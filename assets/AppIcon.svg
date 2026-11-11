@@ -1,10 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <rect x="64" y="64" width="896" height="896" rx="232" fill="#26272b"/>
-  <rect x="72" y="72" width="880" height="880" rx="224" fill="none" stroke="#000" stroke-opacity=".22" stroke-width="16"/>
-  <g fill="none" stroke="#f7f5ef" stroke-width="40">
-    <circle cx="512" cy="512" r="288" stroke-opacity=".3"/>
-    <circle cx="512" cy="512" r="204" stroke-opacity=".55"/>
-    <circle cx="512" cy="512" r="120" stroke-opacity=".85"/>
+  <rect width="1024" height="1024" rx="232" fill="#26272b"/>
+  <g fill="none" stroke="#f7f5ef" stroke-width="46">
+    <circle cx="512" cy="512" r="331" stroke-opacity=".3"/>
+    <circle cx="512" cy="512" r="235" stroke-opacity=".55"/>
+    <circle cx="512" cy="512" r="138" stroke-opacity=".85"/>
   </g>
-  <circle cx="512" cy="512" r="48" fill="#f7f5ef"/>
+  <circle cx="512" cy="512" r="56" fill="#f7f5ef"/>
 </svg>
