@@ -15,7 +15,7 @@ use std::{
 // Small rail thumbnails and a dense discography can exceed 48 simultaneously
 // visible URLs. Retain more keys while keeping the same combined byte budget.
 const MAX_IMAGES: usize = 128;
-const MAX_DECODED_BYTES: usize = 32 * 1024 * 1024;
+const MAX_DECODED_BYTES: usize = 16 * 1024 * 1024;
 const FAILURE_RETRY_DELAY: Duration = Duration::from_secs(5);
 const IMAGE_WORKERS: usize = 2;
 

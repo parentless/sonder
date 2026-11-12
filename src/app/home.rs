@@ -88,7 +88,9 @@ impl HomePage {
     pub(super) fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         self.visible = visible;
         if !visible {
-            self.track_list.update(cx, |list, cx| list.close_menu(cx));
+            // Leaving frees the list's rows; the few kilobytes of fetched data
+            // stay so coming back needs no new request.
+            self.track_list.update(cx, |list, cx| list.clear(cx));
             return;
         }
         let fresh = self

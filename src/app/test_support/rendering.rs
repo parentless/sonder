@@ -33,7 +33,6 @@ enum Scene {
     ArtistZoomLarge,
     Settings,
     SettingsAutoplayOff,
-    SettingsMenu,
     SettingsCache,
     Setup,
     SetupFilled,
@@ -84,7 +83,6 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("settings", Scene::Settings),
         ("settings-cache", Scene::SettingsCache),
         ("settings-autoplay-off", Scene::SettingsAutoplayOff),
-        ("settings-mascot-open", Scene::SettingsMenu),
         ("setup", Scene::Setup),
         ("setup-filled", Scene::SetupFilled),
         ("premium-required", Scene::PremiumRequired),
@@ -365,7 +363,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 Scene::PlaybackPending => { services::AppServices::player(cx).update(cx, |player, cx| player.set_loading(true, cx)); }
                 Scene::ShuffleOn => { services::AppServices::player(cx).update(cx, |player, cx| player.toggle_shuffle(cx)); }
                 Scene::UpdateAvailable => { workspace.toolbar.update(cx, |toolbar, cx| toolbar.seed_update_available(cx)); }
-                Scene::Settings | Scene::SettingsAutoplayOff | Scene::SettingsMenu | Scene::SettingsCache => {
+                Scene::Settings | Scene::SettingsAutoplayOff | Scene::SettingsCache => {
                     workspace.open_settings(cx);
                     if matches!(scene, Scene::SettingsAutoplayOff) {
                         services::AppServices::set_autoplay(false, cx)
@@ -691,17 +689,6 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             for character in "0123456789abcdef0123456789abcdef".chars() {
                 press_key(&mut cx, handle.into(), &character.to_string());
             }
-        }
-        Scene::SettingsMenu => {
-            cx.update_window(handle.into(), |_, window, cx| {
-                window.within("settings-mascot").click("input", cx);
-            })
-            .expect("open mascot selector");
-            settle(&mut cx, handle.into());
-            cx.update_window(handle.into(), |_, window, _| {
-                assert_eq!(window.find("settings-mascot").expanded(), Some(true));
-            })
-            .expect("mascot menu is actually open");
         }
         _ => {}
     }

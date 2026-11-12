@@ -1,45 +1,6 @@
 use super::*;
 use gpui_kit::TestSupportExt as _;
 
-#[derive(Clone)]
-struct MascotOption {
-    label: &'static str,
-    preference: MascotPreference,
-}
-
-impl SelectItem for MascotOption {
-    type Value = MascotPreference;
-
-    fn title(&self) -> SharedString {
-        self.label.into()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.preference
-    }
-}
-
-fn mascot_options() -> Vec<MascotOption> {
-    vec![
-        MascotOption {
-            label: "None",
-            preference: MascotPreference::None,
-        },
-        MascotOption {
-            label: "Vespa Romeo",
-            preference: MascotPreference::RomeoVespa,
-        },
-        MascotOption {
-            label: "Vespa Duo",
-            preference: MascotPreference::VespaDuo,
-        },
-        MascotOption {
-            label: "Tarantella Dancer",
-            preference: MascotPreference::TarantellaDancer,
-        },
-    ]
-}
-
 /// What the settings page asks the workspace to do.
 pub(super) enum SettingsEvent {
     RequestAppChange,
@@ -48,7 +9,6 @@ pub(super) enum SettingsEvent {
     SetAutoplay(bool),
     SetNormaliseVolume(bool),
     SetKeepInTray(bool),
-    SetMascot(MascotPreference),
     SetDiscord(crate::discord::Config),
     SetLastfm(crate::lastfm::Config),
 }
@@ -81,7 +41,6 @@ pub(super) struct Settings {
     session: Entity<session::Session>,
     tab: SettingsTab,
     scroll: gpui_kit::ScrollHandle,
-    mascot_select: Entity<SelectState<Vec<MascotOption>>>,
     /// Each switch is ringed while its focus is inside, in place of the kit's
     /// ring, which also shows after a click.
     autoplay_focus: FocusHandle,
@@ -114,25 +73,7 @@ impl Settings {
             input.set_value(discord_id, window, cx);
             input
         });
-        let mascot = services::AppServices::preferences(cx).mascot;
-        let mascot_select = cx.new(|cx| {
-            SelectState::new(
-                mascot_options(),
-                Some(IndexPath::default().row(mascot_index(mascot))),
-                window,
-                cx,
-            )
-        });
-        let mut subscriptions = vec![cx.subscribe_in(
-            &mascot_select,
-            window,
-            |_, _, event: &SelectEvent<Vec<MascotOption>>, _, cx| {
-                let SelectEvent::Confirm(Some(mascot)) = event else {
-                    return;
-                };
-                cx.emit(SettingsEvent::SetMascot(*mascot));
-            },
-        )];
+        let mut subscriptions = Vec::new();
         subscriptions.push(cx.subscribe(
             &discord_application_id,
             |this, _, event: &InputEvent, cx| match event {
@@ -165,7 +106,6 @@ impl Settings {
             session: services::AppServices::session(cx),
             tab: SettingsTab::General,
             scroll: gpui_kit::ScrollHandle::new(),
-            mascot_select,
             autoplay_focus: cx.focus_handle(),
             normalise_focus: cx.focus_handle(),
             tray_focus: cx.focus_handle(),
@@ -182,21 +122,6 @@ impl Settings {
             cache_cleared: false,
             _subscriptions: subscriptions,
         }
-    }
-
-    pub(super) fn sync_mascot(
-        &mut self,
-        mascot: MascotPreference,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.mascot_select.update(cx, |select, cx| {
-            select.set_selected_index(
-                Some(IndexPath::default().row(mascot_index(mascot))),
-                window,
-                cx,
-            );
-        });
     }
 
     #[cfg(test)]
@@ -339,22 +264,6 @@ impl Settings {
                                                 )),
                                         ),
                                     ))
-                                    .child(
-                                        div()
-                                            .mt_5()
-                                            .pt_5()
-                                            .border_t_1()
-                                            .border_color(rgb(palette.border))
-                                            .child(Self::playback_setting_row(
-                                                palette,
-                                                "Mascot",
-                                                "Choose which mascot appears above the player bar.",
-                                                Select::new(&self.mascot_select)
-                                                    .id("settings-mascot")
-                                                    .w(tokens::SETTINGS_FIELD_WIDTH)
-                                                    .menu_width(tokens::SETTINGS_FIELD_WIDTH),
-                                            )),
-                                    )
                                     .child(
                                         div()
                                             .mt_5()
@@ -1065,15 +974,6 @@ impl Settings {
             .on_click(cx.listener(move |_, _, _, cx| {
                 cx.emit(SettingsEvent::SetTheme(preference));
             }))
-    }
-}
-
-fn mascot_index(mascot: MascotPreference) -> usize {
-    match mascot {
-        MascotPreference::None => 0,
-        MascotPreference::RomeoVespa => 1,
-        MascotPreference::VespaDuo => 2,
-        MascotPreference::TarantellaDancer => 3,
     }
 }
 

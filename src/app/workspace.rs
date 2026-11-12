@@ -167,19 +167,6 @@ impl Workspace {
                     this.settings.update(cx, |_, cx| cx.notify());
                     cx.notify();
                 }
-                settings::SettingsEvent::SetMascot(mascot) => {
-                    let result = services::AppServices::set_mascot(*mascot, cx);
-                    let result = services::require_settings_storage(result);
-                    if let Some(error) = services::preference_save_error("mascot", result) {
-                        this.last_error = Some(error);
-                        let mascot = services::AppServices::preferences(cx).mascot;
-                        this.settings.update(cx, |settings, cx| {
-                            settings.sync_mascot(mascot, window, cx);
-                        });
-                    }
-                    this.player_bar.update(cx, |_, cx| cx.notify());
-                    cx.notify();
-                }
             },
         ));
         let sidebar = cx.new(|cx| sidebar::Sidebar::new(preferences.sidebar_collapsed, cx));

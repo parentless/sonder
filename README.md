@@ -64,7 +64,6 @@ needed. See [Windows setup](docs/WINDOWS.md) and [releasing](docs/RELEASING.md).
 - Now Playing and media key controls
 - Optional Discord Rich Presence with current track, artist, artwork, and progress
 - Light, dark, and system appearances
-- Optional pixel-art player mascot
 - Persistent playback and library state
 
 ## Reported memory use

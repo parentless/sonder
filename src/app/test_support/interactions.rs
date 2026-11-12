@@ -5,7 +5,7 @@ use crate::app::{
 };
 use crate::backend::{BackendCommand, BackendEvent};
 use crate::model;
-use crate::storage::{MascotPreference, ThemePreference};
+use crate::storage::ThemePreference;
 use gpui_kit::component::Root;
 use gpui_kit::test::{ElementSnapshot, TestWindowExt};
 use gpui_kit::{
@@ -601,48 +601,6 @@ fn tab_rings_the_autoplay_switch_and_space_toggles_it() {
         assert!(autoplay_ring_visible(window, cx));
     });
     fixture.no_commands();
-}
-
-#[test]
-fn mascot_select_commits_enter_and_preserves_selection_on_escape_and_outside_click() {
-    let mut fixture = Fixture::new(true);
-    fixture.update(|window, cx| window.within("settings-mascot").click("input", cx));
-    fixture.update(|window, cx| {
-        assert_eq!(window.find("settings-mascot").expanded(), Some(true));
-        window.press("down", cx);
-    });
-    fixture.update(|window, cx| window.press("enter", cx));
-    fixture.wait_for(|window, _| window.find("settings-mascot").expanded() == Some(false));
-    fixture.update(|window, cx| {
-        assert_eq!(
-            services::AppServices::preferences(cx).mascot,
-            MascotPreference::RomeoVespa
-        );
-        assert_eq!(window.find("settings-mascot").value(), Some("Vespa Romeo"));
-        window.within("settings-mascot").click("input", cx);
-    });
-    fixture.update(|window, cx| window.press("down", cx));
-    fixture.update(|window, cx| window.press("escape", cx));
-    fixture.wait_for(|window, _| window.find("settings-mascot").expanded() == Some(false));
-    fixture.update(|window, cx| {
-        assert_eq!(
-            services::AppServices::preferences(cx).mascot,
-            MascotPreference::RomeoVespa
-        );
-        assert_eq!(window.find("settings-mascot").value(), Some("Vespa Romeo"));
-        window.within("settings-mascot").click("input", cx);
-    });
-    fixture.update(|window, cx| window.press("down", cx));
-    // Any control outside the open menu; the tab list never sits under it.
-    fixture.update(|window, cx| window.click(("settings-tab", 0usize), cx));
-    fixture.wait_for(|window, _| window.find("settings-mascot").expanded() == Some(false));
-    fixture.update(|window, cx| {
-        assert_eq!(
-            services::AppServices::preferences(cx).mascot,
-            MascotPreference::RomeoVespa
-        );
-        assert_eq!(window.find("settings-mascot").value(), Some("Vespa Romeo"));
-    });
 }
 
 #[test]

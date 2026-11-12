@@ -98,7 +98,7 @@ update files.
 - Now Playing metadata, cover art, media buttons, and position updates use
   Windows System Media Transport Controls and a hidden window whose lifetime
   matches the player, rather than the visible window.
-- System appearance, the optional mascot, local playback, queue/history/radio,
+- System appearance, local playback, queue/history/radio,
   favorites, pinned playlists, artist/album browsing, and saved state keep their
   existing implementations.
 

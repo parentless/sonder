@@ -14,15 +14,6 @@ pub enum ThemePreference {
     Dark,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum MascotPreference {
-    #[default]
-    None,
-    RomeoVespa,
-    VespaDuo,
-    TarantellaDancer,
-}
-
 /// Selection colors use muted fills so track text stays readable in both themes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SelectionColor {
@@ -100,7 +91,6 @@ pub struct AppPreferences {
     pub normalise_volume: bool,
     /// Closing the window keeps Sonder running from the tray (Windows).
     pub keep_in_tray: bool,
-    pub mascot: MascotPreference,
 }
 
 impl Default for AppPreferences {
@@ -114,7 +104,6 @@ impl Default for AppPreferences {
             autoplay: true,
             normalise_volume: false,
             keep_in_tray: false,
-            mascot: MascotPreference::default(),
         }
     }
 }
@@ -316,13 +305,6 @@ impl Store {
         let autoplay = self.preference("autoplay")?.as_deref() != Some("false");
         let normalise_volume = self.preference("normalise_volume")?.as_deref() == Some("true");
         let keep_in_tray = self.preference("keep_in_tray")?.as_deref() == Some("true");
-        let mascot = match self.preference("mascot")?.as_deref() {
-            Some("none") => MascotPreference::None,
-            Some("vespa_duo") => MascotPreference::VespaDuo,
-            Some("tarantella_dancer") => MascotPreference::TarantellaDancer,
-            Some("romeo_vespa") => MascotPreference::RomeoVespa,
-            _ => MascotPreference::default(),
-        };
         let selection_color = self.preference("selection_color")?;
         let ui_zoom = self
             .preference("ui_zoom")?
@@ -340,7 +322,6 @@ impl Store {
             autoplay,
             normalise_volume,
             keep_in_tray,
-            mascot,
         })
     }
 
@@ -417,16 +398,6 @@ impl Store {
 
     pub fn set_keep_in_tray(&mut self, keep: bool) -> Result<()> {
         self.set_preference("keep_in_tray", if keep { "true" } else { "false" })
-    }
-
-    pub fn set_mascot(&mut self, mascot: MascotPreference) -> Result<()> {
-        let value = match mascot {
-            MascotPreference::None => "none",
-            MascotPreference::RomeoVespa => "romeo_vespa",
-            MascotPreference::VespaDuo => "vespa_duo",
-            MascotPreference::TarantellaDancer => "tarantella_dancer",
-        };
-        self.set_preference("mascot", value)
     }
 
     pub fn set_sidebar_collapsed(&mut self, collapsed: bool) -> Result<()> {
@@ -912,7 +883,7 @@ const LIBRARY_FINGERPRINT_KEY: &str = "library_fingerprint";
 mod tests {
     use gpui_kit::SharedString;
 
-    use super::{AppPreferences, MascotPreference, Store, ThemePreference};
+    use super::{AppPreferences, Store, ThemePreference};
     use crate::model::{LibraryFingerprint, Playlist, Provider, QueueItem, Track};
 
     fn track(id: &str) -> Track {
@@ -1048,9 +1019,6 @@ mod tests {
         store.set_autoplay(false).unwrap();
         store.set_normalise_volume(true).unwrap();
         store.set_keep_in_tray(true).unwrap();
-        store
-            .set_mascot(MascotPreference::TarantellaDancer)
-            .unwrap();
         assert_eq!(
             store.preferences().unwrap(),
             AppPreferences {
@@ -1061,25 +1029,8 @@ mod tests {
                 autoplay: false,
                 normalise_volume: true,
                 keep_in_tray: true,
-                mascot: MascotPreference::TarantellaDancer,
             }
         );
-    }
-
-    #[test]
-    fn mascot_preferences_round_trip() {
-        let mut store = Store::in_memory().unwrap();
-        assert_eq!(store.preferences().unwrap().mascot, MascotPreference::None);
-
-        for mascot in [
-            MascotPreference::None,
-            MascotPreference::RomeoVespa,
-            MascotPreference::VespaDuo,
-            MascotPreference::TarantellaDancer,
-        ] {
-            store.set_mascot(mascot).unwrap();
-            assert_eq!(store.preferences().unwrap().mascot, mascot);
-        }
     }
 
     #[test]

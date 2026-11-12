@@ -12,15 +12,14 @@ use crate::{
     lifecycle::{Instance, InstanceLifecycle},
     model,
     spotify::{self, ClientIdSource, valid_client_id},
-    storage::{AppPreferences, MascotPreference, SelectionColor, Store, ThemePreference, UiZoom},
+    storage::{AppPreferences, SelectionColor, Store, ThemePreference, UiZoom},
 };
 use gpui_kit::base::FocusableExt as _;
 use gpui_kit::component::{
-    Icon, IndexPath, Sizable, Theme, WindowExt,
+    Icon, Sizable, Theme, WindowExt,
     avatar::Avatar,
     h_flex,
     input::{Input, InputEvent, InputState},
-    select::{Select, SelectEvent, SelectItem, SelectState},
     spinner::Spinner,
     switch::Switch,
     theme::ThemeMode,
@@ -381,7 +380,6 @@ mod page;
 mod playback_clock;
 mod player;
 mod player_bar;
-mod player_mascot;
 mod router;
 mod scrubber;
 mod services;
