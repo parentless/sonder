@@ -3648,6 +3648,12 @@ fn home_lists_new_releases_from_top_artists_and_opens_one() {
             tracks: vec![credited_track()],
         }))
         .unwrap();
+    // While the releases load, the section holds its place with placeholders.
+    fixture.update(|_, _| {});
+    fixture.update(|window, _| {
+        assert!(window.try_find("home-releases-heading").is_some());
+        assert!(window.try_find(("home-release", 0usize)).is_none());
+    });
     answer_new_releases(&mut fixture, Ok(vec![release_album()]));
     fixture.update(|_, _| {});
     fixture.update(|window, _| {

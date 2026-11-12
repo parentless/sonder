@@ -543,6 +543,11 @@ impl Render for HomePage {
                 .upcoming
                 .as_ref()
                 .map_or_else(|| Arc::from([]), |upcoming| upcoming.releases.clone());
+            let releases_pending = self.releases.is_none() && self.releases_loading;
+            let upcoming_pending = self.upcoming.is_none() && self.upcoming_loading;
+            // Shown while looking, and once looked even when nothing turned up,
+            // so an empty row is explained rather than missing.
+            let upcoming_shown = upcoming_pending || self.upcoming.is_some();
             let mut upcoming_cards = div().flex().flex_wrap().gap_3();
             for (index, release) in upcoming.iter().enumerate() {
                 upcoming_cards = upcoming_cards.child(upcoming_card(palette, release, index));
@@ -565,6 +570,19 @@ impl Render for HomePage {
                             .child(cards),
                     )
                 })
+                .when(releases_pending, |content| {
+                    content.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(heading(
+                                "home-releases-heading",
+                                "New from artists you listen to",
+                            ))
+                            .child(release_skeleton(palette)),
+                    )
+                })
                 .when(!releases.is_empty(), |content| {
                     content.child(
                         div()
@@ -578,14 +596,24 @@ impl Render for HomePage {
                             .child(release_cards),
                     )
                 })
-                .when(!upcoming.is_empty(), |content| {
+                .when(upcoming_shown, |content| {
                     content.child(
                         div()
                             .flex()
                             .flex_col()
                             .gap_3()
                             .child(heading("home-upcoming-heading", "Coming soon"))
-                            .child(upcoming_cards),
+                            .child(if upcoming_pending {
+                                release_skeleton(palette).into_any_element()
+                            } else if upcoming.is_empty() {
+                                components::page_detail(
+                                    palette,
+                                    "Nothing announced yet for your top artists. Dates come from MusicBrainz, so some may be missing.",
+                                )
+                                .into_any_element()
+                            } else {
+                                upcoming_cards.into_any_element()
+                            }),
                     )
                 })
                 .when(!tracks.is_empty(), |content| {
@@ -633,6 +661,39 @@ impl Render for HomePage {
 }
 
 /// `2026-11-07` as `Nov 7`; anything not an exact date gives nothing.
+/// Placeholder cards the size of a release card, so the section does not
+/// change height when the data arrives.
+fn release_skeleton(palette: CadencePalette) -> Div {
+    div().flex().flex_wrap().gap_4().children((0..5).map(|_| {
+        div()
+            .w(RELEASE_CARD_WIDTH + Rems(0.75))
+            .p_1p5()
+            .flex()
+            .flex_col()
+            .gap_1p5()
+            .child(
+                div()
+                    .size(RELEASE_CARD_WIDTH)
+                    .rounded(Rems(0.625))
+                    .bg(rgb(palette.control)),
+            )
+            .child(
+                div()
+                    .h_3()
+                    .w(relative(0.7))
+                    .rounded_md()
+                    .bg(rgb(palette.control)),
+            )
+            .child(
+                div()
+                    .h_2()
+                    .w(relative(0.45))
+                    .rounded_md()
+                    .bg(rgb(palette.control)),
+            )
+    }))
+}
+
 /// A release that is announced but not out: no artwork or link yet, just when.
 fn upcoming_card(
     palette: CadencePalette,

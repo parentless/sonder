@@ -118,6 +118,8 @@ pub(super) fn open_main_window(cx: &mut App) {
                 services::AppServices::onboarding_window(cx).is_none()
             });
             let cadence = cx.new(|cx| Workspace::new(window, cx));
+            // Home is the front door; the library pages are one click away.
+            cadence.update(cx, |workspace, cx| workspace.navigate(Route::Home, cx));
             services::AppServices::set_root(cadence.downgrade(), cx);
             cadence
         },
