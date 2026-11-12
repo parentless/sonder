@@ -7,6 +7,7 @@ mod diagnostics;
 pub(crate) mod discord;
 pub(crate) mod lastfm;
 pub mod lifecycle;
+mod memory;
 pub mod model;
 mod oauth_callback;
 mod oauth_page;

@@ -114,6 +114,18 @@ impl BoundedImageCache {
         self.evictions = 0;
         self.invalidate_cached_views(cx);
     }
+    /// Drops every decoded image while no window is open to repaint them.
+    pub(super) fn release_all(&mut self, cx: &mut App) {
+        for (_, entry) in self.items.drain() {
+            if let Some(image) = entry.image {
+                cx.drop_image(image, None);
+            }
+        }
+        self.recency.clear();
+        self.visibility_batches.clear();
+        self.decoded_bytes = 0;
+        self.evictions = 0;
+    }
     pub(super) fn new(cx: &mut App) -> Entity<Self> {
         let cache = cx.new(|cx| Self {
             items: HashMap::new(),

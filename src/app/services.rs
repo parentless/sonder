@@ -124,6 +124,7 @@ impl AppServices {
                 // Persist the final position before Windows quits, or before
                 // macOS continues without a window.
                 Self::player(cx).read(cx).save_position();
+                Self::release_memory_when_idle(cx);
             }
         })
         .detach();
@@ -318,6 +319,24 @@ impl AppServices {
     }
 
     /// Artwork is shared by every view, so the cache is not tied to one of them.
+    /// Once the app has sat window-less in the tray for a while, drops the
+    /// decoded artwork and lets Windows reclaim the pages. A quick peek at the
+    /// tray menu never pays for the reload.
+    fn release_memory_when_idle(cx: &mut App) {
+        const IDLE: Duration = Duration::from_secs(30);
+        cx.spawn(async move |cx| {
+            cx.background_executor().timer(IDLE).await;
+            cx.update(|cx| {
+                if !cx.windows().is_empty() {
+                    return;
+                }
+                Self::image_cache(cx).update(cx, |cache, cx| cache.release_all(cx));
+                crate::memory::trim_working_set();
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn image_cache(cx: &App) -> Entity<image_cache::BoundedImageCache> {
         cx.global::<Self>().image_cache.clone()
     }

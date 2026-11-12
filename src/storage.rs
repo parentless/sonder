@@ -197,7 +197,9 @@ impl Store {
     fn migrate(&self) -> Result<()> {
         self.connection.execute_batch(
             "PRAGMA foreign_keys = ON;
-             PRAGMA journal_mode = WAL;",
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -512;",
         )?;
         let version: u32 = self
             .connection
