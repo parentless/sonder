@@ -29,7 +29,7 @@ ax.tick_params(axis="both", length=0, pad=12)
 ax.grid(axis="x", color="#34373e", linewidth=.7, zorder=0)
 for spine in ax.spines.values(): spine.set_visible(False)
 fig.text(.075, .88, "Reported memory usage", color="#f1f3f5", fontsize=23, weight="bold")
-fig.text(.075, .79, "Cadence and Spotify on Windows", color="#a9afbc", fontsize=12)
+fig.text(.075, .79, "Sonder and Spotify on Windows", color="#a9afbc", fontsize=12)
 fig.text(.075, .095, "User-reported ranges • not a controlled benchmark", color="#c3c8d2", fontsize=10)
 fig.text(.075, .045, "Workload, cache state and process accounting were not independently verified.", color="#8f96a4", fontsize=9)
 for suffix in ["png", "svg"]:
