@@ -569,6 +569,33 @@ impl Spotify {
         .await
     }
 
+    /// Announced releases from the artists the listener plays most. The dates
+    /// come from MusicBrainz because Spotify only lists what is already out.
+    pub async fn upcoming_from_top_artists(&self) -> Result<Vec<crate::model::UpcomingRelease>> {
+        let names: Vec<String> = self
+            .gated(async {
+                self.require_top_read().await?;
+                let artists = self
+                    .client
+                    .current_user_top_artists_manual(
+                        Some(TimeRange::MediumTerm),
+                        Some(crate::model::UPCOMING_ARTISTS as u32),
+                        Some(0),
+                    )
+                    .await
+                    .context("could not load Spotify top artists")?;
+                Ok(artists
+                    .items
+                    .into_iter()
+                    .map(|artist| artist.name)
+                    .collect())
+            })
+            .await?;
+        let mut upcoming = crate::musicbrainz::upcoming(&names, &release_cutoff(0)).await?;
+        upcoming.truncate(crate::model::UPCOMING_LIMIT);
+        Ok(upcoming)
+    }
+
     pub async fn search_tracks(&self, query: &str) -> Result<Vec<Track>> {
         if query.trim().is_empty() {
             return Ok(Vec::new());

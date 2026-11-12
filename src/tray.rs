@@ -16,8 +16,8 @@ use windows_sys::{
         System::LibraryLoader::GetModuleHandleW,
         UI::{
             Shell::{
-                NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
-                Shell_NotifyIconW,
+                NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+                NOTIFYICONDATAW, Shell_NotifyIconW,
             },
             WindowsAndMessaging::*,
         },
@@ -40,6 +40,8 @@ const ICON_RESOURCE: usize = 1;
 /// Sent by the shell for mouse activity on the icon.
 const CALLBACK_MESSAGE: u32 = WM_APP + 1;
 const ICON_ID: u32 = 1;
+/// Sent when the listener clicks a balloon notification (`WM_USER + 5`).
+const BALLOON_CLICKED: u32 = 0x405;
 const CLASS_NAME: PCWSTR = w!("CadenceTrayWindow");
 const MENU_ITEMS: [(usize, PCWSTR, TrayCommand); 4] = [
     (1, w!("Show Sonder"), TrayCommand::Show),
@@ -87,6 +89,30 @@ impl Tray {
                 Err(error)
             }
             Err(_) => Err(io::Error::other("the tray thread stopped while starting")),
+        }
+    }
+}
+
+impl Tray {
+    /// Shows a balloon (a toast on current Windows) from the tray icon.
+    /// Clicking it raises the window.
+    pub fn notify(&self, title: &str, body: &str) {
+        // SAFETY: `Shell_NotifyIconW` may be called from any thread for an icon
+        // this process added; the buffers are copied into the struct.
+        unsafe {
+            let mut data = icon_data(self.window);
+            data.uFlags = NIF_INFO;
+            for (slot, unit) in data
+                .szInfoTitle
+                .iter_mut()
+                .zip(title.encode_utf16().take(63))
+            {
+                *slot = unit;
+            }
+            for (slot, unit) in data.szInfo.iter_mut().zip(body.encode_utf16().take(255)) {
+                *slot = unit;
+            }
+            Shell_NotifyIconW(NIM_MODIFY, &data);
         }
     }
 }
@@ -243,6 +269,7 @@ unsafe extern "system" fn window_proc(
                 match (lparam & 0xFFFF) as u32 {
                     WM_LBUTTONUP | WM_LBUTTONDBLCLK => send(TrayCommand::Show),
                     WM_MBUTTONUP => send(TrayCommand::Toggle),
+                    BALLOON_CLICKED => send(TrayCommand::Show),
                     WM_RBUTTONUP | WM_CONTEXTMENU => show_menu(window),
                     _ => {}
                 }

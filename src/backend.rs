@@ -318,6 +318,9 @@ pub enum BackendCommand {
     LoadNewReleases {
         respond: Reply<Vec<Album>>,
     },
+    LoadUpcoming {
+        respond: Reply<Vec<crate::model::UpcomingRelease>>,
+    },
     SearchCatalog {
         query: String,
         respond: Reply<crate::model::CatalogSearchResults>,
@@ -1292,6 +1295,10 @@ impl Worker {
             }
             BackendCommand::LoadNewReleases { respond } => {
                 self.catalog.new_releases(self.spotify.clone(), respond);
+                Ok(())
+            }
+            BackendCommand::LoadUpcoming { respond } => {
+                self.catalog.upcoming(self.spotify.clone(), respond);
                 Ok(())
             }
             BackendCommand::SearchCatalog { query, respond } => {
@@ -2589,6 +2596,7 @@ struct CatalogFetches {
     search: Option<tokio::task::JoinHandle<()>>,
     home: Option<tokio::task::JoinHandle<()>>,
     new_releases: Option<tokio::task::JoinHandle<()>>,
+    upcoming: Option<tokio::task::JoinHandle<()>>,
     playlist: Option<tokio::task::JoinHandle<()>>,
     artist: Option<tokio::task::JoinHandle<()>>,
     artist_albums: Option<tokio::task::JoinHandle<()>>,
@@ -2641,6 +2649,15 @@ impl CatalogFetches {
             respond,
             "Spotify new releases",
             async move { spotify.new_from_top_artists().await },
+        );
+    }
+
+    fn upcoming(&mut self, spotify: Spotify, respond: Reply<Vec<crate::model::UpcomingRelease>>) {
+        Self::start(
+            &mut self.upcoming,
+            respond,
+            "announced releases",
+            async move { spotify.upcoming_from_top_artists().await },
         );
     }
 
@@ -2735,6 +2752,7 @@ impl CatalogFetches {
         abort_task(&mut self.search);
         abort_task(&mut self.home);
         abort_task(&mut self.new_releases);
+        abort_task(&mut self.upcoming);
         abort_task(&mut self.playlist);
         abort_task(&mut self.artist);
         abort_task(&mut self.artist_albums);

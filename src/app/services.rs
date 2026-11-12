@@ -184,7 +184,23 @@ impl AppServices {
         });
         Self::pump(events, cx);
         Self::poll_library(cx);
+        release_watch::start(cx);
         handle
+    }
+
+    pub(super) fn load_release_watch(cx: &App) -> Option<crate::storage::ReleaseWatchState> {
+        cx.global::<Self>()
+            .store
+            .as_ref()
+            .and_then(|store| store.release_watch().ok().flatten())
+    }
+
+    pub(super) fn save_release_watch(state: &crate::storage::ReleaseWatchState, cx: &mut App) {
+        if let Some(store) = cx.global_mut::<Self>().store.as_mut()
+            && let Err(error) = store.set_release_watch(state)
+        {
+            log::warn!("could not save the release watch: {error}");
+        }
     }
 
     pub(super) fn discord_config(cx: &App) -> &crate::discord::Config {

@@ -3583,7 +3583,24 @@ fn answer_new_releases(fixture: &mut Fixture, result: anyhow::Result<Vec<model::
     else {
         panic!("expected a new-releases request")
     };
+    let answered = result.is_ok();
     respond.send(result).unwrap();
+    if answered {
+        // Home asks for announced releases once the new ones are in.
+        fixture.update(|_, _| {});
+        let BackendCommand::LoadUpcoming { respond } = fixture.backend.commands.try_recv().unwrap()
+        else {
+            panic!("expected an announced-releases request")
+        };
+        respond
+            .send(Ok(vec![model::UpcomingRelease {
+                artist: "Top Artist".into(),
+                title: "Next Record".into(),
+                date: "2099-01-02".into(),
+                kind: "Album".into(),
+            }]))
+            .unwrap();
+    }
 }
 
 #[test]
@@ -3636,6 +3653,8 @@ fn home_lists_new_releases_from_top_artists_and_opens_one() {
     fixture.update(|window, _| {
         assert!(window.try_find("home-releases-heading").is_some());
         assert!(window.try_find(("home-release", 0usize)).is_some());
+        assert!(window.try_find("home-upcoming-heading").is_some());
+        assert!(window.try_find(("home-upcoming", 0usize)).is_some());
     });
     fixture.update(|window, cx| window.click(("home-release", 0usize), cx));
     assert_eq!(fixture.route(), Route::Album);

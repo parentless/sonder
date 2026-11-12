@@ -43,6 +43,13 @@ pub(super) fn is_active(cx: &App) -> bool {
     cx.has_global::<TrayHost>()
 }
 
+/// Shows a tray notification, if the tray is up. Clicking it raises the window.
+pub(super) fn notify(title: &str, body: &str, cx: &App) {
+    if let Some(host) = cx.try_global::<TrayHost>() {
+        host._tray.notify(title, body);
+    }
+}
+
 fn handle(command: TrayCommand, cx: &mut App) {
     let player = services::AppServices::player(cx);
     match command {

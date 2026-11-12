@@ -202,6 +202,21 @@ pub const NEW_RELEASE_ARTISTS: usize = 15;
 pub const NEW_RELEASE_DAYS: u64 = 90;
 /// Home shows at most this many new releases.
 pub const NEW_RELEASE_LIMIT: usize = 20;
+/// "Coming soon" looks up this many top artists, one polite request at a time.
+pub const UPCOMING_ARTISTS: usize = 10;
+/// Home shows at most this many announced releases.
+pub const UPCOMING_LIMIT: usize = 8;
+
+/// A release that is announced but not out yet.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpcomingRelease {
+    pub artist: String,
+    pub title: String,
+    /// `YYYY-MM-DD`.
+    pub date: String,
+    /// Album, EP or Single.
+    pub kind: String,
+}
 
 /// How far back Home looks. Spotify names these short, medium and long term.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]

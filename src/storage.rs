@@ -165,6 +165,13 @@ pub struct PlaybackSnapshot {
     pub position_ms: u32,
 }
 
+/// Album ids the release watch has seen. Both lists are capped by the watcher.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct ReleaseWatchState {
+    pub seen: Vec<String>,
+    pub new: Vec<String>,
+}
+
 pub struct Store {
     connection: Connection,
 }
@@ -581,6 +588,19 @@ impl Store {
             "spotify_playback_credentials_invalidated",
             if invalidated { "true" } else { "false" },
         )
+    }
+
+    /// Which releases Home has already shown, and which are still new to the
+    /// listener. `None` means the watch has never run, so the first pass should
+    /// only learn what exists.
+    pub fn release_watch(&self) -> Result<Option<ReleaseWatchState>> {
+        Ok(self
+            .preference("release_watch")?
+            .and_then(|json| serde_json::from_str(&json).ok()))
+    }
+
+    pub fn set_release_watch(&mut self, state: &ReleaseWatchState) -> Result<()> {
+        self.set_preference("release_watch", &serde_json::to_string(state)?)
     }
 
     fn preference(&self, key: &str) -> Result<Option<String>> {

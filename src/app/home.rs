@@ -10,6 +10,8 @@ use std::time::SystemTime;
 /// Top items drift over weeks, so there is no reason to fetch them often.
 const HOME_STALE_TIME: Duration = Duration::from_secs(30 * 60);
 /// New releases move more slowly, and finding them costs a request per artist.
+/// Announced dates change slowly, and each lookup costs MusicBrainz about 20 requests.
+const UPCOMING_STALE_TIME: Duration = Duration::from_secs(24 * 60 * 60);
 const RELEASES_STALE_TIME: Duration = Duration::from_secs(6 * 60 * 60);
 const RELEASE_CARD_WIDTH: Rems = Rems(9.5);
 
@@ -28,6 +30,11 @@ impl RangeData {
     }
 }
 
+struct Upcoming {
+    releases: Arc<[model::UpcomingRelease]>,
+    loaded_at: SystemTime,
+}
+
 struct Releases {
     albums: Arc<[model::Album]>,
     loaded_at: SystemTime,
@@ -42,6 +49,9 @@ pub(super) struct HomePage {
     releases: Option<Releases>,
     releases_loading: bool,
     releases_request: Option<gpui_kit::Task<()>>,
+    upcoming: Option<Upcoming>,
+    upcoming_loading: bool,
+    upcoming_request: Option<gpui_kit::Task<()>>,
     loading: bool,
     error: Option<SharedString>,
     /// The saved sign-in lacks the permission to read top items.
@@ -73,6 +83,9 @@ impl HomePage {
             releases: None,
             releases_loading: false,
             releases_request: None,
+            upcoming: None,
+            upcoming_loading: false,
+            upcoming_request: None,
             loading: false,
             error: None,
             permission_missing: false,
@@ -106,6 +119,9 @@ impl HomePage {
         self.releases = None;
         self.releases_loading = false;
         self.releases_request = None;
+        self.upcoming = None;
+        self.upcoming_loading = false;
+        self.upcoming_request = None;
         self.error = None;
         self.permission_missing = false;
         self.track_list.update(cx, |list, cx| list.clear(cx));
@@ -120,6 +136,8 @@ impl HomePage {
             // Leaving frees the list's rows; the few kilobytes of fetched data
             // stay so coming back needs no new request.
             self.track_list.update(cx, |list, cx| list.clear(cx));
+            // The listener has had their look at what was new.
+            release_watch::acknowledge_all(cx);
             return;
         }
         self.load_if_needed(cx);
@@ -167,6 +185,41 @@ impl HomePage {
                     // A missing section is better than an error banner for
                     // something Home can do without; try again on the next visit.
                     Err(error) => log::warn!("home: could not load new releases: {error}"),
+                }
+                cx.notify();
+                // After the releases, so the page's own data is never kept waiting.
+                page.load_upcoming_if_needed(cx);
+            });
+        }));
+    }
+
+    fn load_upcoming_if_needed(&mut self, cx: &mut Context<Self>) {
+        let fresh = self.upcoming.as_ref().is_some_and(|upcoming| {
+            upcoming
+                .loaded_at
+                .elapsed()
+                .is_ok_and(|elapsed| elapsed < UPCOMING_STALE_TIME)
+        });
+        if fresh || self.upcoming_loading || self.permission_missing || !self.visible {
+            return;
+        }
+        self.upcoming_loading = true;
+        let reply = catalog::request(&self.backend, |respond| BackendCommand::LoadUpcoming {
+            respond,
+        });
+        self.upcoming_request = Some(cx.spawn(async move |this, cx| {
+            let result = reply.await;
+            let _ = this.update(cx, |page, cx| {
+                page.upcoming_request = None;
+                page.upcoming_loading = false;
+                match result {
+                    Ok(releases) => {
+                        page.upcoming = Some(Upcoming {
+                            releases: releases.into(),
+                            loaded_at: SystemTime::now(),
+                        });
+                    }
+                    Err(error) => log::debug!("home: could not load announced releases: {error}"),
                 }
                 cx.notify();
             });
@@ -238,6 +291,7 @@ impl HomePage {
     ) -> AnyElement {
         let palette = appearance::Appearance::palette(cx);
         let cache = services::AppServices::image_cache(cx);
+        let is_new = release_watch::is_new(&album.source_id, cx);
         let mut detail = album
             .artists
             .iter()
@@ -280,9 +334,31 @@ impl HomePage {
                     .child(
                         div()
                             .w_full()
-                            .truncate()
-                            .font_weight(gpui_kit::FontWeight::MEDIUM)
-                            .child(album.name.clone()),
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap_1p5()
+                            .when(is_new, |row| {
+                                row.child(
+                                    div()
+                                        .id(("home-release-new", index))
+                                        .flex_none()
+                                        .px_1p5()
+                                        .rounded_md()
+                                        .bg(rgb(palette.link))
+                                        .text_color(rgb(palette.on_accent))
+                                        .text_xs()
+                                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                        .child("NEW"),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                    .child(album.name.clone()),
+                            ),
                     )
                     .child(components::page_detail(palette, detail).w_full().truncate()),
             )
@@ -463,6 +539,14 @@ impl Render for HomePage {
                 .as_ref()
                 .map(|releases| releases.albums.clone())
                 .unwrap_or_default();
+            let upcoming = self
+                .upcoming
+                .as_ref()
+                .map_or_else(|| Arc::from([]), |upcoming| upcoming.releases.clone());
+            let mut upcoming_cards = div().flex().flex_wrap().gap_3();
+            for (index, release) in upcoming.iter().enumerate() {
+                upcoming_cards = upcoming_cards.child(upcoming_card(palette, release, index));
+            }
             let mut release_cards = div().flex().flex_wrap().gap_4();
             for (index, album) in releases.iter().enumerate() {
                 release_cards = release_cards.child(self.release_card(album, index, cx));
@@ -492,6 +576,16 @@ impl Render for HomePage {
                                 "New from artists you listen to",
                             ))
                             .child(release_cards),
+                    )
+                })
+                .when(!upcoming.is_empty(), |content| {
+                    content.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(heading("home-upcoming-heading", "Coming soon"))
+                            .child(upcoming_cards),
                     )
                 })
                 .when(!tracks.is_empty(), |content| {
@@ -539,6 +633,45 @@ impl Render for HomePage {
 }
 
 /// `2026-11-07` as `Nov 7`; anything not an exact date gives nothing.
+/// A release that is announced but not out: no artwork or link yet, just when.
+fn upcoming_card(
+    palette: CadencePalette,
+    release: &model::UpcomingRelease,
+    index: usize,
+) -> impl IntoElement {
+    let when = release_label(&release.date).unwrap_or_else(|| release.date.clone());
+    div()
+        .id(("home-upcoming", index))
+        .test_support()
+        .w(RELEASE_CARD_WIDTH + Rems(0.75))
+        .min_w_0()
+        .p_3()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .rounded_xl()
+        .bg(rgb(palette.surface_raised))
+        .child(
+            div()
+                .text_xs()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(rgb(palette.link))
+                .child(when.to_uppercase()),
+        )
+        .child(
+            div()
+                .w_full()
+                .truncate()
+                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                .child(release.title.clone()),
+        )
+        .child(
+            components::page_detail(palette, format!("{} · {}", release.artist, release.kind))
+                .w_full()
+                .truncate(),
+        )
+}
+
 fn release_label(date: &str) -> Option<String> {
     let mut parts = date.split('-');
     let _year: u32 = parts.next()?.parse().ok()?;

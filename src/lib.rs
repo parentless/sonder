@@ -9,6 +9,7 @@ pub(crate) mod lastfm;
 pub mod lifecycle;
 mod memory;
 pub mod model;
+mod musicbrainz;
 mod oauth_callback;
 mod oauth_page;
 pub mod playback;
