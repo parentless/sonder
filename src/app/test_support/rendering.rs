@@ -465,7 +465,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 window.dispatch_event(
                     gpui_kit::ScrollWheelEvent {
                         position: window.find("search-scroll").bounds().center(),
-                        delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-1200.))),
+                        delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-20000.))),
                         ..Default::default()
                     }
                     .to_platform_input(),
@@ -475,13 +475,12 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             .unwrap();
             settle(&mut cx, handle.into());
             cx.update_window(handle.into(), |_, window, _| {
-                let last = window
-                    .find(("spotify-track", model::SEARCH_TRACK_LIMIT - 1))
-                    .bounds();
+                // Albums are the last section; the end of the page must show them.
+                let last = window.find(("search-album", 3usize)).bounds();
                 let viewport = window.find("search-scroll").bounds();
                 assert!(
                     last.top() >= viewport.top() && last.bottom() <= viewport.bottom(),
-                    "last Gallery song is not reachable"
+                    "last Gallery album is not reachable"
                 );
             })
             .unwrap();
