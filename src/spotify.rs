@@ -526,7 +526,7 @@ impl Spotify {
                         .context("could not load Spotify artist releases")?;
                     Ok(page.items)
                 }))
-                .buffer_unordered(4)
+                .buffer_unordered(2)
                 .collect()
                 .await;
             let cutoff = release_cutoff(crate::model::NEW_RELEASE_DAYS);

@@ -197,7 +197,7 @@ pub const SEARCH_ALBUM_LIMIT: usize = 4;
 pub const SEARCH_TRACK_LIMIT: usize = 5;
 
 /// New releases come from this many of the listener's top artists.
-pub const NEW_RELEASE_ARTISTS: usize = 15;
+pub const NEW_RELEASE_ARTISTS: usize = 10;
 /// A release counts as new for this many days.
 pub const NEW_RELEASE_DAYS: u64 = 90;
 /// Home shows at most this many new releases.

@@ -23,6 +23,8 @@ use crate::{
 };
 
 const CATALOG_TIMEOUT_SECONDS: u64 = 30;
+/// How long a saved "new from your top artists" answer is reused.
+const NEW_RELEASES_CACHE_SECONDS: u64 = 12 * 60 * 60;
 const LIBRARY_TIMEOUT_SECONDS: u64 = 60;
 const COMMAND_CAPACITY: usize = 256;
 const CONTROL_CAPACITY: usize = 8;
@@ -118,6 +120,15 @@ impl BlockingStore {
             ))
         })
         .await
+    }
+
+    async fn new_releases_cache(&self) -> Result<Option<(u64, Vec<Album>)>> {
+        self.call(|store| store.new_releases_cache()).await
+    }
+
+    async fn set_new_releases_cache(&self, albums: Vec<Album>) -> Result<()> {
+        self.call(move |store| store.set_new_releases_cache(&albums))
+            .await
     }
 
     async fn cached_library(&self) -> Result<CachedLibrary> {
@@ -1294,7 +1305,8 @@ impl Worker {
                 Ok(())
             }
             BackendCommand::LoadNewReleases { respond } => {
-                self.catalog.new_releases(self.spotify.clone(), respond);
+                self.catalog
+                    .new_releases(self.spotify.clone(), self.store.clone(), respond);
                 Ok(())
             }
             BackendCommand::LoadUpcoming { respond } => {
@@ -2643,12 +2655,40 @@ impl CatalogFetches {
         });
     }
 
-    fn new_releases(&mut self, spotify: Spotify, respond: Reply<Vec<Album>>) {
+    fn new_releases(&mut self, spotify: Spotify, store: BlockingStore, respond: Reply<Vec<Album>>) {
         Self::start(
             &mut self.new_releases,
             respond,
             "Spotify new releases",
-            async move { spotify.new_from_top_artists().await },
+            async move {
+                // One sweep is a dozen requests, so launches, Home visits and
+                // the release watch all share the saved answer for a while.
+                let saved = store.new_releases_cache().await.ok().flatten();
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |elapsed| elapsed.as_secs());
+                if let Some((fetched_at, albums)) = &saved
+                    && now.saturating_sub(*fetched_at) < NEW_RELEASES_CACHE_SECONDS
+                {
+                    return Ok(albums.clone());
+                }
+                match spotify.new_from_top_artists().await {
+                    Ok(albums) => {
+                        if let Err(error) = store.set_new_releases_cache(albums.clone()).await {
+                            log::warn!("could not save new releases: {error:#}");
+                        }
+                        Ok(albums)
+                    }
+                    // Rate limited or offline: an old answer beats an error.
+                    Err(error) => match saved {
+                        Some((_, albums)) => {
+                            log::warn!("using saved new releases: {error:#}");
+                            Ok(albums)
+                        }
+                        None => Err(error),
+                    },
+                }
+            },
         );
     }
 

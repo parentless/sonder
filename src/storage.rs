@@ -936,7 +936,29 @@ impl Store {
     }
 
     pub fn clear_library_cache(&mut self) -> Result<()> {
+        self.connection.execute(
+            "DELETE FROM preferences WHERE key = 'new_releases_cache'",
+            [],
+        )?;
         self.replace_library_cache(&[], &[], None)
+    }
+
+    /// The last "new from your top artists" answer and when it was fetched (Unix
+    /// seconds). It spares Spotify the dozen-request sweep on every launch.
+    pub fn new_releases_cache(&self) -> Result<Option<(u64, Vec<crate::model::Album>)>> {
+        Ok(self
+            .preference("new_releases_cache")?
+            .and_then(|json| serde_json::from_str(&json).ok()))
+    }
+
+    pub fn set_new_releases_cache(&mut self, albums: &[crate::model::Album]) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        self.set_preference(
+            "new_releases_cache",
+            &serde_json::to_string(&(now, albums))?,
+        )
     }
 
     /// A fingerprint this build cannot read is dropped rather than failing the
@@ -1101,6 +1123,30 @@ mod tests {
             store.set_preference("ui_zoom", invalid).unwrap();
             assert_eq!(store.preferences().unwrap().ui_zoom.percent(), 100);
         }
+    }
+
+    #[test]
+    fn new_releases_cache_round_trips_and_clears_with_the_library() {
+        let mut store = Store::in_memory().unwrap();
+        assert!(store.new_releases_cache().unwrap().is_none());
+        let album = crate::model::Album {
+            provider: crate::model::Provider::Spotify,
+            source_id: "a".into(),
+            spotify_uri: None,
+            name: "A".into(),
+            artists: Vec::new(),
+            release_date: Some("2026-11-01".into()),
+            artwork_url: None,
+            track_count: None,
+        };
+        store
+            .set_new_releases_cache(std::slice::from_ref(&album))
+            .unwrap();
+        let (fetched_at, albums) = store.new_releases_cache().unwrap().unwrap();
+        assert!(fetched_at > 0);
+        assert_eq!(albums, [album]);
+        store.clear_library_cache().unwrap();
+        assert!(store.new_releases_cache().unwrap().is_none());
     }
 
     #[test]
