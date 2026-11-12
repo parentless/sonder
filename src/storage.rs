@@ -71,7 +71,16 @@ impl Default for UiZoom {
 }
 
 impl UiZoom {
-    pub const ALL: [Self; 5] = [Self(75), Self(90), Self(100), Self(110), Self(125)];
+    /// Seven steps of ten, from dense to spacious.
+    pub const ALL: [Self; 7] = [
+        Self(70),
+        Self(80),
+        Self(90),
+        Self(100),
+        Self(110),
+        Self(120),
+        Self(130),
+    ];
     pub fn percent(self) -> u16 {
         self.0
     }
@@ -313,6 +322,12 @@ impl Store {
         let ui_zoom = self
             .preference("ui_zoom")?
             .and_then(|value| value.parse().ok())
+            // Earlier versions offered 75% and 125%; keep those listeners close.
+            .map(|percent: u16| match percent {
+                75 => 70,
+                125 => 130,
+                other => other,
+            })
             .and_then(UiZoom::from_percent)
             .unwrap_or_default();
         Ok(AppPreferences {

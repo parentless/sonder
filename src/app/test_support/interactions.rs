@@ -1127,7 +1127,7 @@ fn discrete_wheel_preserves_distance_and_precise_scrolling_stays_direct() {
 
 #[test]
 fn scrollbar_gutter_keeps_duration_columns_stable_on_hover_and_drag() {
-    for (width, zoom) in [(1280., 100), (900., 125)] {
+    for (width, zoom) in [(1280., 100), (900., 130)] {
         let mut fixture = Fixture::at_width(width);
         fixture.update(|_, cx| {
             appearance::Appearance::set_ui_zoom(
@@ -2348,29 +2348,25 @@ fn current_track_index_toggles_playback_without_replacing_the_queue() {
 fn zoom_scales_layout_and_transport_and_survives_theme_changes() {
     let mut fixture = Fixture::new(true);
     let original = fixture.update(|window, _| window.find("play-toggle").bounds().size);
-    fixture.update(|window, cx| window.click(("settings-ui-zoom", 125usize), cx));
+    fixture.update(|window, cx| window.click(("settings-ui-zoom", 130usize), cx));
     fixture.update(|window, cx| {
-        assert_eq!(window.rem_size(), px(20.));
+        assert_eq!(window.rem_size(), px(20.8));
         assert_eq!(
             services::AppServices::preferences(cx).ui_zoom.percent(),
-            125
+            130
         );
-        assert_eq!(
-            window.find("play-toggle").bounds().size.width,
-            original.width * 1.25
-        );
+        let width = f32::from(window.find("play-toggle").bounds().size.width);
+        assert!((width - f32::from(original.width) * 1.3).abs() < 0.5);
         appearance::Appearance::set_preference(ThemePreference::Light, window, cx);
     });
     fixture.update(|window, cx| {
-        assert_eq!(window.rem_size(), px(20.));
-        window.click(("settings-ui-zoom", 75usize), cx);
+        assert_eq!(window.rem_size(), px(20.8));
+        window.click(("settings-ui-zoom", 70usize), cx);
     });
     fixture.update(|window, cx| {
-        assert_eq!(window.rem_size(), px(12.));
-        assert_eq!(
-            window.find("play-toggle").bounds().size.width,
-            original.width * 0.75
-        );
+        assert_eq!(window.rem_size(), px(11.2));
+        let width = f32::from(window.find("play-toggle").bounds().size.width);
+        assert!((width - f32::from(original.width) * 0.7).abs() < 0.5);
         window.click(("settings-ui-zoom", 100usize), cx);
     });
     fixture.update(|window, _| assert_eq!(window.rem_size(), px(16.)));
@@ -2819,7 +2815,7 @@ fn playlist_play_skips_unavailable_start_pages_without_loading_the_whole_list() 
 
 #[test]
 fn discography_cards_fit_the_available_width_at_narrow_and_wide_sizes() {
-    for (width, zoom, collapsed) in [(900., 125, false), (1920., 100, false), (1280., 100, true)] {
+    for (width, zoom, collapsed) in [(900., 130, false), (1920., 100, false), (1280., 100, true)] {
         let mut fixture = Fixture::at_width(width);
         let workspace = fixture.workspace.clone().unwrap();
         fixture.update(|_, cx| {

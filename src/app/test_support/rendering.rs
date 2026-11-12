@@ -200,7 +200,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 | Scene::ArtistMenu
                 | Scene::ArtistPortrait
                 | Scene::ArtistLandscape | Scene::ArtistZoomLarge => {
-                    if matches!(scene, Scene::ArtistZoomLarge) { appearance::Appearance::set_ui_zoom(crate::storage::UiZoom::from_percent(125).unwrap(), cx).unwrap(); }
+                    if matches!(scene, Scene::ArtistZoomLarge) { appearance::Appearance::set_ui_zoom(crate::storage::UiZoom::from_percent(130).unwrap(), cx).unwrap(); }
                     let (image_width, image_height) = match scene {
                         Scene::ArtistPortrait => (360, 1080),
                         Scene::ArtistLandscape => (1080, 360),
@@ -306,7 +306,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     let cover = image::RgbaImage::from_fn(64, 64, |x, y| image::Rgba([45 + (x*2) as u8, 50 + (y*2) as u8, 160, 255]));
                     services::AppServices::image_cache(cx).update(cx, |cache, _| cache.seed_artist_fixture(artwork_url, Arc::new(gpui_kit::RenderImage::new([image::Frame::new(cover)]))));
                     if matches!(scene, Scene::PlaylistZoomSmall | Scene::PlaylistZoomLarge) {
-                        let percent = if matches!(scene, Scene::PlaylistZoomSmall) { 75 } else { 125 };
+                        let percent = if matches!(scene, Scene::PlaylistZoomSmall) { 70 } else { 130 };
                         appearance::Appearance::set_ui_zoom(crate::storage::UiZoom::from_percent(percent).unwrap(), cx).unwrap();
                     }
                     let playlists: Vec<_> = (0..200).map(|index| model::Playlist {
@@ -764,9 +764,11 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 backdrop.size.width, header.size.width,
                 "backdrop must cover the full header width for every source aspect ratio"
             );
-            assert_eq!(
-                backdrop.size.height,
-                header.size.height + Rems(2.875).to_pixels(window.rem_size())
+            // Fractional zoom levels round layout to whole pixels.
+            let expected = header.size.height + Rems(2.875).to_pixels(window.rem_size());
+            assert!(
+                (f32::from(backdrop.size.height) - f32::from(expected)).abs() <= 1.,
+                "backdrop must extend past the header by the fade height"
             );
         })
         .expect("square artist portrait");

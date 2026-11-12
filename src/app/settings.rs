@@ -208,14 +208,7 @@ impl Settings {
                             ),
                     )
                     .child(div().mt_5().child(components::section_label(palette, "UI zoom"))
-                        .child(div().mt_2().flex().flex_wrap().gap_2().children(UiZoom::ALL.into_iter().map(|zoom| {
-                            components::button(palette, ("settings-ui-zoom", usize::from(zoom.percent())))
-                                .test_support().h_9().px_3().rounded_lg()
-                                .bg(rgb(if preferences.ui_zoom == zoom { palette.selection } else { palette.control }))
-                                .hover(|style| style.bg(rgb(palette.control_hover)))
-                                .child(format!("{}%", zoom.percent()))
-                                .on_click(cx.listener(move |_, _, _, cx| cx.emit(SettingsEvent::SetZoom(zoom))))
-                        })))
+                        .child(Self::zoom_scale(palette, preferences.ui_zoom, cx))
                     )
                     .child(
                         div().mt_5().child(components::section_label(palette, "Selection color"))
@@ -969,6 +962,108 @@ impl Settings {
                     ),
             )
             .child(div().flex_none().child(field))
+    }
+
+    /// Seven stops from dense to spacious on one line; the chosen stop is
+    /// filled, and Reset returns to 100%.
+    fn zoom_scale(palette: CadencePalette, current: UiZoom, cx: &mut Context<Self>) -> Div {
+        let default = UiZoom::default();
+        let stops = UiZoom::ALL.len() as f32;
+        let mut row = div()
+            .relative()
+            .flex()
+            .w_full()
+            .max_w(Rems(32.))
+            .mt_2()
+            // The line runs between the first and last dot centres.
+            .child(
+                div()
+                    .absolute()
+                    .top(Rems(2.4))
+                    .left(relative(0.5 / stops))
+                    .right(relative(0.5 / stops))
+                    .h(px(2.))
+                    .bg(rgb(palette.border)),
+            );
+        for (index, zoom) in UiZoom::ALL.into_iter().enumerate() {
+            let selected = zoom == current;
+            let caption = if index == 0 {
+                "Dense"
+            } else if zoom == default {
+                "Default"
+            } else if index == UiZoom::ALL.len() - 1 {
+                "Spacious"
+            } else {
+                ""
+            };
+            let ink = if selected {
+                palette.text_primary
+            } else {
+                palette.text_muted
+            };
+            row = row.child(
+                components::button(palette, ("settings-ui-zoom", usize::from(zoom.percent())))
+                    .test_support()
+                    .flex_1()
+                    .min_w_0()
+                    .py_1p5()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .rounded_lg()
+                    .hover(|style| style.bg(rgb(palette.control)))
+                    .child(
+                        div()
+                            .h_5()
+                            .whitespace_nowrap()
+                            .text_size(tokens::BODY_TEXT)
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .text_color(rgb(palette.text_primary))
+                            .child(caption),
+                    )
+                    .child(
+                        div()
+                            .size_4()
+                            .rounded_full()
+                            .border_2()
+                            .border_color(rgb(if selected {
+                                palette.text_primary
+                            } else {
+                                palette.text_muted
+                            }))
+                            .bg(rgb(if selected {
+                                palette.text_primary
+                            } else {
+                                palette.surface
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(ink))
+                            .child(format!("{}%", zoom.percent())),
+                    )
+                    .on_click(
+                        cx.listener(move |_, _, _, cx| cx.emit(SettingsEvent::SetZoom(zoom))),
+                    ),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .child(row)
+            .when(current != default, |scale| {
+                scale.child(
+                    div().mt_2().flex().child(
+                        components::pill(palette, "settings-ui-zoom-reset", "Reset", false)
+                            .test_support()
+                            .h_9()
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                cx.emit(SettingsEvent::SetZoom(UiZoom::default()))
+                            })),
+                    ),
+                )
+            })
     }
 
     fn appearance_option(
