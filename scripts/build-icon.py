@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Draws the Sonder ripple icon with a transparent background, no dependencies.
 
-Writes assets/AppIcon.ico, assets/sonder-mark.png and, on macOS,
+Writes assets/AppIcon.ico (small sizes as BMP, 256 as PNG), assets/sonder-mark.png and, on macOS,
 assets/AppIcon.icns. The tile is full-bleed: the rounded square touches every
 edge and the corners are transparent. Keep assets/*.svg in step with SHAPES.
 """
@@ -55,7 +55,21 @@ def render(size):
             else:
                 row += b"\0\0\0\0"
         rows.append(bytes(row))
-    return png(size, rows)
+    return rows
+
+
+def bmp(size, rows):
+    """An ICO image entry stored as a 32-bit DIB with an empty AND mask.
+
+    Windows loads small icons most reliably this way; only the 256 px entry
+    may be PNG, which matches how the previous icon was built."""
+    header = struct.pack("<IiiHHIIiiII", 40, size, size * 2, 1, 32, 0, 0, 0, 0, 0, 0)
+    pixels = b"".join(
+        b"".join(bytes((row[i + 2], row[i + 1], row[i], row[i + 3])) for i in range(0, size * 4, 4))
+        for row in reversed(rows)
+    )
+    mask = bytes(((size + 31) // 32 * 4) * size)
+    return header + pixels + mask
 
 
 def png(size, rows):
@@ -71,15 +85,18 @@ def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assets = os.path.join(root, "assets")
     cache = {}
-    def get(size):
+    def get_rows(size):
         if size not in cache:
             cache[size] = render(size)
         return cache[size]
 
+    def get(size):
+        return png(size, get_rows(size))
+
     sizes = [16, 24, 32, 48, 64, 128, 256]
     out = struct.pack("<HHH", 0, 1, len(sizes)); body = b""; offset = 6 + 16 * len(sizes)
     for s in sizes:
-        data = get(s)
+        data = get(s) if s == 256 else bmp(s, get_rows(s))
         out += struct.pack("<BBBBHHII", s % 256, s % 256, 0, 0, 1, 32, len(data), offset + len(body))
         body += data
     open(os.path.join(assets, "AppIcon.ico"), "wb").write(out + body)
