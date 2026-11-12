@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.24",
+    "cadence": "0.8.25",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "7f8ceaba5a68f33e0debcd3731e1315f3f2a7097",
-    "lockfile_sha256": "08deba9a3263739bec0fe81f2d4fc0d215650b1d77655ba96eb2632ef2c28fda"
+    "revision": "c089b544e5a59f2715a197ad6ab4adea345bad2a",
+    "lockfile_sha256": "c188ad740ee17a8475f33df65f3ed1985ca2cdb17d0fc6e1d466c5b4dd42c61d"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43143360994",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/43159994552",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.24",
+      "cadence": "0.8.25",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "7f8ceaba5a68f33e0debcd3731e1315f3f2a7097",
-      "lockfile_sha256": "08deba9a3263739bec0fe81f2d4fc0d215650b1d77655ba96eb2632ef2c28fda"
+      "revision": "c089b544e5a59f2715a197ad6ab4adea345bad2a",
+      "lockfile_sha256": "c188ad740ee17a8475f33df65f3ed1985ca2cdb17d0fc6e1d466c5b4dd42c61d"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43143360994"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/43159994552"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -71,6 +71,7 @@
     "Renamed to Sonder with a ripple mark on a dark grey tile: the sidebar brand, its logo and the fixture artist text change in every full-window reference, and Settings shows version 0.8.22 and Sonder wording; the 20 sign-in references only change where they name the app",
     "The mascot is removed: the Settings Mascot row and the four open-selector references are gone, the Playback card now holds Autoplay and Normalize volume, and the sidebar logo is the new near-black tile with a thin chrome rim; Settings shows version 0.8.23",
     "Track lists lose the favorites star column and its header icon; Home gains Last 4 weeks / Last 6 months / All time buttons and a rank under each artist (replacing the word Artist); Settings shows version 0.8.24",
+    "UI zoom is now a seven-step Dense to Spacious scale (70-130%) in Settings, with 70% and 130% replacing the old 75% and 125% zoom scenes; Settings gains a Streaming quality row (Very high by default); Home gains a New from artists section below the top artists; the sidebar mark is redrawn with a firmer chrome rim; Settings shows version 0.8.25",
     "Eight new references: Premium-required (shown to free Spotify accounts instead of the app closing), Home with top artists and tracks, and Home asking for the new top-items permission; each in dark/light and regular/compact",
     "The Cache text now mentions the bounded on-disk artwork cache (48 MiB); Clear cache empties memory and disk",
     "Last.fm scrobbling is event-driven with one idle worker thread, one exact timer and a bounded retry queue; its secret and session key stay in the system keychain",
