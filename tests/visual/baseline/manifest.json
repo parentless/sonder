@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.25",
+    "cadence": "0.8.26",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "c089b544e5a59f2715a197ad6ab4adea345bad2a",
-    "lockfile_sha256": "c188ad740ee17a8475f33df65f3ed1985ca2cdb17d0fc6e1d466c5b4dd42c61d"
+    "revision": "8ac12dc403b50f1d644d03b393fccd277d45c074",
+    "lockfile_sha256": "35a1e9782533cdb1e14e0b0118f5501975b995d06b1ff475a30addbde12934ea"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43159994552",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/43184509196",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.25",
+      "cadence": "0.8.26",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "c089b544e5a59f2715a197ad6ab4adea345bad2a",
-      "lockfile_sha256": "c188ad740ee17a8475f33df65f3ed1985ca2cdb17d0fc6e1d466c5b4dd42c61d"
+      "revision": "8ac12dc403b50f1d644d03b393fccd277d45c074",
+      "lockfile_sha256": "35a1e9782533cdb1e14e0b0118f5501975b995d06b1ff475a30addbde12934ea"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43159994552"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/43184509196"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -75,6 +75,7 @@
     "Eight new references: Premium-required (shown to free Spotify accounts instead of the app closing), Home with top artists and tracks, and Home asking for the new top-items permission; each in dark/light and regular/compact",
     "The Cache text now mentions the bounded on-disk artwork cache (48 MiB); Clear cache empties memory and disk",
     "Last.fm scrobbling is event-driven with one idle worker thread, one exact timer and a bounded retry queue; its secret and session key stay in the system keychain",
-    "Liking or unliking keeps the library fingerprint current so refreshes stay two-request probes; the audio writer wakes every 10 ms instead of 2 ms and the backend runtime uses two worker threads"
+    "Liking or unliking keeps the library fingerprint current so refreshes stay two-request probes; the audio writer wakes every 10 ms instead of 2 ms and the backend runtime uses two worker threads",
+    "The track right-click menu gains a Copy Spotify link row above Open track in Spotify; Settings shows version 0.8.26; Home also gains a Coming soon row and a NEW badge on fresh releases, which only appear with live data, so no reference shows them"
   ]
 }
