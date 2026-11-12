@@ -239,7 +239,7 @@ impl Playback {
         )?;
         let volume = mixer.get_soft_volume();
         let player_config = PlayerConfig {
-            position_update_interval: Some(Duration::from_millis(250)),
+            position_update_interval: Some(Duration::from_millis(500)),
             normalisation: NORMALISE_VOLUME.load(Ordering::Relaxed),
             ..PlayerConfig::default()
         };

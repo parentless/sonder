@@ -23,6 +23,10 @@ pub(super) struct Player {
     history_pending: bool,
     clock: playback_clock::PlaybackClock,
     saved_position_ms: u32,
+    /// The whole second last drawn. Reports arrive several times a second, but
+    /// the clock text and bar only change on the second, so the rest repaint
+    /// nothing.
+    painted_second: u32,
     volume: f32,
     volume_before_mute: f32,
     volume_dragging: bool,
@@ -42,6 +46,7 @@ impl Player {
             history_pending: false,
             clock: playback_clock::PlaybackClock::new(now),
             saved_position_ms: 0,
+            painted_second: u32::MAX,
             volume: 0.72,
             volume_before_mute: 0.72,
             volume_dragging: false,
@@ -472,9 +477,16 @@ impl Player {
                 position_ms,
             } => {
                 if self.restore.is_none() && self.live_track_matches(&spotify_uri) {
-                    self.clock
-                        .report(position_ms, cx.background_executor().now());
+                    let now = cx.background_executor().now();
+                    self.clock.report(position_ms, now);
                     self.save_position_if_moved(spotify_uri, position_ms);
+                    let second = self.clock.position_ms(now) / 1_000;
+                    if second == self.painted_second {
+                        return None;
+                    }
+                    self.painted_second = second;
+                } else {
+                    return None;
                 }
             }
             BackendEvent::PlaybackSnapshotLoaded {

@@ -30,6 +30,13 @@ pub(super) struct ImageHttpClient {
 static DISK_CACHE: OnceLock<Arc<super::disk_cache::DiskCache>> = OnceLock::new();
 
 /// Deletes the on-disk artwork off the UI thread.
+/// Whether downloaded artwork is being kept on disk. When it is, the picture
+/// cache can drop each compressed original after decoding and fetch it back
+/// from disk if a larger size is wanted.
+pub(super) fn disk_cache_active() -> bool {
+    DISK_CACHE.get().is_some()
+}
+
 pub(super) fn clear_disk_cache() {
     if let Some(cache) = DISK_CACHE.get().cloned() {
         std::thread::spawn(move || cache.clear());

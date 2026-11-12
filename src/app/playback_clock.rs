@@ -11,7 +11,7 @@ const SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Playback position as the interface should show it.
 ///
-/// The backend reports every 250ms and applies seeks only after a round trip,
+/// The backend reports every 500ms and applies seeks only after a round trip,
 /// so mirroring the last report lets a report sampled before a seek undo it.
 /// This owns the clock instead: it holds an anchor, extrapolates from it, and
 /// accepts reports only once they agree with what was asked for.

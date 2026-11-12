@@ -369,10 +369,11 @@ impl BoundedImageCache {
                         }
                         Arc::from(bytes)
                     };
-                    Ok(DecodedArtwork {
-                        image: decode_artwork(&source, target)?,
-                        source: Some(source),
-                    })
+                    let image = decode_artwork(&source, target)?;
+                    // The disk cache already holds the original, so keeping a
+                    // second copy in memory would only shrink the picture budget.
+                    let source = (!super::http::disk_cache_active()).then_some(source);
+                    Ok(DecodedArtwork { image, source })
                 } else {
                     Ok(DecodedArtwork {
                         image: fallback.await?,

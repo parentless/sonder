@@ -298,3 +298,15 @@ layout scaling or a renderer fork. Keyboard activation and reduced motion add
 no interpolation; every frame request is bounded to an active transition.
 Play/pause glyph assets remain unchanged. These tests and code bounds do not
 constitute a Windows CPU/GPU profile or proof of zero allocations/leaks globally.
+
+# Review of 0.8.25 (playback repaints and artwork copies)
+
+Position reports now arrive every 500 ms instead of 250 ms, and the player only
+repaints when the displayed second changes. The clock text changes once a
+second and the progress bar moves under a pixel per report, so the extra
+repaints drew nothing new. This cuts frame work and wake-ups while a song plays.
+
+The picture cache no longer keeps each compressed original in memory when the
+artwork disk cache is active: a larger size is read back from disk instead. The
+retained-image budget therefore holds decoded pictures only. Without a disk
+cache the originals are still kept, as before.
