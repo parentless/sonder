@@ -366,10 +366,6 @@ pub enum BackendCommand {
         liked: bool,
         respond: Reply<()>,
     },
-    SetFavorite {
-        track: Track,
-        favorite: bool,
-    },
     SetPlaylistPinned {
         playlist: Playlist,
         pinned: bool,
@@ -1424,9 +1420,6 @@ impl Worker {
                 );
                 Ok(())
             }
-            BackendCommand::SetFavorite { track, favorite } => {
-                self.set_favorite(track, favorite).await
-            }
             BackendCommand::SetPlaylistPinned { playlist, pinned } => {
                 self.set_playlist_pinned(playlist, pinned).await
             }
@@ -1753,12 +1746,6 @@ impl Worker {
 
     async fn mark_played(&mut self, track: Track) -> Result<()> {
         self.store.add_history(track).await?;
-        send_local_state(&self.store, &self.events).await;
-        Ok(())
-    }
-
-    async fn set_favorite(&mut self, track: Track, favorite: bool) -> Result<()> {
-        self.store.set_favorite(track, favorite).await?;
         send_local_state(&self.store, &self.events).await;
         Ok(())
     }

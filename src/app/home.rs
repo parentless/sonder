@@ -153,7 +153,7 @@ impl HomePage {
             .flex_col()
             .items_start()
             .justify_start()
-            .gap_2()
+            .gap_1p5()
             .rounded_xl()
             .hover(|style| style.bg(rgb(palette.surface_hover)))
             .child(components::rectangular_artwork(
@@ -165,13 +165,28 @@ impl HomePage {
                 CadenceIcon::Person,
             ))
             .child(
+                // Name and rank sit close together, away from the picture.
                 div()
                     .w_full()
-                    .truncate()
-                    .font_weight(gpui_kit::FontWeight::MEDIUM)
-                    .child(artist.name.clone()),
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .w_full()
+                            .truncate()
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .child(artist.name.clone()),
+                    )
+                    .child(components::page_detail(
+                        palette,
+                        if index == 0 {
+                            "#1 · Most played".to_owned()
+                        } else {
+                            format!("#{}", index + 1)
+                        },
+                    )),
             )
-            .child(components::page_detail(palette, "Artist"))
             // Capture just the index, resolving the current data on activation.
             .on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(artist) = this.artists.get(index) {

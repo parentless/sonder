@@ -325,7 +325,6 @@ fn text_menu_row(row: Stateful<Div>, label: &'static str, color: u32) -> Statefu
         "Add to Liked Songs" | "Remove from Liked Songs" | "Updating Spotify library…" => {
             CadenceIcon::Heart
         }
-        "Add to favorites" | "Remove from favorites" => CadenceIcon::Star,
         _ => CadenceIcon::MusicNote,
     };
     row.w_full()

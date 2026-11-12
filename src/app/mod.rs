@@ -1,6 +1,6 @@
 use std::{
     cell::Cell,
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     ops::Range,
     rc::Rc,
     sync::Arc,
@@ -332,17 +332,6 @@ fn catalog_data_is_fresh(loaded_at: Option<SystemTime>) -> bool {
     })
 }
 
-fn index_favorites(favorites: &[model::Track]) -> HashMap<model::Provider, HashSet<String>> {
-    let mut index: HashMap<model::Provider, HashSet<String>> = HashMap::new();
-    for track in favorites {
-        index
-            .entry(track.provider)
-            .or_default()
-            .insert(track.source_id.clone());
-    }
-    index
-}
-
 async fn receive_backend_event_batch(
     events: &mut crate::backend::EventReceiver,
 ) -> Option<Vec<BackendEvent>> {
@@ -406,26 +395,10 @@ pub fn run() {
 #[cfg(test)]
 mod event_bridge_tests {
     use super::{
-        BackendEvent, CATALOG_STALE_TIME, catalog_data_is_fresh, index_favorites, model,
-        next_request_id, receive_backend_event_batch,
+        BackendEvent, CATALOG_STALE_TIME, catalog_data_is_fresh, next_request_id,
+        receive_backend_event_batch,
     };
     use std::time::{Duration, SystemTime};
-
-    fn track(provider: model::Provider, source_id: &str) -> model::Track {
-        model::Track {
-            provider,
-            source_id: source_id.to_owned(),
-            spotify_uri: None,
-            isrc: None,
-            title: source_id.into(),
-            artist: "Artist".into(),
-            artists: Vec::new(),
-            album: "Album".into(),
-            album_ref: None,
-            duration_ms: 1,
-            artwork_url: None,
-        }
-    }
 
     #[tokio::test]
     async fn batches_events_that_are_already_queued() {
@@ -470,18 +443,6 @@ mod event_bridge_tests {
         assert!(!catalog_data_is_fresh(Some(
             SystemTime::now() - CATALOG_STALE_TIME - Duration::from_secs(1)
         )));
-    }
-
-    #[test]
-    fn favorite_index_separates_providers_and_deduplicates_tracks() {
-        let spotify = track(model::Provider::Spotify, "same-id");
-        let tidal = track(model::Provider::Tidal, "same-id");
-
-        let index = index_favorites(&[spotify.clone(), spotify, tidal]);
-
-        assert_eq!(index[&model::Provider::Spotify].len(), 1);
-        assert!(index[&model::Provider::Spotify].contains("same-id"));
-        assert!(index[&model::Provider::Tidal].contains("same-id"));
     }
 }
 

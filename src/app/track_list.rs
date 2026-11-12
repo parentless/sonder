@@ -216,13 +216,12 @@ impl TrackList {
         };
         let palette = appearance::Appearance::palette(cx);
         let is_current_track = self.player.read(cx).is_current_track(&track);
-        let favorite = self.library.read(cx).is_favorite(&track);
         let menu_open = self
             .menu_open
             .as_ref()
             .is_some_and(|(id, row)| id.as_ref() == track.source_id && *row == index);
         let menu = menu_open
-            .then(|| self.action_menu(&track, index, favorite, is_current_track, cx))
+            .then(|| self.action_menu(&track, index, is_current_track, cx))
             .map(IntoElement::into_any_element);
         // Share one small identity across callbacks, rather than a full Track.
         // Input from a stale frame must never act on a different replacement row.
@@ -256,7 +255,6 @@ impl TrackList {
                     this.player.update(cx, |player, cx| player.toggle(cx));
                 }),
             )
-            .favorite(favorite)
             .hover_transition(
                 self.hover.transition(index, cx.background_executor().now()),
                 cx.listener(move |this, hovered: &bool, _, cx| {
@@ -267,30 +265,6 @@ impl TrackList {
             )
             .menu(menu)
             .on_play(cx.listener(move |this, _, _, cx| this.play_from(index, cx)))
-            .on_favorite(cx.listener(move |this, _, _, cx| {
-                // The full metadata copy is needed only when sending a write,
-                // not whenever scrolling or hover repaints this visible row.
-                let track = if let Some(buffer) = &this.playlist_tracks {
-                    buffer
-                        .borrow()
-                        .get(index)
-                        .filter(|track| {
-                            track.provider == provider && track.source_id == source_id.as_ref()
-                        })
-                        .cloned()
-                } else {
-                    this.tracks
-                        .get(index)
-                        .filter(|track| {
-                            track.provider == provider && track.source_id == source_id.as_ref()
-                        })
-                        .cloned()
-                };
-                if let Some(track) = track {
-                    this.library
-                        .update(cx, |library, cx| library.set_favorite(track, !favorite, cx));
-                }
-            }))
             .context_menu(
                 self.menu_position,
                 cx.listener(move |this, event: &gpui_kit::MouseDownEvent, _, cx| {
@@ -377,7 +351,6 @@ impl TrackList {
         &self,
         track: &model::Track,
         index: usize,
-        favorite: bool,
         is_current_track: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -386,7 +359,6 @@ impl TrackList {
         let next_track = track.clone();
         let queue_track = track.clone();
         let radio_track = track.clone();
-        let favorite_track = track.clone();
         let spotify_track = track.clone();
         let spotify_liked = self.library.read(cx).is_spotify_liked(track);
         let spotify_like_busy = self.library.read(cx).spotify_like_busy();
@@ -520,24 +492,6 @@ impl TrackList {
                 })),
             )
             .child(separator())
-            .child(
-                components::text_menu_item(
-                    palette,
-                    ("track-menu-favorite", index),
-                    if favorite {
-                        "Remove from favorites"
-                    } else {
-                        "Add to favorites"
-                    },
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.menu_open = None;
-                    this.library.update(cx, |library, cx| {
-                        library.set_favorite(favorite_track.clone(), !favorite, cx)
-                    });
-                    cx.notify();
-                })),
-            )
             .when(track.provider == model::Provider::Spotify, |menu| {
                 let label = if spotify_like_busy {
                     "Updating Spotify library…"

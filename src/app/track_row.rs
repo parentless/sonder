@@ -7,7 +7,6 @@ use gpui_kit::ClickEvent;
 const COLUMN_GUTTER: Rems = Rems(1.);
 /// The fixed columns; Title and Album flex to share whatever remains.
 const INDEX_COLUMN_WIDTH: Rems = Rems(2.75);
-const STAR_COLUMN_WIDTH: Rems = Rems(2.25);
 const TIME_COLUMN_WIDTH: Rems = Rems(3.75);
 /// How far the actions menu drops below its trigger, and the room it keeps
 /// from the window edges.
@@ -39,19 +38,6 @@ pub(super) fn track_list_header(palette: CadencePalette, compact: bool) -> impl 
         .when(!compact, |header| {
             header.child(div().flex_1().min_w_0().child("Album"))
         })
-        .child(
-            div()
-                .w(STAR_COLUMN_WIDTH)
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(components::icon(
-                    CadenceIcon::Star,
-                    tokens::COLUMN_HEADER_ICON,
-                    palette.text_muted,
-                )),
-        )
         .child(
             div()
                 .w(TIME_COLUMN_WIDTH)
@@ -87,7 +73,7 @@ type ContextCallback = Box<dyn Fn(&gpui_kit::MouseDownEvent, &mut Window, &mut A
 
 /// One track in a list.
 ///
-/// Stateless: the list that shows it decides whether it is current, favorited
+/// Stateless: the list that shows it decides whether it is current
 /// or has its menu open, and supplies the behaviour as callbacks. The row never
 /// reaches for the player or the library itself.
 #[derive(IntoElement)]
@@ -102,12 +88,10 @@ pub(super) struct TrackRow {
     current: bool,
     playing: bool,
     on_toggle_playback: Option<RowCallback>,
-    favorite: bool,
     /// Anchored to the pointer while the context menu is open.
     menu: Option<AnyElement>,
     on_play: Option<RowCallback>,
     on_navigate: Option<NavigationCallback>,
-    on_favorite: Option<RowCallback>,
     on_context_menu: Option<ContextCallback>,
     hover_transition: Option<components::HoverTransition>,
     on_hover: Option<HoverCallback>,
@@ -132,11 +116,9 @@ impl TrackRow {
             current: false,
             playing: false,
             on_toggle_playback: None,
-            favorite: false,
             menu: None,
             on_play: None,
             on_navigate: None,
-            on_favorite: None,
             on_context_menu: None,
             hover_transition: None,
             on_hover: None,
@@ -183,11 +165,6 @@ impl TrackRow {
     ) -> Self {
         self.playing = playing;
         self.on_toggle_playback = Some(Rc::new(handler));
-        self
-    }
-
-    pub(super) fn favorite(mut self, favorite: bool) -> Self {
-        self.favorite = favorite;
         self
     }
 
@@ -281,14 +258,6 @@ impl TrackRow {
             credits = credits.child(text(self.track.artist[cursor..].to_owned().into()));
         }
         credits.into_any_element()
-    }
-
-    pub(super) fn on_favorite(
-        mut self,
-        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        self.on_favorite = Some(Rc::new(handler));
-        self
     }
 
     pub(super) fn context_menu(
@@ -507,33 +476,6 @@ impl RenderOnce for TrackRow {
                         .child(album_label),
                 )
             })
-            .child(
-                components::button(palette, ("spotify-favorite", index))
-                    .test_support()
-                    .size(STAR_COLUMN_WIDTH)
-                    .flex_none()
-                    .rounded_full()
-                    .hover(|style| style.bg(rgb(palette.control)))
-                    .child(components::icon(
-                        if self.favorite {
-                            CadenceIcon::StarFilled
-                        } else {
-                            CadenceIcon::Star
-                        },
-                        tokens::MENU_ICON,
-                        if self.favorite {
-                            palette.text_primary
-                        } else {
-                            palette.text
-                        },
-                    ))
-                    .when_some(self.on_favorite, |button, handler| {
-                        button.on_click(move |event, window, cx| {
-                            cx.stop_propagation();
-                            handler(event, window, cx);
-                        })
-                    }),
-            )
             .child(
                 div()
                     .id(("track-duration", index))

@@ -21,7 +21,6 @@ pub(super) const CONTROL_ICON: Rems = Rems(1.0625);
 pub(super) const FIELD_ICON: Rems = Rems(1.);
 pub(super) const PLAYBACK_ICON: Rems = Rems(1.);
 pub(super) const MENU_ICON: Rems = Rems(0.9375);
-pub(super) const COLUMN_HEADER_ICON: Rems = Rems(0.75);
 pub(super) const INLINE_ICON: Rems = Rems(0.6875);
 
 pub(super) const INLINE_ICON_GAP: Rems = Rems(0.3125);

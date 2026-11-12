@@ -659,7 +659,7 @@ fn queue_keyboard_activation_preserves_playback_and_reports_expansion() {
 }
 
 #[test]
-fn duplicate_track_actions_preserve_row_index_and_favorite_does_not_start_playback() {
+fn duplicate_track_actions_preserve_row_index() {
     let mut fixture = Fixture::new(false);
     fixture.right_click_track(2);
     fixture.no_commands();
@@ -674,47 +674,6 @@ fn duplicate_track_actions_preserve_row_index_and_favorite_does_not_start_playba
             assert_eq!(tracks[1].source_id, tracks[2].source_id);
             assert_eq!(tracks[index].source_id, track(1).source_id);
         }
-        command => panic!("unexpected command: {command:?}"),
-    }
-    fixture.no_commands();
-    fixture.update(|window, cx| window.click(("spotify-favorite", 3usize), cx));
-    match fixture
-        .backend
-        .commands
-        .try_recv()
-        .expect("favorite command")
-    {
-        BackendCommand::SetFavorite {
-            track: favorite,
-            favorite: true,
-        } => assert_eq!(favorite.source_id, track(2).source_id),
-        command => panic!("unexpected command: {command:?}"),
-    }
-    fixture.no_commands();
-    fixture.update(|_, cx| {
-        services::AppServices::library(cx).update(cx, |library, cx| {
-            library.handle_backend_event(
-                BackendEvent::LocalStateLoaded {
-                    favorites: vec![track(0), track(2)],
-                    pinned_playlists: Vec::new(),
-                    recently_played: Vec::new(),
-                },
-                0,
-                cx,
-            );
-        });
-    });
-    fixture.update(|window, cx| window.click(("spotify-favorite", 3usize), cx));
-    match fixture
-        .backend
-        .commands
-        .try_recv()
-        .expect("unfavorite command")
-    {
-        BackendCommand::SetFavorite {
-            track: favorite,
-            favorite: false,
-        } => assert_eq!(favorite.source_id, track(2).source_id),
         command => panic!("unexpected command: {command:?}"),
     }
     fixture.no_commands();
@@ -1039,58 +998,6 @@ fn loaded_playlist_row_opens_album_without_fetching_more_tracks() {
     fixture.update(|_, _| {});
     fixture.update(|window, cx| window.click(("track-album", 0usize), cx));
     assert_eq!(fixture.requested_album(), "album-grease");
-    fixture.no_commands();
-}
-
-#[test]
-fn stale_track_row_input_cannot_favorite_a_replacement_track() {
-    let mut fixture = Fixture::new(false);
-    fixture.update(|window, cx| {
-        let position = window.find(("spotify-favorite", 1usize)).bounds().center();
-        services::AppServices::library(cx).update(cx, |library, cx| {
-            library.handle_backend_event(
-                BackendEvent::LibraryLoaded {
-                    generation: 0,
-                    liked_tracks: vec![track(0), track(2)],
-                    playlists: vec![],
-                },
-                0,
-                cx,
-            );
-        });
-        // Send queued input against the completed frame, without the test
-        // click helper's intervening redraws of the replacement collection.
-        window.dispatch_event(
-            MouseDownEvent {
-                position,
-                button: MouseButton::Left,
-                click_count: 1,
-                ..Default::default()
-            }
-            .to_platform_input(),
-            cx,
-        );
-        window.dispatch_event(
-            MouseUpEvent {
-                position,
-                button: MouseButton::Left,
-                click_count: 1,
-                ..Default::default()
-            }
-            .to_platform_input(),
-            cx,
-        );
-    });
-    if let Ok(command) = fixture.backend.commands.try_recv() {
-        let BackendCommand::SetFavorite { track: target, .. } = command else {
-            panic!("only a favorite write is allowed")
-        };
-        assert_eq!(
-            target.source_id,
-            track(1).source_id,
-            "queued input must not target the replacement track"
-        );
-    }
     fixture.no_commands();
 }
 
@@ -3021,7 +2928,7 @@ fn discography_cards_fit_the_available_width_at_narrow_and_wide_sizes() {
 }
 
 #[test]
-fn spotify_likes_confirm_success_keep_favorites_separate_and_bound_pending_work() {
+fn spotify_likes_confirm_success_and_bound_pending_work() {
     let mut fixture = Fixture::new(false);
     fixture.right_click_track(1);
     fixture.update(|window, cx| window.click(("track-menu-spotify-like", 1usize), cx));
@@ -3082,8 +2989,6 @@ fn spotify_likes_confirm_success_keep_favorites_separate_and_bound_pending_work(
         let library = services::AppServices::library(cx);
         let library = library.read(cx);
         assert!(!library.is_spotify_liked(&track(1)));
-        assert!(library.is_favorite(&track(0)));
-        assert!(!library.is_favorite(&track(1)));
     });
     fixture.update(|_, cx| {
         services::AppServices::library(cx).update(cx, |library, cx| {

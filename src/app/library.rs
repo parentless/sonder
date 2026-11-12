@@ -16,7 +16,6 @@ pub(super) struct Library {
     playlists: Arc<[model::Playlist]>,
     loaded: bool,
     favorites: Arc<[model::Track]>,
-    favorite_keys: HashMap<model::Provider, HashSet<String>>,
     pinned_playlists: Arc<[model::Playlist]>,
     recently_played: Arc<[model::Track]>,
     local_loaded: bool,
@@ -45,7 +44,6 @@ impl Library {
             playlists: Arc::default(),
             loaded: false,
             favorites: Arc::default(),
-            favorite_keys: HashMap::new(),
             pinned_playlists: Arc::default(),
             recently_played: Arc::default(),
             local_loaded: false,
@@ -138,12 +136,6 @@ impl Library {
         self.local_loaded
     }
 
-    pub(super) fn is_favorite(&self, track: &model::Track) -> bool {
-        self.favorite_keys
-            .get(&track.provider)
-            .is_some_and(|ids| ids.contains(&track.source_id))
-    }
-
     pub(super) fn is_playlist_pinned(&self, playlist: &model::Playlist) -> bool {
         self.pinned_playlists.iter().any(|candidate| {
             candidate.provider == playlist.provider && candidate.source_id == playlist.source_id
@@ -206,17 +198,6 @@ impl Library {
             });
         }));
         cx.notify();
-    }
-
-    pub(super) fn set_favorite(
-        &mut self,
-        track: model::Track,
-        favorite: bool,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        cx.notify();
-        self.backend
-            .send(BackendCommand::SetFavorite { track, favorite })
     }
 
     pub(super) fn set_playlist_pinned(
@@ -294,7 +275,6 @@ impl Library {
                 pinned_playlists,
                 recently_played,
             } => {
-                self.favorite_keys = index_favorites(&favorites);
                 self.favorites = favorites.into();
                 self.pinned_playlists = pinned_playlists.into();
                 self.recently_played = recently_played.into();

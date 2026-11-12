@@ -10,8 +10,6 @@ pub(super) enum CadenceIcon {
     HomeFilled,
     Heart,
     HeartFilled,
-    Star,
-    StarFilled,
     Clock,
     ClockFilled,
     Search,
@@ -43,13 +41,11 @@ pub(super) enum CadenceIcon {
 
 impl CadenceIcon {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 33] = [
+    pub(super) const ALL: [Self; 31] = [
         Self::Home,
         Self::HomeFilled,
         Self::Heart,
         Self::HeartFilled,
-        Self::Star,
-        Self::StarFilled,
         Self::Clock,
         Self::ClockFilled,
         Self::Search,
@@ -85,8 +81,6 @@ impl CadenceIcon {
             Self::HomeFilled => "home-filled",
             Self::Heart => "heart",
             Self::HeartFilled => "heart-filled",
-            Self::Star => "star",
-            Self::StarFilled => "star-filled",
             Self::Clock => "clock",
             Self::ClockFilled => "clock-filled",
             Self::Search => "search",
