@@ -10,7 +10,7 @@
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" rx="232" fill="url(#chrome)"/>
-  <rect x="30" y="30" width="964" height="964" rx="202" fill="#151619"/>
+  <rect x="10" y="10" width="1004" height="1004" rx="222" fill="#0a0b0d"/>
   <g fill="none" stroke="#f7f5ef" stroke-width="46">
     <circle cx="512" cy="512" r="331" stroke-opacity=".3"/>
     <circle cx="512" cy="512" r="235" stroke-opacity=".55"/>
