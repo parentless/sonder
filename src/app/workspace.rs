@@ -148,6 +148,15 @@ impl Workspace {
                     }
                     cx.notify();
                 }
+                settings::SettingsEvent::SetLaunchAtLogin(launch) => {
+                    let result = services::AppServices::set_launch_at_login(*launch, cx);
+                    let result = services::require_settings_storage(result);
+                    if let Some(error) = services::preference_save_error("startup setting", result)
+                    {
+                        this.last_error = Some(error);
+                    }
+                    cx.notify();
+                }
                 settings::SettingsEvent::SetDiscord(config) => {
                     if let Err(error) =
                         services::AppServices::set_discord_config(config.clone(), cx)

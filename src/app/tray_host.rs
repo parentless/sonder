@@ -38,6 +38,11 @@ pub(super) fn apply(enabled: bool, cx: &mut App) {
     }
 }
 
+/// Whether the tray icon is up, so a window-less start can still be reached.
+pub(super) fn is_active(cx: &App) -> bool {
+    cx.has_global::<TrayHost>()
+}
+
 fn handle(command: TrayCommand, cx: &mut App) {
     let player = services::AppServices::player(cx);
     match command {

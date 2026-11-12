@@ -50,12 +50,31 @@ pub(super) fn run() {
         services::AppServices::init(cx, lifecycle, preferences_store, preferences);
         #[cfg(target_os = "windows")]
         tray_host::apply(preferences.keep_in_tray, cx);
+        // Keep the login entry pointing at this executable, e.g. after a move.
+        #[cfg(target_os = "windows")]
+        if preferences.launch_at_login
+            && let Err(error) = crate::startup::set_enabled(true)
+        {
+            log::warn!("startup: could not refresh the login entry: {error}");
+        }
+        // A login launch with the tray up and a saved sign-in starts quietly;
+        // otherwise there would be no window and nothing to click.
+        #[cfg(target_os = "windows")]
+        let start_hidden = credentials_expected
+            && crate::startup::launched_at_startup()
+            && tray_host::is_active(cx);
+        #[cfg(not(target_os = "windows"))]
+        let start_hidden = false;
         bind_keys(cx);
         let updates_available = updater::start(cx);
         // Without a menu bar, Cmd+Q is only deliverable through a window, so
         // closing the last one would leave no way to quit.
         cx.set_menus(menus(updates_available));
         watch_for_activations(cx);
+        if start_hidden {
+            log::info!("startup: started in the tray");
+            return;
+        }
         windows::open_initial_window(credentials_expected, cx);
         #[cfg(target_os = "windows")]
         if cx.windows().is_empty() {

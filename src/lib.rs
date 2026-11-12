@@ -20,5 +20,7 @@ pub use app::run;
 
 #[cfg(any(target_os = "windows", test))]
 #[cfg(target_os = "windows")]
+mod startup;
+#[cfg(target_os = "windows")]
 mod tray;
 mod update_release;

@@ -9,6 +9,7 @@ pub(super) enum SettingsEvent {
     SetAutoplay(bool),
     SetNormaliseVolume(bool),
     SetKeepInTray(bool),
+    SetLaunchAtLogin(bool),
     SetDiscord(crate::discord::Config),
     SetLastfm(crate::lastfm::Config),
 }
@@ -46,6 +47,7 @@ pub(super) struct Settings {
     autoplay_focus: FocusHandle,
     normalise_focus: FocusHandle,
     tray_focus: FocusHandle,
+    startup_focus: FocusHandle,
     automatic_updates_focus: FocusHandle,
     discord_focus: FocusHandle,
     discord_application_id: Entity<InputState>,
@@ -109,6 +111,7 @@ impl Settings {
             autoplay_focus: cx.focus_handle(),
             normalise_focus: cx.focus_handle(),
             tray_focus: cx.focus_handle(),
+            startup_focus: cx.focus_handle(),
             automatic_updates_focus: cx.focus_handle(),
             discord_focus: cx.focus_handle(),
             lastfm_focus: cx.focus_handle(),
@@ -141,6 +144,7 @@ impl Settings {
         let autoplay = preferences.autoplay;
         let normalise_volume = preferences.normalise_volume;
         let keep_in_tray = preferences.keep_in_tray;
+        let launch_at_login = preferences.launch_at_login;
 
         let tab = self.tab;
         // The tab list stays put while the selected group scrolls beside it.
@@ -323,7 +327,37 @@ impl Settings {
                                                                 },
                                                             )),
                                                     ),
-                                                )),
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .mt_5()
+                                                        .pt_5()
+                                                        .border_t_1()
+                                                        .border_color(rgb(palette.border))
+                                                        .child(Self::playback_setting_row(
+                                                            palette,
+                                                            "Open on startup",
+                                                            "Start Sonder when you sign in to Windows. With the tray option on, it starts hidden in the tray.",
+                                                            components::focus_ring_around(
+                                                                palette,
+                                                                &self.startup_focus,
+                                                                window,
+                                                                cx,
+                                                                Switch::new("settings-open-on-startup")
+                                                                    .focus_ring(false)
+                                                                    .checked(launch_at_login)
+                                                                    .on_click(cx.listener(
+                                                                        |_, checked: &bool, _, cx| {
+                                                                            cx.emit(
+                                                                                SettingsEvent::SetLaunchAtLogin(
+                                                                                    *checked,
+                                                                                ),
+                                                                            );
+                                                                        },
+                                                                    )),
+                                                            ),
+                                                        )),
+                                                ),
                                         )
                                     }),
                             ),

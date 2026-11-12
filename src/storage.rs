@@ -91,6 +91,8 @@ pub struct AppPreferences {
     pub normalise_volume: bool,
     /// Closing the window keeps Sonder running from the tray (Windows).
     pub keep_in_tray: bool,
+    /// Starts Sonder when the listener signs in to Windows.
+    pub launch_at_login: bool,
 }
 
 impl Default for AppPreferences {
@@ -104,6 +106,7 @@ impl Default for AppPreferences {
             autoplay: true,
             normalise_volume: false,
             keep_in_tray: false,
+            launch_at_login: false,
         }
     }
 }
@@ -305,6 +308,7 @@ impl Store {
         let autoplay = self.preference("autoplay")?.as_deref() != Some("false");
         let normalise_volume = self.preference("normalise_volume")?.as_deref() == Some("true");
         let keep_in_tray = self.preference("keep_in_tray")?.as_deref() == Some("true");
+        let launch_at_login = self.preference("launch_at_login")?.as_deref() == Some("true");
         let selection_color = self.preference("selection_color")?;
         let ui_zoom = self
             .preference("ui_zoom")?
@@ -322,6 +326,7 @@ impl Store {
             autoplay,
             normalise_volume,
             keep_in_tray,
+            launch_at_login,
         })
     }
 
@@ -398,6 +403,10 @@ impl Store {
 
     pub fn set_keep_in_tray(&mut self, keep: bool) -> Result<()> {
         self.set_preference("keep_in_tray", if keep { "true" } else { "false" })
+    }
+
+    pub fn set_launch_at_login(&mut self, launch: bool) -> Result<()> {
+        self.set_preference("launch_at_login", if launch { "true" } else { "false" })
     }
 
     pub fn set_sidebar_collapsed(&mut self, collapsed: bool) -> Result<()> {
@@ -1019,6 +1028,7 @@ mod tests {
         store.set_autoplay(false).unwrap();
         store.set_normalise_volume(true).unwrap();
         store.set_keep_in_tray(true).unwrap();
+        store.set_launch_at_login(true).unwrap();
         assert_eq!(
             store.preferences().unwrap(),
             AppPreferences {
@@ -1029,6 +1039,7 @@ mod tests {
                 autoplay: false,
                 normalise_volume: true,
                 keep_in_tray: true,
+                launch_at_login: true,
             }
         );
     }

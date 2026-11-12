@@ -400,6 +400,26 @@ impl AppServices {
         result
     }
 
+    /// Saves the choice, then adds or removes the Windows login entry. If the
+    /// entry cannot be changed the saved choice is rolled back, so the switch
+    /// never claims something Windows will not do.
+    pub(super) fn set_launch_at_login(launch: bool, cx: &mut App) -> Option<anyhow::Result<()>> {
+        let services = cx.global_mut::<Self>();
+        let store = services.store.as_mut()?;
+        #[cfg(target_os = "windows")]
+        if let Err(error) = crate::startup::set_enabled(launch) {
+            return Some(Err(anyhow::anyhow!(error)));
+        }
+        let result = store.set_launch_at_login(launch);
+        if result.is_ok() {
+            services.preferences.launch_at_login = launch;
+        } else {
+            #[cfg(target_os = "windows")]
+            let _ = crate::startup::set_enabled(!launch);
+        }
+        Some(result)
+    }
+
     pub(super) fn set_keep_in_tray(keep: bool, cx: &mut App) -> Option<anyhow::Result<()>> {
         let services = cx.global_mut::<Self>();
         let result = services
