@@ -7,10 +7,15 @@ edge and the corners are transparent. Keep assets/*.svg in step with SHAPES.
 """
 import math, os, struct, subprocess, sys, tempfile, zlib
 
-TILE = (0x26, 0x27, 0x2B)
+TILE = (0x15, 0x16, 0x19)
 INK = (0xF7, 0xF5, 0xEF)
 # Everything below is on a 1024 grid.
 RADIUS = 232
+# A brushed-chrome rim: bright at the top left, a dark band through the middle
+# and a second highlight at the bottom right (position 0..1 along the diagonal).
+CHROME_WIDTH = 30
+CHROME = [(0.0, (252, 253, 255)), (0.22, (160, 166, 175)), (0.45, (74, 78, 86)),
+          (0.62, (150, 156, 165)), (0.82, (236, 239, 243)), (1.0, (112, 117, 126))]
 RINGS = [(138, 0.85), (235, 0.55), (331, 0.30)]  # (radius, opacity)
 RING_WIDTH = 46
 DOT = 56
@@ -18,12 +23,18 @@ DOT = 56
 
 def coverage_pixel(x, y):
     """Returns (r, g, b, a) in 0..1 for a point on the 1024 grid."""
-    # Rounded square.
-    dx = max(RADIUS - x, 0, x - (1024 - RADIUS))
-    dy = max(RADIUS - y, 0, y - (1024 - RADIUS))
-    if x < 0 or y < 0 or x > 1024 or y > 1024 or dx * dx + dy * dy > RADIUS * RADIUS:
+    # Signed distance to the rounded square: negative inside.
+    qx = abs(x - 512) - (512 - RADIUS)
+    qy = abs(y - 512) - (512 - RADIUS)
+    edge = math.hypot(max(qx, 0), max(qy, 0)) + min(max(qx, qy), 0) - RADIUS
+    if edge > 0:
         return (0, 0, 0, 0)
-    colour = list(TILE)
+    if -edge < CHROME_WIDTH:
+        t = min(max((x + y) / 2048, 0), 1)
+        for (a, ca), (b, cb) in zip(CHROME, CHROME[1:]):
+            if t <= b:
+                f = (t - a) / (b - a)
+                return tuple((ca[i] + (cb[i] - ca[i]) * f) / 255 for i in range(3)) + (1.0,)
     d = math.hypot(x - 512, y - 512)
     ink = 0.0
     if d <= DOT:
