@@ -140,15 +140,62 @@ const RATE_LIMIT_MAX_JITTER_MS: u64 = 750;
 #[derive(Default)]
 struct RateLimitGate {
     state: std::sync::Mutex<GateState>,
+    /// Where a long cooldown is remembered, so restarting the app does not
+    /// walk straight back into a limit Spotify has not lifted.
+    saved: Option<(std::path::PathBuf, String)>,
 }
 
 #[derive(Default)]
 struct GateState {
     open_until: Option<std::time::Instant>,
     strikes: u32,
+    /// The cooldown is also on disk and must be removed once it ends.
+    remembered: bool,
+}
+
+/// Cooldowns shorter than this are not worth remembering across a restart.
+const REMEMBERED_COOLDOWN: Duration = Duration::from_secs(60);
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
 }
 
 impl RateLimitGate {
+    /// A gate that restores, and later saves, a long cooldown for this app.
+    /// The Client ID is part of the record: Spotify limits per app, so a
+    /// different Client ID starts clean.
+    fn remembering(client_id: &str) -> Self {
+        match directories::ProjectDirs::from("dev", "twoducks", "cadence") {
+            Some(dirs) => {
+                Self::remembering_at(dirs.data_dir().join("spotify-rate-limit"), client_id)
+            }
+            None => Self::default(),
+        }
+    }
+
+    fn remembering_at(path: std::path::PathBuf, client_id: &str) -> Self {
+        let saved = Some((path, client_id.to_owned()));
+        let gate = Self {
+            state: std::sync::Mutex::default(),
+            saved,
+        };
+        if let Some((path, client)) = &gate.saved
+            && let Ok(text) = std::fs::read_to_string(path)
+            && let Some((saved_client, until)) = text.trim().split_once(' ')
+            && saved_client == client
+            && let Ok(until) = until.parse::<u64>()
+            && until > unix_now()
+        {
+            let mut state = gate.state.lock().expect("rate-limit gate lock");
+            state.open_until =
+                Some(std::time::Instant::now() + Duration::from_secs(until - unix_now()));
+            state.remembered = true;
+        }
+        gate
+    }
+
     fn check(&self) -> Result<()> {
         self.check_at(std::time::Instant::now())
     }
@@ -173,6 +220,16 @@ impl RateLimitGate {
         state.strikes = state.strikes.saturating_add(1);
         let wait = retry_after.unwrap_or_else(|| fallback_cooldown(state.strikes));
         state.open_until = Some(now + wait + jitter);
+        if wait >= REMEMBERED_COOLDOWN
+            && let Some((path, client)) = &self.saved
+        {
+            state.remembered = true;
+            if let Err(error) =
+                std::fs::write(path, format!("{client} {}", unix_now() + wait.as_secs()))
+            {
+                log::warn!("could not remember the Spotify cooldown: {error}");
+            }
+        }
     }
 
     fn reset(&self) {
@@ -185,6 +242,11 @@ impl RateLimitGate {
         // the cooldown must not clear it, or the strikes it earned.
         let cooling = state.open_until.is_some_and(|until| until > now);
         if !cooling {
+            if state.remembered
+                && let Some((path, _)) = &self.saved
+            {
+                let _ = std::fs::remove_file(path);
+            }
             *state = GateState::default();
         }
     }
@@ -329,7 +391,7 @@ impl Spotify {
         Ok(Self {
             client,
             refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
-            gate: Arc::new(RateLimitGate::default()),
+            gate: Arc::new(RateLimitGate::remembering(client_id)),
             top_tracks_unavailable: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -511,8 +573,14 @@ impl Spotify {
                 )
                 .await
                 .context("could not load Spotify top artists")?;
+            // Once Spotify says "slow down", the remaining lookups must not go out.
+            let stopped = AtomicBool::new(false);
+            let stopped = &stopped;
             let results: Vec<Result<Vec<SimplifiedAlbum>>> =
                 futures::stream::iter(artists.items.into_iter().map(|artist| async move {
+                    if stopped.load(Ordering::Relaxed) {
+                        return Ok(Vec::new());
+                    }
                     let page = self
                         .client
                         .artist_albums_manual(
@@ -523,8 +591,13 @@ impl Spotify {
                             Some(0),
                         )
                         .await
-                        .context("could not load Spotify artist releases")?;
-                    Ok(page.items)
+                        .context("could not load Spotify artist releases");
+                    if let Err(error) = &page
+                        && matches!(classify_error(error), ErrorKind::RateLimited { .. })
+                    {
+                        stopped.store(true, Ordering::Relaxed);
+                    }
+                    Ok(page?.items)
                 }))
                 .buffer_unordered(2)
                 .collect()
@@ -533,6 +606,12 @@ impl Spotify {
             let mut first_error = None;
             let mut albums: Vec<Album> = Vec::new();
             for result in results {
+                // A rate limit outranks partial results: the gate must hear it.
+                if let Err(error) = &result
+                    && matches!(classify_error(error), ErrorKind::RateLimited { .. })
+                {
+                    return result.map(|_| Vec::new());
+                }
                 match result {
                     Ok(items) => albums.extend(
                         items
@@ -1845,6 +1924,26 @@ mod tests {
         let images = [image(Some(64), "small"), image(Some(200), "medium")];
 
         assert_eq!(artwork_url(&images).as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn a_long_cooldown_survives_a_restart_for_the_same_app_only() {
+        let path = std::env::temp_dir().join(format!("sonder-gate-{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let gate = super::RateLimitGate::remembering_at(path.clone(), "client-a");
+        gate.trip(Some(std::time::Duration::from_secs(3600)));
+        // A restart reads the saved cooldown back.
+        let restarted = super::RateLimitGate::remembering_at(path.clone(), "client-a");
+        assert!(restarted.check().is_err());
+        // Another Client ID is a different app with its own limit.
+        let other = super::RateLimitGate::remembering_at(path.clone(), "client-b");
+        assert!(other.check().is_ok());
+        // Short cooldowns are not written down.
+        let _ = std::fs::remove_file(&path);
+        super::RateLimitGate::remembering_at(path.clone(), "client-a")
+            .trip(Some(std::time::Duration::from_secs(5)));
+        assert!(!path.exists());
+        let _ = std::fs::remove_file(&path);
     }
 }
 

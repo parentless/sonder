@@ -498,7 +498,13 @@ impl AppServices {
                 cx.background_executor()
                     .timer(LIBRARY_REFRESH_INTERVAL)
                     .await;
-                library.update(cx, |library, cx| library.revalidate(cx));
+                // Nobody is looking while the app sits in the tray; the check
+                // runs when the window comes back.
+                cx.update(|cx| {
+                    if !cx.windows().is_empty() {
+                        library.update(cx, |library, cx| library.revalidate(cx));
+                    }
+                });
             }
         });
         cx.global_mut::<Self>().library_refresh = Some(task);

@@ -4,7 +4,9 @@ use super::*;
 /// on purpose: a revalidation is a two-request head probe unless something
 /// changed, and Spotify's rate limit is a rolling 30-second window. Wall
 /// clock rather than `Instant`, which stops while the machine sleeps.
-const REVALIDATION_DEBOUNCE: Duration = Duration::from_secs(30);
+/// Coming back to the window re-checks the library at most this often; each
+/// check is two Spotify requests.
+const REVALIDATION_DEBOUNCE: Duration = Duration::from_secs(5 * 60);
 
 /// Everything Sonder knows about the listener's music: what Spotify holds for
 /// the account, and what Sonder keeps locally about it.

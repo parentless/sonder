@@ -1,6 +1,6 @@
 [package]
 name = "cadence"
-version = "0.8.27"
+version = "0.8.28"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/parentless/sonder"
