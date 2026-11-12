@@ -10,17 +10,31 @@ use std::time::SystemTime;
 /// Top items drift over weeks, so there is no reason to fetch them often.
 const HOME_STALE_TIME: Duration = Duration::from_secs(30 * 60);
 
+/// One time range's fetched lists, kept so switching back needs no request.
+struct RangeData {
+    artists: Arc<[model::Artist]>,
+    tracks: Arc<[model::Track]>,
+    loaded_at: SystemTime,
+}
+
+impl RangeData {
+    fn is_fresh(&self) -> bool {
+        self.loaded_at
+            .elapsed()
+            .is_ok_and(|elapsed| elapsed < HOME_STALE_TIME)
+    }
+}
+
 pub(super) struct HomePage {
     backend: BackendHandle,
     session: Entity<session::Session>,
     track_list: Entity<track_list::TrackList>,
-    artists: Arc<[model::Artist]>,
-    tracks: Arc<[model::Track]>,
+    range: model::HomeRange,
+    data: [Option<RangeData>; 3],
     loading: bool,
     error: Option<SharedString>,
     /// The saved sign-in lacks the permission to read top items.
     permission_missing: bool,
-    loaded_at: Option<SystemTime>,
     visible: bool,
     request: Option<gpui_kit::Task<()>>,
     scroll: gpui_kit::ScrollHandle,
@@ -43,12 +57,11 @@ impl HomePage {
             backend,
             session,
             track_list,
-            artists: Arc::default(),
-            tracks: Arc::default(),
+            range: model::HomeRange::default(),
+            data: [None, None, None],
             loading: false,
             error: None,
             permission_missing: false,
-            loaded_at: None,
             visible: false,
             request: None,
             scroll: gpui_kit::ScrollHandle::new(),
@@ -74,11 +87,9 @@ impl HomePage {
     fn reset(&mut self, cx: &mut Context<Self>) {
         self.request = None;
         self.loading = false;
-        self.artists = Arc::default();
-        self.tracks = Arc::default();
+        self.data = [None, None, None];
         self.error = None;
         self.permission_missing = false;
-        self.loaded_at = None;
         self.track_list.update(cx, |list, cx| list.clear(cx));
         cx.notify();
     }
@@ -93,12 +104,31 @@ impl HomePage {
             self.track_list.update(cx, |list, cx| list.clear(cx));
             return;
         }
-        let fresh = self
-            .loaded_at
-            .is_some_and(|at| at.elapsed().is_ok_and(|elapsed| elapsed < HOME_STALE_TIME));
+        self.load_if_needed(cx);
+    }
+
+    fn current(&self) -> Option<&RangeData> {
+        self.data[self.range.index()].as_ref()
+    }
+
+    fn load_if_needed(&mut self, cx: &mut Context<Self>) {
+        let fresh = self.current().is_some_and(RangeData::is_fresh);
         if !fresh && !self.loading && !self.permission_missing {
             self.load(cx);
         }
+    }
+
+    fn select_range(&mut self, range: model::HomeRange, cx: &mut Context<Self>) {
+        if range == self.range {
+            return;
+        }
+        self.range = range;
+        self.error = None;
+        // A request for the previous range is no longer wanted.
+        self.request = None;
+        self.loading = false;
+        self.load_if_needed(cx);
+        cx.notify();
     }
 
     pub(super) fn close_menus(&mut self, cx: &mut Context<Self>) {
@@ -108,7 +138,9 @@ impl HomePage {
     fn load(&mut self, cx: &mut Context<Self>) {
         self.loading = true;
         self.error = None;
-        let reply = catalog::request(&self.backend, |respond| BackendCommand::LoadHome {
+        let range = self.range;
+        let reply = catalog::request(&self.backend, move |respond| BackendCommand::LoadHome {
+            range,
             respond,
         });
         self.request = Some(cx.spawn(async move |this, cx| {
@@ -120,9 +152,11 @@ impl HomePage {
                     Ok(mut home) => {
                         home.artists.truncate(model::HOME_ARTIST_LIMIT);
                         home.tracks.truncate(model::HOME_TRACK_LIMIT);
-                        page.artists = home.artists.into();
-                        page.tracks = home.tracks.into();
-                        page.loaded_at = Some(SystemTime::now());
+                        page.data[range.index()] = Some(RangeData {
+                            artists: home.artists.into(),
+                            tracks: home.tracks.into(),
+                            loaded_at: SystemTime::now(),
+                        });
                         page.error = None;
                         cx.emit(PageEvent::Loaded);
                     }
@@ -141,9 +175,13 @@ impl HomePage {
         cx.notify();
     }
 
-    fn artist_card(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn artist_card(
+        &self,
+        artist: &model::Artist,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let palette = appearance::Appearance::palette(cx);
-        let artist = &self.artists[index];
         let cache = services::AppServices::image_cache(cx);
         components::button(palette, ("home-artist", index))
             .test_support()
@@ -189,7 +227,7 @@ impl HomePage {
             )
             // Capture just the index, resolving the current data on activation.
             .on_click(cx.listener(move |this, _, _, cx| {
-                if let Some(artist) = this.artists.get(index) {
+                if let Some(artist) = this.current().and_then(|data| data.artists.get(index)) {
                     cx.emit(PageEvent::OpenArtist(model::ArtistRef {
                         name: artist.name.clone(),
                         source_id: Some(artist.source_id.clone()),
@@ -198,6 +236,24 @@ impl HomePage {
                 }
             }))
             .into_any_element()
+    }
+
+    /// Last 4 weeks, 6 months or all time; the chosen one is filled.
+    fn range_chips(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
+        let mut chips = div().mt_4().flex().flex_wrap().gap_2();
+        for range in model::HomeRange::ALL {
+            chips = chips.child(
+                components::pill(
+                    palette,
+                    ("home-range", range.index()),
+                    range.label(),
+                    range == self.range,
+                )
+                .test_support()
+                .on_click(cx.listener(move |this, _, _, cx| this.select_range(range, cx))),
+            );
+        }
+        chips
     }
 
     fn permission_prompt(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
@@ -247,7 +303,11 @@ impl Render for HomePage {
                 .text_color(rgb(palette.text_primary))
                 .child(text)
         };
-        let loaded = self.loaded_at.is_some();
+        let (artists, tracks) = self
+            .current()
+            .map(|data| (data.artists.clone(), data.tracks.clone()))
+            .unwrap_or_default();
+        let loaded = self.current().is_some();
         let content = if self.permission_missing {
             self.permission_prompt(palette, cx)
         } else if self.error.is_some() && !loaded {
@@ -257,34 +317,34 @@ impl Render for HomePage {
             ))
         } else if !loaded {
             div().child(components::list_skeleton_rows(palette, 4))
-        } else if self.artists.is_empty() && self.tracks.is_empty() {
+        } else if artists.is_empty() && tracks.is_empty() {
             div().child(components::empty_state(
                 palette,
                 "Listen to more music and your top artists and tracks will show up here",
             ))
         } else {
-            let mut artists = div().flex().flex_wrap().gap_4();
-            for index in 0..self.artists.len() {
-                artists = artists.child(self.artist_card(index, cx));
+            let mut cards = div().flex().flex_wrap().gap_4();
+            for (index, artist) in artists.iter().enumerate() {
+                cards = cards.child(self.artist_card(artist, index, cx));
             }
             self.track_list.update(cx, |list, cx| {
-                list.show("home-tracks", self.tracks.clone(), cx);
+                list.show(("home-tracks", self.range.index()), tracks.clone(), cx);
             });
             div()
                 .flex()
                 .flex_col()
                 .gap_6()
-                .when(!self.artists.is_empty(), |content| {
+                .when(!artists.is_empty(), |content| {
                     content.child(
                         div()
                             .flex()
                             .flex_col()
                             .gap_3()
                             .child(heading("home-artists-heading", "Your top artists"))
-                            .child(artists),
+                            .child(cards),
                     )
                 })
-                .when(!self.tracks.is_empty(), |content| {
+                .when(!tracks.is_empty(), |content| {
                     content.child(
                         div()
                             .flex()
@@ -319,7 +379,10 @@ impl Render for HomePage {
                                 "Home",
                                 "Based on what you play most",
                             ))
-                            .child(div().mt_4().child(content)),
+                            .when(!self.permission_missing, |page| {
+                                page.child(self.range_chips(palette, cx))
+                            })
+                            .child(div().mt_5().child(content)),
                     ),
             )
     }

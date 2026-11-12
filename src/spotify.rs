@@ -443,9 +443,15 @@ impl Spotify {
         .await
     }
 
-    /// The listener's most played artists and tracks over roughly six months.
+    /// The listener's most played artists and tracks over `range`.
     /// Two small requests, made only when the Home page asks.
-    pub async fn home(&self) -> Result<crate::model::HomeData> {
+    pub async fn home(&self, range: crate::model::HomeRange) -> Result<crate::model::HomeData> {
+        use crate::model::HomeRange;
+        let range = match range {
+            HomeRange::Weeks => TimeRange::ShortTerm,
+            HomeRange::Months => TimeRange::MediumTerm,
+            HomeRange::AllTime => TimeRange::LongTerm,
+        };
         self.gated(async {
             let authorized = self
                 .client
@@ -460,12 +466,12 @@ impl Spotify {
             }
             let (artists, tracks) = futures::try_join!(
                 self.client.current_user_top_artists_manual(
-                    Some(TimeRange::MediumTerm),
+                    Some(range),
                     Some(crate::model::HOME_ARTIST_LIMIT as u32),
                     Some(0),
                 ),
                 self.client.current_user_top_tracks_manual(
-                    Some(TimeRange::MediumTerm),
+                    Some(range),
                     Some(crate::model::HOME_TRACK_LIMIT as u32),
                     Some(0),
                 ),

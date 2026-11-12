@@ -196,6 +196,38 @@ pub const HOME_TRACK_LIMIT: usize = 20;
 pub const SEARCH_ALBUM_LIMIT: usize = 4;
 pub const SEARCH_TRACK_LIMIT: usize = 5;
 
+/// How far back Home looks. Spotify names these short, medium and long term.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum HomeRange {
+    /// About the last four weeks.
+    Weeks,
+    /// About the last six months.
+    #[default]
+    Months,
+    /// Everything Spotify has on record.
+    AllTime,
+}
+
+impl HomeRange {
+    pub const ALL: [Self; 3] = [Self::Weeks, Self::Months, Self::AllTime];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Weeks => "Last 4 weeks",
+            Self::Months => "Last 6 months",
+            Self::AllTime => "All time",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Weeks => 0,
+            Self::Months => 1,
+            Self::AllTime => 2,
+        }
+    }
+}
+
 /// What the Home page shows: the listener's most played artists and tracks.
 #[derive(Debug, Default)]
 pub struct HomeData {

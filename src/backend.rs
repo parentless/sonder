@@ -312,6 +312,7 @@ pub enum BackendCommand {
         respond: Reply<LibraryReload>,
     },
     LoadHome {
+        range: crate::model::HomeRange,
         respond: Reply<crate::model::HomeData>,
     },
     SearchCatalog {
@@ -1282,8 +1283,8 @@ impl Worker {
                 self.reload_library(respond);
                 Ok(())
             }
-            BackendCommand::LoadHome { respond } => {
-                self.catalog.home(self.spotify.clone(), respond);
+            BackendCommand::LoadHome { range, respond } => {
+                self.catalog.home(self.spotify.clone(), range, respond);
                 Ok(())
             }
             BackendCommand::SearchCatalog { query, respond } => {
@@ -2615,9 +2616,14 @@ impl CatalogFetches {
         ));
     }
 
-    fn home(&mut self, spotify: Spotify, respond: Reply<crate::model::HomeData>) {
+    fn home(
+        &mut self,
+        spotify: Spotify,
+        range: crate::model::HomeRange,
+        respond: Reply<crate::model::HomeData>,
+    ) {
         Self::start(&mut self.home, respond, "Spotify top items", async move {
-            spotify.home().await
+            spotify.home(range).await
         });
     }
 

@@ -343,7 +343,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 }
                 Scene::Home | Scene::HomePermission => {
                     workspace.navigate(Route::Home, cx);
-                    let BackendCommand::LoadHome { respond } = backend.commands.try_recv().unwrap() else { panic!("home request") };
+                    let BackendCommand::LoadHome { respond, .. } = backend.commands.try_recv().unwrap() else { panic!("home request") };
                     if matches!(scene, Scene::HomePermission) {
                         respond.send(Err(model::HomePermissionMissing.into())).unwrap();
                     } else {

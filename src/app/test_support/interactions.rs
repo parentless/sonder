@@ -3550,7 +3550,8 @@ fn home_loads_top_items_once_when_opened_and_opens_an_artist() {
     let mut fixture = Fixture::new(false);
     fixture.no_commands();
     fixture.update(|window, cx| window.click("nav-home", cx));
-    let BackendCommand::LoadHome { respond } = fixture.backend.commands.try_recv().unwrap() else {
+    let BackendCommand::LoadHome { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
         panic!("expected a Home request")
     };
     respond
@@ -3575,10 +3576,39 @@ fn home_loads_top_items_once_when_opened_and_opens_an_artist() {
 }
 
 #[test]
+fn home_time_ranges_load_once_each_and_are_remembered() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|window, cx| window.click("nav-home", cx));
+    let reply = |fixture: &mut Fixture, expected: model::HomeRange| {
+        let BackendCommand::LoadHome { range, respond } =
+            fixture.backend.commands.try_recv().unwrap()
+        else {
+            panic!("expected a Home request")
+        };
+        assert_eq!(range, expected);
+        respond.send(Ok(model::HomeData::default())).unwrap();
+    };
+    reply(&mut fixture, model::HomeRange::Months);
+    fixture.update(|_, _| {});
+    fixture.update(|window, cx| window.click(("home-range", 0usize), cx));
+    reply(&mut fixture, model::HomeRange::Weeks);
+    fixture.update(|_, _| {});
+    fixture.update(|window, cx| window.click(("home-range", 2usize), cx));
+    reply(&mut fixture, model::HomeRange::AllTime);
+    fixture.update(|_, _| {});
+    // Every range is now cached, so moving between them asks for nothing.
+    for index in [1usize, 0, 2, 1] {
+        fixture.update(|window, cx| window.click(("home-range", index), cx));
+        fixture.no_commands();
+    }
+}
+
+#[test]
 fn home_asks_for_a_new_sign_in_when_the_permission_is_missing() {
     let mut fixture = Fixture::new(false);
     fixture.update(|window, cx| window.click("nav-home", cx));
-    let BackendCommand::LoadHome { respond } = fixture.backend.commands.try_recv().unwrap() else {
+    let BackendCommand::LoadHome { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
         panic!("expected a Home request")
     };
     respond
