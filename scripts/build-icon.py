@@ -14,6 +14,11 @@ RADIUS = 232
 # A brushed-chrome rim: bright at the top left, a dark band through the middle
 # and a second highlight at the bottom right (position 0..1 along the diagonal).
 CHROME_WIDTH = 10
+# At small sizes the rim is widened to at least this many output pixels.
+MIN_RIM_PX = 1.5
+# The sidebar mark is drawn near its display size with a firmer rim.
+MARK_SIZE = 96
+MARK_RIM_PX = 3
 CHROME = [(0.0, (252, 253, 255)), (0.22, (160, 166, 175)), (0.45, (74, 78, 86)),
           (0.62, (150, 156, 165)), (0.82, (236, 239, 243)), (1.0, (112, 117, 126))]
 RINGS = [(138, 0.85), (235, 0.55), (331, 0.30)]  # (radius, opacity)
@@ -21,7 +26,7 @@ RING_WIDTH = 46
 DOT = 56
 
 
-def coverage_pixel(x, y):
+def coverage_pixel(x, y, chrome_width):
     """Returns (r, g, b, a) in 0..1 for a point on the 1024 grid."""
     # Signed distance to the rounded square: negative inside.
     qx = abs(x - 512) - (512 - RADIUS)
@@ -29,7 +34,7 @@ def coverage_pixel(x, y):
     edge = math.hypot(max(qx, 0), max(qy, 0)) + min(max(qx, qy), 0) - RADIUS
     if edge > 0:
         return (0, 0, 0, 0)
-    if -edge < CHROME_WIDTH:
+    if -edge < chrome_width:
         t = min(max((x + y) / 2048, 0), 1)
         for (a, ca), (b, cb) in zip(CHROME, CHROME[1:]):
             if t <= b:
@@ -46,9 +51,13 @@ def coverage_pixel(x, y):
     return tuple((TILE[i] * (1 - ink) + INK[i] * ink) / 255 for i in range(3)) + (1.0,)
 
 
-def render(size):
-    ss = 4 if size <= 256 else 2
+def render(size, rim_px=None):
+    """Draws the icon at `size` px. The chrome rim is about one thousandth of
+    the icon at full size, which would be a blur at small sizes, so it never
+    gets thinner than `rim_px` real pixels (1.5 by default)."""
     scale = 1024 / size
+    chrome_width = max(CHROME_WIDTH, (rim_px or MIN_RIM_PX) * scale)
+    ss = 4 if size <= 256 else 2
     rows = []
     for py in range(size):
         row = bytearray()
@@ -57,7 +66,9 @@ def render(size):
             for sy in range(ss):
                 for sx in range(ss):
                     pr, pg, pb, pa = coverage_pixel(
-                        (px + (sx + 0.5) / ss) * scale, (py + (sy + 0.5) / ss) * scale
+                        (px + (sx + 0.5) / ss) * scale,
+                        (py + (sy + 0.5) / ss) * scale,
+                        chrome_width,
                     )
                     r += pr * pa; g += pg * pa; b += pb * pa; a += pa
             n = ss * ss
@@ -111,7 +122,9 @@ def main():
         out += struct.pack("<BBBBHHII", s % 256, s % 256, 0, 0, 1, 32, len(data), offset + len(body))
         body += data
     open(os.path.join(assets, "AppIcon.ico"), "wb").write(out + body)
-    open(os.path.join(assets, "sonder-mark.png"), "wb").write(get(128))
+    open(os.path.join(assets, "sonder-mark.png"), "wb").write(
+        png(MARK_SIZE, render(MARK_SIZE, MARK_RIM_PX))
+    )
 
     if sys.platform == "darwin":
         with tempfile.TemporaryDirectory() as work:
