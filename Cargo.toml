@@ -49,7 +49,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphic
 [build-dependencies]
 embed-resource = "3"
 # librespot 0.8's build script is incompatible with vergen 9.1.
-vergen = "=9.0.6"
+vergen = "=10.0.3"
 
 [dev-dependencies]
 gpui-kit = { version = "0.7.0", features = ["test-support"] }
