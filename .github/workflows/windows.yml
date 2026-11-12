@@ -60,10 +60,9 @@ jobs:
         run: ./scripts/package-windows.ps1
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: cadence-windows-x86_64
+          name: sonder-windows-x86_64
           path: |
             dist/*.exe
-            dist/*.zip
             dist/*.sha256
           if-no-files-found: error
           retention-days: 14

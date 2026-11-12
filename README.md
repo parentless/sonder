@@ -23,8 +23,8 @@ and author attribution are preserved. macOS source support remains available.
 
 ## Windows downloads and updates
 
-Download the optimized Windows x86-64 [Cadence.exe](https://github.com/parentless/cadence-for-windows/releases/latest/download/Cadence.exe)
-or get the portable ZIP from [Releases](https://github.com/parentless/cadence-for-windows/releases/latest). These are release builds with thin LTO, an embedded C runtime,
+Download the optimized Windows x86-64 [Sonder.exe](https://github.com/parentless/sonder/releases/latest/download/Sonder.exe)
+from [Releases](https://github.com/parentless/sonder/releases/latest). It is a release build with thin LTO, an embedded C runtime,
 assets and precompiled GPUI shaders. The target computer needs no Rust toolchain
 or Spotify desktop app. Spotify Premium and your own Spotify developer Client
 ID are required; the app guides you through setup.
@@ -35,7 +35,7 @@ downloads and verifies the new executable, then restarts Sonder to replace it.
 Automatic checks can be disabled. Keep Sonder in a writable directory such as
 `%LOCALAPPDATA%\Programs\Sonder`. Debug builds do not self-update.
 
-Every push to `main` builds an optimized EXE/ZIP in Actions. Bumping `version`
+Every push to `main` builds an optimized `Sonder.exe` in Actions. Bumping `version`
 in `Cargo.toml` and its `Cargo.lock` package entry publishes a new stable
 `vMAJOR.MINOR.PATCH` release automatically after Windows checks pass. Re-pushing
 the same version keeps its published release immutable and leaves fresh build
@@ -85,7 +85,7 @@ through CPAL, rspotify connects to the Spotify Web API, and SQLite keeps local s
 ## Install
 
 For Windows, see [Windows build and installation instructions](docs/WINDOWS.md).
-The **Windows** Actions workflow produces a portable `.exe` and release zip;
+The **Windows** Actions workflow produces a portable `Sonder.exe`;
 this fork preserves the Rust, GPUI, librespot, and CPAL architecture.
 
 ### macOS

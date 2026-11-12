@@ -1,9 +1,9 @@
 [package]
 name = "cadence"
-version = "0.8.22"
+version = "0.8.23"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/parentless/cadence-for-windows"
+repository = "https://github.com/parentless/sonder"
 description = "A native Rust and GPUI Spotify client for Windows and macOS"
 rust-version = "1.97"
 

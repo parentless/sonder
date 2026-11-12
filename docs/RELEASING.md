@@ -3,7 +3,7 @@
 The `Windows release` workflow runs for pushes to `main`, `v*` tags, and manual
 runs. It calls the Windows build workflow, which tests on Windows, runs Clippy
 and formatting checks, then uses `cargo build --release --locked` and packages
-an EXE, ZIP, and SHA-256 files. The GitHub repository name is embedded as the
+`Sonder.exe` and its SHA-256 file. The GitHub repository name is embedded as the
 update feed with `CADENCE_UPDATE_REPOSITORY=${{ github.repository }}`.
 
 ## Publish a version
@@ -14,7 +14,7 @@ update feed with `CADENCE_UPDATE_REPOSITORY=${{ github.repository }}`.
 3. The publisher creates `vMAJOR.MINOR.PATCH` at that commit. It uploads assets
    to a draft first and publishes only after uploads finish. Failed draft
    uploads can be retried by rerunning the workflow.
-4. Download the public EXE or ZIP from Releases and test playback, Discord,
+4. Download `Sonder.exe` from Releases and test playback, Discord,
    settings, system media controls, and in-app update installation on Windows.
 
 Published versions are not overwritten on subsequent pushes. Increase the
@@ -22,12 +22,10 @@ version to ship another update. Every successful build still has optimized
 artifacts attached to its Actions run. When tagging manually, the tag must
 match the Cargo version; do not publish a competing release by hand.
 
-Keep old public GitHub releases for users and rollback. Local packaging clears
-superseded Windows files in `dist` only after generating a replacement.
+Keep old public GitHub releases for users and rollback.
 
-The standalone download and executable inside the ZIP are named `Cadence.exe`.
-A versioned executable alias and checksum remain available for older installed
-updaters. Both executables contain identical optimized bytes.
+Each release carries exactly two files: `Sonder.exe` and `Sonder.exe.sha256`.
+macOS builds will be added to the same releases later.
 
 ## In-app updater
 
@@ -45,7 +43,7 @@ checksum text at 1 KiB, and executable downloads at 300 MiB.
 After verification, a short-lived PowerShell helper waits for normal shutdown,
 keeps a rollback executable while replacing it, restarts Sonder, and cleans
 up. Installation needs a writable app folder. A system policy that disables
-PowerShell can prevent installation; a portable ZIP remains available.
+PowerShell can prevent installation; replacing the executable manually remains available.
 
 The repository's normal `GITHUB_TOKEN` publishes releases; no token is embedded
 in the app. Enable GitHub Actions in the public repository. The workflow grants

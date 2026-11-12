@@ -12,6 +12,8 @@ use serde::Deserialize;
 
 const METADATA_LIMIT: usize = 1024 * 1024;
 const CHECKSUM_LIMIT: usize = 1024;
+/// The only Windows asset a release carries, next to its `.sha256`.
+const EXECUTABLE: &str = "Sonder.exe";
 
 #[derive(Clone, Debug)]
 pub(crate) struct Release {
@@ -68,30 +70,15 @@ fn release_assets(
     if newest <= version(current).context("invalid installed version")? {
         return Ok(None);
     }
-    let legacy_name = format!(
-        "cadence-{}-windows-x86_64.exe",
-        release
-            .tag_name
-            .strip_prefix('v')
-            .unwrap_or(&release.tag_name)
-    );
-    // Prefer the portable download name, retaining old-release compatibility.
-    let name = if release
-        .assets
-        .iter()
-        .any(|asset| asset.name == "Cadence.exe")
-    {
-        "Cadence.exe".to_owned()
-    } else {
-        legacy_name
-    };
+    // Each release publishes one standalone executable and its checksum.
+    let name = EXECUTABLE;
     let url = format!(
         "https://github.com/{repository}/releases/download/{}/{name}",
         release.tag_name
     );
     let checksum_url = format!("{url}.sha256");
     for (name, expected) in [
-        (name.clone(), &url),
+        (name.to_owned(), &url),
         (format!("{name}.sha256"), &checksum_url),
     ] {
         let asset = release
@@ -176,30 +163,23 @@ mod tests {
     use super::*;
     fn metadata() -> serde_json::Value {
         serde_json::json!({"tag_name":"v0.9.0", "assets":[
-            {"name":"cadence-0.9.0-windows-x86_64.exe", "browser_download_url":"https://github.com/owner/cadence-for-windows/releases/download/v0.9.0/cadence-0.9.0-windows-x86_64.exe"},
-            {"name":"cadence-0.9.0-windows-x86_64.exe.sha256", "browser_download_url":"https://github.com/owner/cadence-for-windows/releases/download/v0.9.0/cadence-0.9.0-windows-x86_64.exe.sha256"}
+            {"name":"Sonder.exe", "browser_download_url":"https://github.com/owner/sonder/releases/download/v0.9.0/Sonder.exe"},
+            {"name":"Sonder.exe.sha256", "browser_download_url":"https://github.com/owner/sonder/releases/download/v0.9.0/Sonder.exe.sha256"}
         ]})
     }
     #[test]
-    fn portable_asset_is_preferred_and_validated_even_with_legacy_aliases() {
+    fn the_executable_and_its_checksum_are_validated() {
         let mut value = metadata();
-        let assets = value["assets"].as_array_mut().unwrap();
-        for name in ["Cadence.exe", "Cadence.exe.sha256"] {
-            assets.push(serde_json::json!({"name":name, "browser_download_url":format!("https://github.com/owner/cadence-for-windows/releases/download/v0.9.0/{name}")}));
-        }
         let (_, url, checksum) = parse(value.clone(), "0.8.12").unwrap().unwrap();
-        assert!(url.ends_with("/Cadence.exe"));
-        assert!(checksum.ends_with("/Cadence.exe.sha256"));
-        value["assets"][2]["browser_download_url"] = "https://evil.invalid/Cadence.exe".into();
+        assert!(url.ends_with("/Sonder.exe"));
+        assert!(checksum.ends_with("/Sonder.exe.sha256"));
+        value["assets"][1]["browser_download_url"] =
+            "https://evil.invalid/Sonder.exe.sha256".into();
         assert!(parse(value, "0.8.12").is_err());
     }
 
     fn parse(value: serde_json::Value, current: &str) -> Result<Option<(String, String, String)>> {
-        release_assets(
-            &serde_json::to_vec(&value)?,
-            "owner/cadence-for-windows",
-            current,
-        )
+        release_assets(&serde_json::to_vec(&value)?, "owner/sonder", current)
     }
     #[test]
     fn stable_updates_are_numeric_and_never_downgrade() {
@@ -222,7 +202,7 @@ mod tests {
             "https://github.com/another/repository/releases/download/v0.9.0/evil.exe".into();
         assert!(parse(value, "0.8.0").is_err());
         let mut value = metadata();
-        value["assets"][0]["name"] = "cadence-0.9.0-windows-x86_64-debug.exe".into();
+        value["assets"][0]["name"] = "Sonder-debug.exe".into();
         assert!(parse(value, "0.8.0").is_err());
         let mut value = metadata();
         value["assets"] = serde_json::json!([]);
