@@ -550,6 +550,22 @@ impl TrackList {
             .child(
                 components::text_menu_item(
                     palette,
+                    ("track-menu-copy-link", index),
+                    "Copy Spotify link",
+                )
+                .test_support()
+                .on_click(cx.listener({
+                    let url = track_url.clone();
+                    move |this, _, _, cx| {
+                        this.menu_open = None;
+                        cx.write_to_clipboard(super::ClipboardItem::new_string(url.clone()));
+                        cx.notify();
+                    }
+                })),
+            )
+            .child(
+                components::text_menu_item(
+                    palette,
                     ("track-menu-spotify", index),
                     "Open track in Spotify",
                 )

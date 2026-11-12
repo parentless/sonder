@@ -3689,3 +3689,16 @@ fn home_asks_for_a_new_sign_in_when_the_permission_is_missing() {
     fixture.update(|window, cx| window.click("nav-home", cx));
     fixture.no_commands();
 }
+
+#[test]
+fn track_menu_copies_the_spotify_link() {
+    let mut fixture = Fixture::new(false);
+    fixture.right_click_track(0);
+    fixture.update(|window, cx| window.click(("track-menu-copy-link", 0usize), cx));
+    fixture.update(|_, cx| {
+        let copied = cx.read_from_clipboard().and_then(|item| item.text());
+        let expected = format!("https://open.spotify.com/track/{}", track(0).source_id);
+        assert_eq!(copied.as_deref(), Some(expected.as_str()));
+    });
+    fixture.no_commands();
+}
