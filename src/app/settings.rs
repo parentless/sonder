@@ -233,7 +233,7 @@ impl Settings {
                             .child(Self::settings_section_header(
                                 palette,
                                 "Playback",
-                                "Control playback behavior and player-bar extras.",
+                                "Control how playback behaves.",
                             ))
                             .child(
                                 div()
