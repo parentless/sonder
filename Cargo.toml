@@ -1,6 +1,6 @@
 [package]
 name = "cadence"
-version = "0.8.28"
+version = "0.8.29"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/parentless/sonder"
@@ -17,7 +17,8 @@ directories = "6.0"
 env_logger = "0.11"
 futures = "0.3"
 gpui-kit = "0.7.0"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+ab_glyph = "0.2"
 keyring = "4.1"
 md-5 = "0.10"
 librespot = { version = "0.8.0", default-features = false, features = ["native-tls"] }

@@ -25,6 +25,10 @@ use crate::{
 const CATALOG_TIMEOUT_SECONDS: u64 = 30;
 /// How long a saved "new from your top artists" answer is reused.
 const NEW_RELEASES_CACHE_SECONDS: u64 = 12 * 60 * 60;
+/// Top artists and tracks move slowly, so a launch reuses the last answer.
+const HOME_CACHE_SECONDS: u64 = 6 * 60 * 60;
+/// Announced releases change daily at most.
+const UPCOMING_CACHE_SECONDS: u64 = 24 * 60 * 60;
 const LIBRARY_TIMEOUT_SECONDS: u64 = 60;
 const COMMAND_CAPACITY: usize = 256;
 const CONTROL_CAPACITY: usize = 8;
@@ -120,6 +124,15 @@ impl BlockingStore {
             ))
         })
         .await
+    }
+
+    async fn cached_json(&self, key: String) -> Result<Option<(u64, String)>> {
+        self.call(move |store| store.cached_json(&key)).await
+    }
+
+    async fn set_cached_json(&self, key: String, json: String) -> Result<()> {
+        self.call(move |store| store.set_cached_json(&key, &json))
+            .await
     }
 
     async fn new_releases_cache(&self) -> Result<Option<(u64, Vec<Album>)>> {
@@ -1301,7 +1314,8 @@ impl Worker {
                 Ok(())
             }
             BackendCommand::LoadHome { range, respond } => {
-                self.catalog.home(self.spotify.clone(), range, respond);
+                self.catalog
+                    .home(self.spotify.clone(), self.store.clone(), range, respond);
                 Ok(())
             }
             BackendCommand::LoadNewReleases { respond } => {
@@ -1310,7 +1324,8 @@ impl Worker {
                 Ok(())
             }
             BackendCommand::LoadUpcoming { respond } => {
-                self.catalog.upcoming(self.spotify.clone(), respond);
+                self.catalog
+                    .upcoming(self.spotify.clone(), self.store.clone(), respond);
                 Ok(())
             }
             BackendCommand::SearchCatalog { query, respond } => {
@@ -2647,11 +2662,21 @@ impl CatalogFetches {
     fn home(
         &mut self,
         spotify: Spotify,
+        store: BlockingStore,
         range: crate::model::HomeRange,
         respond: Reply<crate::model::HomeData>,
     ) {
+        use crate::model::HomeRange;
+        let key = format!(
+            "home-{}",
+            match range {
+                HomeRange::Weeks => "weeks",
+                HomeRange::Months => "months",
+                HomeRange::AllTime => "all-time",
+            }
+        );
         Self::start(&mut self.home, respond, "Spotify top items", async move {
-            spotify.home(range).await
+            saved_or_fetch(&store, key, HOME_CACHE_SECONDS, spotify.home(range)).await
         });
     }
 
@@ -2692,7 +2717,12 @@ impl CatalogFetches {
         );
     }
 
-    fn upcoming(&mut self, spotify: Spotify, respond: Reply<Vec<crate::model::UpcomingRelease>>) {
+    fn upcoming(
+        &mut self,
+        spotify: Spotify,
+        store: BlockingStore,
+        respond: Reply<Vec<crate::model::UpcomingRelease>>,
+    ) {
         // MusicBrainz allows one request a second, so a sweep outlasts the
         // catalog timeout; it keeps partial results and bounds itself instead.
         abort_task(&mut self.upcoming);
@@ -2702,7 +2732,13 @@ impl CatalogFetches {
                 biased;
                 _ = respond.closed() => {}
                 result = run_with_timeout(90, "announced releases", async move {
-                    spotify.upcoming_from_top_artists().await
+                    saved_or_fetch(
+                        &store,
+                        "upcoming".to_owned(),
+                        UPCOMING_CACHE_SECONDS,
+                        spotify.upcoming_from_top_artists(),
+                    )
+                    .await
                 }) => {
                     let _ = respond.send(result);
                 }
@@ -2979,6 +3015,57 @@ async fn receive_shutdown_acknowledgment(
     None
 }
 
+/// Answers from the saved copy while it is fresh, otherwise asks and saves.
+/// When asking fails (rate limited, offline) an older saved copy still beats an
+/// error, except a missing permission, which the page must be told about.
+async fn saved_or_fetch<T>(
+    store: &BlockingStore,
+    key: String,
+    max_age_seconds: u64,
+    fetch: impl std::future::Future<Output = Result<T>>,
+) -> Result<T>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    let saved = store.cached_json(key.clone()).await.ok().flatten();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let saved: Option<(u64, T)> =
+        saved.and_then(|(saved_at, json)| Some((saved_at, serde_json::from_str(&json).ok()?)));
+    if saved
+        .as_ref()
+        .is_some_and(|(saved_at, _)| now.saturating_sub(*saved_at) < max_age_seconds)
+        && let Some((_, value)) = saved
+    {
+        return Ok(value);
+    }
+    match fetch.await {
+        Ok(value) => {
+            if let Ok(json) = serde_json::to_string(&value)
+                && let Err(error) = store.set_cached_json(key, json).await
+            {
+                log::warn!("could not save an answer: {error:#}");
+            }
+            Ok(value)
+        }
+        Err(error)
+            if error
+                .downcast_ref::<crate::model::HomePermissionMissing>()
+                .is_some() =>
+        {
+            Err(error)
+        }
+        Err(error) => match saved {
+            Some((_, value)) => {
+                log::warn!("using a saved answer: {error:#}");
+                Ok(value)
+            }
+            None => Err(error),
+        },
+    }
+}
+
 async fn load_library(spotify: &Spotify) -> Result<(Vec<Track>, Vec<Playlist>)> {
     tokio::try_join!(spotify.liked_tracks(), spotify.playlists())
 }
@@ -3045,7 +3132,9 @@ fn spawn_library_load(
         };
         let library_load = async {
             let library = tokio::time::timeout(
-                Duration::from_secs(60),
+                // Paced at a few requests a second, a very large library takes
+                // minutes; the walk must not be cut short and started again.
+                Duration::from_secs(900),
                 probe_and_load_library(&spotify, &fingerprint),
             )
             .await;

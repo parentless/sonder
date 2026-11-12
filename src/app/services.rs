@@ -203,6 +203,28 @@ impl AppServices {
         }
     }
 
+    pub(super) fn load_album_review(
+        album_id: &str,
+        cx: &App,
+    ) -> Option<crate::storage::AlbumReview> {
+        cx.global::<Self>()
+            .store
+            .as_ref()
+            .and_then(|store| store.album_review(album_id).ok().flatten())
+    }
+
+    pub(super) fn save_album_review(
+        album_id: &str,
+        review: &crate::storage::AlbumReview,
+        cx: &mut App,
+    ) {
+        if let Some(store) = cx.global_mut::<Self>().store.as_mut()
+            && let Err(error) = store.set_album_review(album_id, review)
+        {
+            log::warn!("could not save the album review: {error}");
+        }
+    }
+
     pub(super) fn discord_config(cx: &App) -> &crate::discord::Config {
         &cx.global::<Self>().discord_config
     }

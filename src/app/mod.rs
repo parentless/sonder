@@ -370,6 +370,8 @@ mod playback_clock;
 mod player;
 mod player_bar;
 mod release_watch;
+mod review;
+mod review_image;
 mod router;
 mod scrubber;
 mod services;

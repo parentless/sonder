@@ -208,7 +208,7 @@ pub const UPCOMING_ARTISTS: usize = 10;
 pub const UPCOMING_LIMIT: usize = 8;
 
 /// A release that is announced but not out yet.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct UpcomingRelease {
     pub artist: String,
     pub title: String,
@@ -251,7 +251,7 @@ impl HomeRange {
 }
 
 /// What the Home page shows: the listener's most played artists and tracks.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct HomeData {
     pub artists: Vec<Artist>,
     pub tracks: Vec<Track>,

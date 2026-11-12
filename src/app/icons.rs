@@ -37,11 +37,14 @@ pub(super) enum CadenceIcon {
     Moon,
     Copy,
     ArrowUpRight,
+    Star,
+    StarFilled,
+    Lock,
 }
 
 impl CadenceIcon {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 31] = [
+    pub(super) const ALL: [Self; 34] = [
         Self::Home,
         Self::HomeFilled,
         Self::Heart,
@@ -73,6 +76,9 @@ impl CadenceIcon {
         Self::Moon,
         Self::Copy,
         Self::ArrowUpRight,
+        Self::Star,
+        Self::StarFilled,
+        Self::Lock,
     ];
 
     fn file_name(self) -> &'static str {
@@ -108,6 +114,9 @@ impl CadenceIcon {
             Self::Moon => "moon",
             Self::Copy => "copy",
             Self::ArrowUpRight => "arrow-up-right",
+            Self::Star => "star",
+            Self::StarFilled => "star-filled",
+            Self::Lock => "lock",
         }
     }
 }

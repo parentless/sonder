@@ -35,6 +35,19 @@ where
 }
 
 /// Search results for the current query.
+/// How long an answered search is shown again, instead of asked again, when
+/// the same query is submitted. Typing never searches Spotify; only Return does.
+const SEARCH_REUSE_WINDOW: Duration = Duration::from_secs(5 * 60);
+
+/// Which results the search page shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SearchFilter {
+    All,
+    Songs,
+    Artists,
+    Albums,
+}
+
 pub(super) struct SearchPage {
     backend: BackendHandle,
     query: String,
@@ -48,6 +61,9 @@ pub(super) struct SearchPage {
     searching: bool,
     error: Option<SharedString>,
     request: Option<gpui_kit::Task<()>>,
+    /// The last query sent to Spotify and when, for [`SEARCH_REUSE_WINDOW`].
+    requested: Option<(String, std::time::Instant)>,
+    filter: SearchFilter,
     track_list: Entity<TrackList>,
     scroll: gpui_kit::ScrollHandle,
     content_width: Pixels,
@@ -70,6 +86,8 @@ impl SearchPage {
             searching: false,
             error: None,
             request: None,
+            requested: None,
+            filter: SearchFilter::All,
             scroll: gpui_kit::ScrollHandle::new(),
             content_width: px(800.),
             _list_subscription: page::forward(&track_list, cx),
@@ -88,7 +106,18 @@ impl SearchPage {
         if query.is_empty() {
             return false;
         }
+        // The same query again, while it is running or its answer is still
+        // fresh, shows what is already there rather than asking Spotify twice.
+        // This is what keeps a held or repeated Return from spamming requests.
+        if self.requested.as_ref().is_some_and(|(asked, at)| {
+            asked.eq_ignore_ascii_case(&query)
+                && (self.searching
+                    || (self.loaded && self.error.is_none() && at.elapsed() < SEARCH_REUSE_WINDOW))
+        }) {
+            return true;
+        }
         self.clear(cx);
+        self.requested = Some((query.clone(), std::time::Instant::now()));
         self.searching = true;
         self.error = None;
         let reply = request(&self.backend, {
@@ -132,6 +161,8 @@ impl SearchPage {
 
     pub(super) fn clear(&mut self, cx: &mut Context<Self>) {
         self.request = None;
+        self.requested = None;
+        self.filter = SearchFilter::All;
         self.results_query = SharedString::default();
         self.track_list.update(cx, |list, cx| list.clear(cx));
         self.scroll.set_offset(point(px(0.), px(0.)));
@@ -148,6 +179,8 @@ impl SearchPage {
 // One inactive page per kind, plus the visible page. Metadata only; artwork
 // stays in the shared bounded image cache. Large pages are deliberately not
 // retained, and stale metadata follows the existing catalog freshness policy.
+const PLAYLIST_SCROLL_SETTLE: Duration = Duration::from_millis(300);
+
 const RETAINED_PAGE_TRACK_LIMIT: usize = 1_024;
 
 const RETAINED_PAGE_BYTES: usize = 2 * 1024 * 1024;
@@ -373,9 +406,9 @@ impl PlaylistPage {
             return;
         }
         self.viewport_request = Some(cx.spawn(async move |page, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(100))
-                .await;
+            // Wait for the scroll to settle: a drag through a long playlist
+            // must ask Spotify once where it stops, not at every row it passes.
+            cx.background_executor().timer(PLAYLIST_SCROLL_SETTLE).await;
             let _ = page.update(cx, |page, cx| {
                 page.viewport_request = None;
                 if page.error.is_some() || page.play_on_load {
@@ -1155,6 +1188,9 @@ pub(super) struct AlbumPage {
     player: Entity<player::Player>,
     image_cache: Entity<image_cache::BoundedImageCache>,
     track_list: Entity<TrackList>,
+    /// Only present while a review is open, so it costs nothing at rest.
+    review: Option<Entity<review::ReviewList>>,
+    review_subscriptions: Vec<Subscription>,
     _list_subscription: Subscription,
 }
 
@@ -1175,6 +1211,8 @@ impl AlbumPage {
             request: None,
             player: services::AppServices::player(cx),
             image_cache: services::AppServices::image_cache(cx),
+            review: None,
+            review_subscriptions: Vec::new(),
             _list_subscription: page::forward(&track_list, cx),
             track_list,
         }
@@ -1183,6 +1221,80 @@ impl AlbumPage {
     /// Takes down any open row menu, for a route change no click drove.
     pub(super) fn close_menus(&mut self, cx: &mut Context<Self>) {
         self.track_list.update(cx, |list, cx| list.close_menu(cx));
+    }
+
+    fn end_review(&mut self) {
+        self.review = None;
+        self.review_subscriptions.clear();
+    }
+
+    /// Opens review mode, resuming any saved progress, or closes it. Progress
+    /// is saved as each rating is locked in, so closing loses nothing.
+    fn toggle_review(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.review.is_some() {
+            self.end_review();
+            cx.notify();
+            return;
+        }
+        let Some(source_id) = self
+            .reference
+            .as_ref()
+            .and_then(|reference| reference.source_id.clone())
+        else {
+            return;
+        };
+        let Some(album) = self.album.as_ref() else {
+            return;
+        };
+        if self.tracks.is_empty() {
+            return;
+        }
+        let artist = album
+            .artists
+            .iter()
+            .map(|artist| artist.name.as_ref())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let saved = services::AppServices::load_album_review(&source_id, cx);
+        let (title, tracks) = (album.name.clone(), self.tracks.clone());
+        let year = album
+            .release_date
+            .as_deref()
+            .and_then(|date| date.get(..4))
+            .map(str::to_owned);
+        let artwork_url = album.artwork_url.clone().map(|url| url.to_string());
+        let details = review::ReviewAlbum {
+            id: source_id,
+            title,
+            artist: artist.into(),
+            year,
+            artwork_url,
+        };
+        let review = cx.new(|cx| review::ReviewList::new(details, tracks, saved, window, cx));
+        self.review_subscriptions = vec![
+            cx.observe(&review, |_, _, cx| cx.notify()),
+            cx.subscribe(&review, |this, _, event: &review::ReviewEvent, cx| {
+                let review::ReviewEvent::Play(index) = event;
+                if *index < this.tracks.len() {
+                    let tracks = this.tracks.to_vec();
+                    this.player
+                        .update(cx, |player, cx| player.play_context(tracks, *index, cx));
+                }
+            }),
+        ];
+        // Start playing at the first unrated track, unless the review is done.
+        let (cursor, complete) = {
+            let review = review.read(cx);
+            (review.cursor(), review.complete())
+        };
+        if !complete {
+            let tracks = self.tracks.to_vec();
+            self.player
+                .update(cx, |player, cx| player.play_context(tracks, cursor, cx));
+        }
+        review.update(cx, |review, cx| review.focus(window, cx));
+        self.review = Some(review);
+        cx.notify();
     }
 
     /// Starts the page's contents from the top, if there is anything to play.
@@ -1207,6 +1319,7 @@ impl AlbumPage {
             .and_then(|album| album.source_id.as_deref())
             == Some(source_id.as_str());
         if !same_album {
+            self.end_review();
             let previous = self.previous.take();
             self.previous = self
                 .reference
@@ -1297,6 +1410,7 @@ impl AlbumPage {
 
     pub(super) fn clear(&mut self, cx: &mut Context<Self>) {
         self.previous = None;
+        self.end_review();
         self.track_list.update(cx, |list, cx| list.clear(cx));
         self.request = None;
         self.reference = None;
@@ -1312,6 +1426,153 @@ impl AlbumPage {
 }
 
 impl SearchPage {
+    fn filter_chips(&self, palette: CadencePalette, cx: &mut Context<Self>) -> impl IntoElement {
+        let chips = [
+            (SearchFilter::All, "All"),
+            (SearchFilter::Songs, "Songs"),
+            (SearchFilter::Artists, "Artists"),
+            (SearchFilter::Albums, "Albums"),
+        ];
+        div()
+            .id("search-filters")
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .children(
+                chips
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (filter, label))| {
+                        components::pill(
+                            palette,
+                            ("search-filter", index),
+                            label,
+                            self.filter == filter,
+                        )
+                        .test_support()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if this.filter != filter {
+                                this.filter = filter;
+                                this.scroll.set_offset(point(px(0.), px(0.)));
+                                cx.notify();
+                            }
+                        }))
+                    }),
+            )
+    }
+
+    /// The single best match to feature: an artist or album named exactly like
+    /// the query, else the first artist, else the first album.
+    fn top_result(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        enum Top {
+            Artist(usize),
+            Album(usize),
+        }
+        let query = self.results_query.trim().to_lowercase();
+        let top = self
+            .artists
+            .iter()
+            .position(|artist| artist.name.to_lowercase() == query)
+            .map(Top::Artist)
+            .or_else(|| {
+                self.albums
+                    .iter()
+                    .position(|album| album.name.to_lowercase() == query)
+                    .map(Top::Album)
+            })
+            .or_else(|| (!self.artists.is_empty()).then_some(Top::Artist(0)))
+            .or_else(|| (!self.albums.is_empty()).then_some(Top::Album(0)))?;
+        let palette = appearance::Appearance::palette(cx);
+        let cache = services::AppServices::image_cache(cx);
+        let (name, detail, artwork_url, icon, radius) = match top {
+            Top::Artist(index) => {
+                let artist = &self.artists[index];
+                (
+                    artist.name.clone(),
+                    "Artist".to_owned(),
+                    artist.artwork_url.clone(),
+                    CadenceIcon::Person,
+                    Rems(3.),
+                )
+            }
+            Top::Album(index) => {
+                let album = &self.albums[index];
+                let artists = album
+                    .artists
+                    .iter()
+                    .map(|artist| artist.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (
+                    album.name.clone(),
+                    if artists.is_empty() {
+                        "Album".to_owned()
+                    } else {
+                        format!("Album · {artists}")
+                    },
+                    album.artwork_url.clone(),
+                    CadenceIcon::MusicNote,
+                    Rems(0.75),
+                )
+            }
+        };
+        Some(
+            components::button(palette, "search-top-result")
+                .test_support()
+                .w_full()
+                .p_5()
+                .flex_col()
+                .items_start()
+                .justify_start()
+                .gap_3()
+                .rounded_2xl()
+                .bg(rgb(palette.surface_raised))
+                .hover(|style| style.bg(rgb(palette.surface_hover)))
+                .child(components::artwork(
+                    palette,
+                    &cache,
+                    artwork_url.as_deref(),
+                    tokens::ArtworkSize {
+                        size: Rems(6.),
+                        radius,
+                    },
+                    icon,
+                ))
+                .child(
+                    div()
+                        .w_full()
+                        .truncate()
+                        .text_2xl()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(rgb(palette.text_primary))
+                        .child(name),
+                )
+                .child(components::page_detail(palette, detail).w_full().truncate())
+                .on_click(cx.listener(move |this, _, _, cx| match top {
+                    Top::Artist(index) => {
+                        if let Some(artist) = this.artists.get(index) {
+                            cx.emit(PageEvent::OpenArtist(model::ArtistRef {
+                                name: artist.name.clone(),
+                                source_id: Some(artist.source_id.clone()),
+                                spotify_uri: artist.spotify_uri.clone(),
+                            }));
+                        }
+                    }
+                    Top::Album(index) => {
+                        if let Some(album) = this.albums.get(index) {
+                            cx.emit(PageEvent::OpenAlbum(model::AlbumRef {
+                                name: album.name.clone(),
+                                source_id: Some(album.source_id.clone()),
+                                spotify_uri: album.spotify_uri.clone(),
+                                artwork_url: album.artwork_url.clone(),
+                            }));
+                        }
+                    }
+                }))
+                .into_any_element(),
+        )
+    }
+
     fn artist_card(&self, index: usize, width: Rems, cx: &mut Context<Self>) -> AnyElement {
         let palette = appearance::Appearance::palette(cx);
         let artist = &self.artists[index];
@@ -1466,42 +1727,67 @@ impl Render for SearchPage {
                     cx,
                 );
             });
-            content = content
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_3()
-                        .child(heading("search-artists-heading", "Top Artists"))
-                        .when(self.artists.is_empty(), |section| {
-                            section.child(components::page_detail(palette, "No artists found"))
-                        })
-                        .child(artists),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_3()
-                        .child(heading("search-albums-heading", "Top Albums"))
-                        .when(self.albums.is_empty(), |section| {
-                            section.child(components::page_detail(palette, "No albums found"))
-                        })
-                        .child(albums),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_3()
-                        .child(heading("search-songs-heading", "Songs"))
-                        .when(self.tracks.is_empty(), |section| {
-                            section.child(components::page_detail(palette, "No songs found"))
-                        })
-                        .when(!self.tracks.is_empty(), |section| {
-                            section.child(self.track_list.clone())
-                        }),
-                );
+            let artists_section = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(heading("search-artists-heading", "Top Artists"))
+                .when(self.artists.is_empty(), |section| {
+                    section.child(components::page_detail(palette, "No artists found"))
+                })
+                .child(artists);
+            let albums_section = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(heading("search-albums-heading", "Top Albums"))
+                .when(self.albums.is_empty(), |section| {
+                    section.child(components::page_detail(palette, "No albums found"))
+                })
+                .child(albums);
+            let songs_section = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(heading("search-songs-heading", "Songs"))
+                .when(self.tracks.is_empty(), |section| {
+                    section.child(components::page_detail(palette, "No songs found"))
+                })
+                .when(!self.tracks.is_empty(), |section| {
+                    section.child(self.track_list.clone())
+                });
+            content = content.child(self.filter_chips(palette, cx));
+            content = match self.filter {
+                SearchFilter::Songs => content.child(songs_section),
+                SearchFilter::Artists => content.child(artists_section),
+                SearchFilter::Albums => content.child(albums_section),
+                SearchFilter::All => {
+                    // The best match beside the songs, then the rest below.
+                    let lead = match self.top_result(cx) {
+                        Some(top) => div()
+                            .flex()
+                            .items_start()
+                            .gap_6()
+                            .child(
+                                div()
+                                    .w(Rems(20.))
+                                    .flex_none()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_3()
+                                    .child(heading("search-top-heading", "Top result"))
+                                    .child(top),
+                            )
+                            .child(songs_section.flex_1().min_w_0())
+                            .into_any_element(),
+                        None => songs_section.into_any_element(),
+                    };
+                    content
+                        .child(lead)
+                        .child(artists_section)
+                        .child(albums_section)
+                }
+            };
         }
         // All bounded sections share one scroll recipient. No per-card tasks,
         // nested scrolling, or discography/album-track prefetch is needed.
@@ -2032,6 +2318,8 @@ impl Render for AlbumPage {
         let list = if let Some(error) = self.error.as_ref() {
             components::empty_state(palette, format!("Unable to load album: {error}"))
                 .into_any_element()
+        } else if let Some(review) = self.review.as_ref().filter(|_| !tracks.is_empty()) {
+            review.clone().into_any_element()
         } else if !tracks.is_empty() {
             let source_id = self
                 .reference
@@ -2047,6 +2335,15 @@ impl Render for AlbumPage {
         } else {
             components::empty_state(palette, "Loading album…").into_any_element()
         };
+        let can_review = self.album.is_some() && !tracks.is_empty();
+        let review_label: SharedString = match self.review.as_ref() {
+            Some(review) => {
+                let review = review.read(cx);
+                format!("Reviewing · {}/{}", review.cursor(), review.track_count()).into()
+            }
+            None => "Review album".into(),
+        };
+        let reviewing = self.review.is_some();
         let playback_tracks = tracks;
 
         components::page("album-page")
@@ -2090,11 +2387,36 @@ impl Render for AlbumPage {
                             .child(components::page_title(palette, name))
                             .child(detail)
                             .child(
-                                components::pill(palette, "album-play", "Play", true).on_click(
-                                    cx.listener(move |this, _, _, cx| {
-                                        this.play(&playback_tracks, cx);
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        components::pill(palette, "album-play", "Play", true)
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.play(&playback_tracks, cx);
+                                            })),
+                                    )
+                                    .when(can_review, |row| {
+                                        row.child(
+                                            components::pill(
+                                                palette,
+                                                "album-review",
+                                                review_label,
+                                                false,
+                                            )
+                                            .test_support()
+                                            .when(reviewing, |pill| {
+                                                pill.bg(rgb(palette.link))
+                                                    .text_color(rgb(palette.on_accent))
+                                            })
+                                            .on_click(
+                                                cx.listener(|this, _, window, cx| {
+                                                    this.toggle_review(window, cx);
+                                                }),
+                                            ),
+                                        )
                                     }),
-                                ),
                             ),
                     ),
             )

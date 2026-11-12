@@ -17,6 +17,7 @@ enum Scene {
     PinnedPlaylist,
     TrackMenu,
     AlbumTint,
+    AlbumReview,
     PlaylistTail,
     ReadmeGlaive,
     ReadmeGlaiveDocked,
@@ -70,6 +71,7 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("playlist-pinned", Scene::PinnedPlaylist),
         ("track-menu", Scene::TrackMenu),
         ("album-tint", Scene::AlbumTint),
+        ("album-review", Scene::AlbumReview),
         ("playlist-tail", Scene::PlaylistTail),
         ("artist-zoom-large", Scene::ArtistZoomLarge),
         ("artist-account-menu", Scene::ArtistMenu),
@@ -261,7 +263,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     }
                 }
                 Scene::ArtistLoading => workspace.open_artist(model::ArtistRef { name: "Artist".into(), source_id: Some("loading".into()), spotify_uri: None }, Route::LikedSongs, cx),
-                Scene::AlbumTint => {
+                Scene::AlbumTint | Scene::AlbumReview => {
                     let url = "https://fixtures.invalid/blue-album.png";
                     let pixels = image::RgbaImage::from_pixel(64, 64, image::Rgba([210, 110, 70, 255]));
                     services::AppServices::image_cache(cx).update(cx, |cache, _| cache.seed_artist_fixture(url, Arc::new(gpui_kit::RenderImage::new([image::Frame::new(pixels)]))));
@@ -390,6 +392,28 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
         .expect("activate fixture window");
     settle(&mut cx, handle.into());
     match scene {
+        Scene::AlbumReview => {
+            // Two tracks locked in, the third open with a rating chosen.
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click("album-review", cx)
+            })
+            .unwrap();
+            let _ = backend.commands.try_recv();
+            settle(&mut cx, handle.into());
+            for stars in [4usize, 5] {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    window.click(("review-star", stars), cx);
+                    window.click("review-lock-in", cx);
+                })
+                .unwrap();
+                settle(&mut cx, handle.into());
+            }
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click(("review-star", 3usize), cx)
+            })
+            .unwrap();
+            settle(&mut cx, handle.into());
+        }
         Scene::TrackCredits => {
             cx.update_window(handle.into(), |_, window, cx| {
                 window

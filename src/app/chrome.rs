@@ -19,6 +19,8 @@ pub(super) struct Toolbar {
     suggestions: Vec<cached_search::Match>,
     suggestion_query: String,
     suggestion_selection: Option<usize>,
+    /// Whether the "Search Spotify for ..." row is offered under the field.
+    search_row: bool,
     suggestion_task: Option<gpui_kit::Task<()>>,
     search_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     library: Entity<library::Library>,
@@ -51,14 +53,12 @@ impl Toolbar {
                     this.queue_suggestions(&query, cx);
                     cx.emit(ToolbarEvent::QueryChanged(query));
                 }
-                InputEvent::PressEnter { .. } => {
-                    if let Some(index) = this.suggestion_selection {
-                        this.play_suggestion(index, cx);
-                    } else {
-                        this.dismiss_suggestions(cx);
-                        cx.emit(ToolbarEvent::SubmitSearch);
+                InputEvent::PressEnter { .. } => match this.suggestion_selection {
+                    Some(index) if index < this.suggestions.len() => {
+                        this.play_suggestion(index, cx)
                     }
-                }
+                    _ => this.submit_search_from_field(cx),
+                },
                 _ => {}
             },
         );
@@ -87,6 +87,7 @@ impl Toolbar {
             suggestions: Vec::new(),
             suggestion_query: String::new(),
             suggestion_selection: None,
+            search_row: false,
             suggestion_task: None,
             search_bounds: Rc::default(),
             library: services::AppServices::library(cx),
@@ -120,6 +121,8 @@ impl Toolbar {
                 library.liked_tracks().clone(),
             ],
         );
+        self.suggestion_query = "Song".into();
+        self.search_row = true;
         self.suggestion_selection = Some(1);
         cx.notify();
     }
@@ -159,8 +162,20 @@ impl Toolbar {
         }
     }
 
+    /// Asks Spotify, once, for what is typed. This is the only thing that
+    /// searches Spotify: typing alone never does.
+    fn submit_search_from_field(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_suggestions(cx);
+        cx.emit(ToolbarEvent::SubmitSearch);
+    }
+
+    /// The suggestion list: what the library matched plus the Spotify row.
+    fn suggestions_open(&self) -> bool {
+        !self.suggestions.is_empty() || self.search_row
+    }
+
     pub(super) fn close_suggestions(&mut self, cx: &mut Context<Self>) -> bool {
-        let open = !self.suggestions.is_empty() || self.suggestion_task.is_some();
+        let open = self.suggestions_open() || self.suggestion_task.is_some();
         self.dismiss_suggestions(cx);
         open
     }
@@ -168,8 +183,9 @@ impl Toolbar {
     fn dismiss_suggestions(&mut self, cx: &mut Context<Self>) {
         self.suggestion_task = None;
         self.suggestion_selection = None;
-        if !self.suggestions.is_empty() {
+        if !self.suggestions.is_empty() || self.search_row {
             self.suggestions.clear();
+            self.search_row = false;
             cx.notify();
         }
     }
@@ -202,6 +218,7 @@ impl Toolbar {
             let _ = this.update(cx, |toolbar, cx| {
                 toolbar.suggestion_task = None;
                 toolbar.suggestions = result;
+                toolbar.search_row = true;
                 cx.notify();
             });
         }));
@@ -238,14 +255,16 @@ impl Toolbar {
             .top_12()
             .left_0()
             .w(width)
-            .child(
-                div()
-                    .px_3()
-                    .py_1()
-                    .text_xs()
-                    .text_color(rgb(palette.text_muted))
-                    .child("From your library"),
-            );
+            .when(!self.suggestions.is_empty(), |menu| {
+                menu.child(
+                    div()
+                        .px_3()
+                        .py_1()
+                        .text_xs()
+                        .text_color(rgb(palette.text_muted))
+                        .child("From your library"),
+                )
+            });
         for (index, found) in self.suggestions.iter().enumerate() {
             let Some(track) = found.resolve(library) else {
                 continue;
@@ -295,6 +314,50 @@ impl Toolbar {
                     ),
             );
         }
+        let query = self.suggestion_query.clone();
+        let selected = self.suggestion_selection == Some(self.suggestions.len());
+        menu = menu
+            .when(!self.suggestions.is_empty(), |menu| {
+                menu.child(div().h(px(1.)).mx_2().my_1().bg(rgb(palette.border)))
+            })
+            .child(
+                components::button(palette, "cached-search-submit")
+                    .test_support()
+                    .w_full()
+                    .h_11()
+                    .px_3()
+                    .gap_2p5()
+                    .rounded_lg()
+                    .justify_start()
+                    .when(selected, |row| row.bg(rgb(palette.selection)))
+                    .hover(|style| style.bg(rgb(palette.surface_hover)))
+                    .child(components::icon(
+                        CadenceIcon::Search,
+                        tokens::CONTROL_ICON,
+                        palette.text_primary,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_sm()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .text_color(rgb(palette.text_primary))
+                            .child(format!("Search Spotify for “{query}”")),
+                    )
+                    .child(
+                        div()
+                            .px_1p5()
+                            .py_0p5()
+                            .rounded_md()
+                            .bg(gpui_kit::rgba(0xFFFFFF14))
+                            .text_color(rgb(palette.text))
+                            .text_size(tokens::CAPTION_TEXT)
+                            .child("Enter"),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.submit_search_from_field(cx))),
+            );
         menu.on_mouse_down_out(
             cx.listener(|this, event: &gpui_kit::MouseDownEvent, _, cx| {
                 if !this
@@ -327,22 +390,20 @@ impl Toolbar {
             .test_support()
             .relative()
             .capture_key_down(cx.listener(|this, event: &gpui_kit::KeyDownEvent, _, cx| {
-                if this.suggestions.is_empty() {
+                // The Spotify row is one more entry after the library matches.
+                let entries = this.suggestions.len() + usize::from(this.search_row);
+                if entries == 0 {
                     return;
                 }
                 match event.keystroke.key.as_str() {
                     "down" => {
-                        this.suggestion_selection = Some(
-                            this.suggestion_selection
-                                .map_or(0, |i| (i + 1) % this.suggestions.len()),
-                        );
+                        this.suggestion_selection =
+                            Some(this.suggestion_selection.map_or(0, |i| (i + 1) % entries));
                     }
                     "up" => {
                         this.suggestion_selection = Some(
                             this.suggestion_selection
-                                .map_or(this.suggestions.len() - 1, |i| {
-                                    (i + this.suggestions.len() - 1) % this.suggestions.len()
-                                }),
+                                .map_or(entries - 1, |i| (i + entries - 1) % entries),
                         );
                     }
                     "escape" => this.dismiss_suggestions(cx),
@@ -401,7 +462,7 @@ impl Toolbar {
                 .absolute()
                 .inset_0(),
             )
-            .when(!self.suggestions.is_empty(), |field| {
+            .when(self.suggestions_open(), |field| {
                 field.child(deferred(self.suggestion_menu(palette, width, cx)))
             })
     }

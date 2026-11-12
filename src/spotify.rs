@@ -145,6 +145,79 @@ struct RateLimitGate {
     saved: Option<(std::path::PathBuf, String)>,
 }
 
+/// Paces every Web API request this app makes, so no burst of work (a library
+/// walk, a Home load, a sweep, fast scrolling) can ever trip Spotify's limit.
+/// Spotify throttles per app over a rolling window, so the safe rate is a low
+/// steady one with a small burst for interactive taps: opening a page makes a
+/// few requests at once and must not wait.
+///
+/// This is a virtual-scheduling token bucket: each request reserves the next
+/// free slot, and callers sleep until their slot, in order. Nothing is
+/// dropped, only delayed.
+struct Pacer {
+    state: std::sync::Mutex<PacerState>,
+}
+
+#[derive(Default)]
+struct PacerState {
+    /// When the bucket would be empty again, if it were refilled at the pace.
+    theoretical: Option<std::time::Instant>,
+    /// Starts of recent requests, only to report an unusually busy window.
+    recent: std::collections::VecDeque<std::time::Instant>,
+}
+
+/// One request per interval, sustained: 2 a second, 60 in any 30 seconds.
+const PACE_INTERVAL: Duration = Duration::from_millis(500);
+/// Requests that may go out back to back before pacing starts.
+const PACE_BURST: u32 = 6;
+/// A window busier than this is logged, so an incident is visible afterwards.
+const PACE_WARN_WINDOW: Duration = Duration::from_secs(30);
+const PACE_WARN_COUNT: usize = 50;
+
+impl Pacer {
+    fn new() -> Self {
+        Self {
+            state: std::sync::Mutex::default(),
+        }
+    }
+
+    /// Reserves the next slot and says how long to wait for it.
+    fn reserve_at(&self, now: std::time::Instant) -> Duration {
+        let mut state = self.state.lock().expect("pacer lock");
+        let theoretical = state.theoretical.map_or(now, |at| at.max(now));
+        let tolerance = PACE_INTERVAL * (PACE_BURST - 1);
+        let wait = theoretical
+            .checked_sub(tolerance)
+            .map_or(Duration::ZERO, |earliest| {
+                earliest.saturating_duration_since(now)
+            });
+        state.theoretical = Some(theoretical + PACE_INTERVAL);
+        let start = now + wait;
+        state.recent.push_back(start);
+        while state
+            .recent
+            .front()
+            .is_some_and(|first| start.saturating_duration_since(*first) > PACE_WARN_WINDOW)
+        {
+            state.recent.pop_front();
+        }
+        if state.recent.len() == PACE_WARN_COUNT {
+            log::warn!(
+                "spotify: {PACE_WARN_COUNT} requests in {}s, pacing keeps them under the limit",
+                PACE_WARN_WINDOW.as_secs()
+            );
+        }
+        wait
+    }
+
+    async fn acquire(&self) {
+        let wait = self.reserve_at(std::time::Instant::now());
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
+    }
+}
+
 #[derive(Default)]
 struct GateState {
     open_until: Option<std::time::Instant>,
@@ -352,8 +425,24 @@ pub struct Spotify {
     client: AuthCodePkceSpotify,
     refresh_lock: Arc<tokio::sync::Mutex<()>>,
     gate: Arc<RateLimitGate>,
+    pacer: Arc<Pacer>,
+    /// The listener's top artists, shared by the releases sweep and the
+    /// upcoming lookup so they never ask for the same list twice.
+    top_artists: Arc<tokio::sync::Mutex<TopArtistsCache>>,
     top_tracks_unavailable: Arc<AtomicBool>,
 }
+
+type TopArtistsCache = Option<(std::time::Instant, Arc<[TopArtist]>)>;
+
+/// A top artist, reduced to what the sweeps need.
+#[derive(Clone)]
+struct TopArtist {
+    id: ArtistId<'static>,
+    name: String,
+}
+
+/// How long a fetched top-artist list is reused within one run.
+const TOP_ARTISTS_REUSE: Duration = Duration::from_secs(30 * 60);
 
 impl Spotify {
     pub async fn from_client_id(client_id: &str, load_saved_token: bool) -> Result<Self> {
@@ -392,6 +481,8 @@ impl Spotify {
             client,
             refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             gate: Arc::new(RateLimitGate::remembering(client_id)),
+            pacer: Arc::new(Pacer::new()),
+            top_artists: Arc::default(),
             top_tracks_unavailable: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -516,6 +607,8 @@ impl Spotify {
         };
         self.gated(async {
             self.require_top_read().await?;
+            // Two requests in this one call: the second takes its own slot.
+            self.pace().await;
             let (artists, tracks) = futures::try_join!(
                 self.client.current_user_top_artists_manual(
                     Some(range),
@@ -564,44 +657,44 @@ impl Spotify {
     pub async fn new_from_top_artists(&self) -> Result<Vec<Album>> {
         self.gated(async {
             self.require_top_read().await?;
-            let artists = self
-                .client
-                .current_user_top_artists_manual(
-                    Some(TimeRange::MediumTerm),
-                    Some(crate::model::NEW_RELEASE_ARTISTS as u32),
-                    Some(0),
-                )
-                .await
-                .context("could not load Spotify top artists")?;
+            let artists = self.top_artists().await?;
             // Once Spotify says "slow down", the remaining lookups must not go out.
             let stopped = AtomicBool::new(false);
             let stopped = &stopped;
-            let results: Vec<Result<Vec<SimplifiedAlbum>>> =
-                futures::stream::iter(artists.items.into_iter().map(|artist| async move {
-                    if stopped.load(Ordering::Relaxed) {
-                        return Ok(Vec::new());
-                    }
-                    let page = self
-                        .client
-                        .artist_albums_manual(
-                            artist.id,
-                            [AlbumType::Album, AlbumType::Single],
-                            None,
-                            Some(5),
-                            Some(0),
-                        )
-                        .await
-                        .context("could not load Spotify artist releases");
-                    if let Err(error) = &page
-                        && matches!(classify_error(error), ErrorKind::RateLimited { .. })
-                    {
-                        stopped.store(true, Ordering::Relaxed);
-                    }
-                    Ok(page?.items)
-                }))
-                .buffer_unordered(2)
-                .collect()
-                .await;
+            let results: Vec<Result<Vec<SimplifiedAlbum>>> = futures::stream::iter(
+                artists
+                    .iter()
+                    .take(crate::model::NEW_RELEASE_ARTISTS)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .map(|artist| async move {
+                        if stopped.load(Ordering::Relaxed) {
+                            return Ok(Vec::new());
+                        }
+                        self.pace().await;
+                        let page = self
+                            .client
+                            .artist_albums_manual(
+                                artist.id,
+                                [AlbumType::Album, AlbumType::Single],
+                                None,
+                                Some(5),
+                                Some(0),
+                            )
+                            .await
+                            .context("could not load Spotify artist releases");
+                        if let Err(error) = &page
+                            && matches!(classify_error(error), ErrorKind::RateLimited { .. })
+                        {
+                            stopped.store(true, Ordering::Relaxed);
+                        }
+                        Ok(page?.items)
+                    }),
+            )
+            .buffer_unordered(2)
+            .collect()
+            .await;
             let cutoff = release_cutoff(crate::model::NEW_RELEASE_DAYS);
             let mut first_error = None;
             let mut albums: Vec<Album> = Vec::new();
@@ -648,25 +741,49 @@ impl Spotify {
         .await
     }
 
+    /// The listener's top artists over the medium term, fetched at most once
+    /// per half hour however many features ask. Call inside a `gated` request.
+    async fn top_artists(&self) -> Result<Arc<[TopArtist]>> {
+        let mut saved = self.top_artists.lock().await;
+        if let Some((fetched, artists)) = saved.as_ref()
+            && fetched.elapsed() < TOP_ARTISTS_REUSE
+        {
+            return Ok(artists.clone());
+        }
+        self.pace().await;
+        let limit = crate::model::NEW_RELEASE_ARTISTS.max(crate::model::UPCOMING_ARTISTS);
+        let page = self
+            .client
+            .current_user_top_artists_manual(
+                Some(TimeRange::MediumTerm),
+                Some(limit as u32),
+                Some(0),
+            )
+            .await
+            .context("could not load Spotify top artists")?;
+        let artists: Arc<[TopArtist]> = page
+            .items
+            .into_iter()
+            .map(|artist| TopArtist {
+                id: artist.id,
+                name: artist.name,
+            })
+            .collect();
+        *saved = Some((std::time::Instant::now(), artists.clone()));
+        Ok(artists)
+    }
+
     /// Announced releases from the artists the listener plays most. The dates
     /// come from MusicBrainz because Spotify only lists what is already out.
     pub async fn upcoming_from_top_artists(&self) -> Result<Vec<crate::model::UpcomingRelease>> {
         let names: Vec<String> = self
             .gated(async {
                 self.require_top_read().await?;
-                let artists = self
-                    .client
-                    .current_user_top_artists_manual(
-                        Some(TimeRange::MediumTerm),
-                        Some(crate::model::UPCOMING_ARTISTS as u32),
-                        Some(0),
-                    )
-                    .await
-                    .context("could not load Spotify top artists")?;
+                let artists = self.top_artists().await?;
                 Ok(artists
-                    .items
-                    .into_iter()
-                    .map(|artist| artist.name)
+                    .iter()
+                    .take(crate::model::UPCOMING_ARTISTS)
+                    .map(|artist| artist.name.clone())
                     .collect())
             })
             .await?;
@@ -737,15 +854,31 @@ impl Spotify {
         }).await
     }
 
+    /// The whole liked collection, one page at a time. Each page takes a
+    /// paced slot, so even a very large library is a slow trickle, not a burst.
     pub async fn liked_tracks(&self) -> Result<Vec<Track>> {
         self.gated(async {
-            self.client
-                .current_user_saved_tracks(None)
-                .map_err(anyhow::Error::from)
-                .and_then(|saved| async move { convert_saved_track(saved) })
-                .try_filter_map(|track| async move { Ok(track) })
-                .try_collect()
-                .await
+            let mut tracks = Vec::new();
+            let mut offset = 0u32;
+            loop {
+                if offset > 0 {
+                    self.pace().await;
+                }
+                let page = self
+                    .client
+                    .current_user_saved_tracks_manual(None, Some(HEAD_PAGE_SIZE), Some(offset))
+                    .await?;
+                let count = u32::try_from(page.items.len()).unwrap_or(u32::MAX);
+                for saved in page.items {
+                    if let Some(track) = convert_saved_track(saved)? {
+                        tracks.push(track);
+                    }
+                }
+                if page.next.is_none() || count == 0 {
+                    return Ok(tracks);
+                }
+                offset = offset.saturating_add(count);
+            }
         })
         .await
     }
@@ -788,12 +921,23 @@ impl Spotify {
 
     pub async fn playlists(&self) -> Result<Vec<Playlist>> {
         self.gated(async {
-            self.client
-                .current_user_playlists()
-                .map_err(anyhow::Error::from)
-                .map_ok(convert_playlist)
-                .try_collect()
-                .await
+            let mut playlists = Vec::new();
+            let mut offset = 0u32;
+            loop {
+                if offset > 0 {
+                    self.pace().await;
+                }
+                let page = self
+                    .client
+                    .current_user_playlists_manual(Some(HEAD_PAGE_SIZE), Some(offset))
+                    .await?;
+                let count = u32::try_from(page.items.len()).unwrap_or(u32::MAX);
+                playlists.extend(page.items.into_iter().map(convert_playlist));
+                if page.next.is_none() || count == 0 {
+                    return Ok(playlists);
+                }
+                offset = offset.saturating_add(count);
+            }
         })
         .await
     }
@@ -1078,6 +1222,7 @@ impl Spotify {
     /// token refresh runs inside the match, so its 429s trip the gate too.
     async fn gated<T>(&self, request: impl std::future::Future<Output = Result<T>>) -> Result<T> {
         self.gate.check()?;
+        self.pacer.acquire().await;
         let result = match self.refresh_if_needed().await {
             Ok(()) => request.await,
             Err(error) => Err(error),
@@ -1091,6 +1236,12 @@ impl Spotify {
             }
         }
         result
+    }
+
+    /// Waits for a slot before an extra request inside one `gated` call; the
+    /// call's own first request is already paced.
+    async fn pace(&self) {
+        self.pacer.acquire().await;
     }
 
     async fn refresh_if_needed(&self) -> Result<()> {
@@ -1358,8 +1509,8 @@ impl TokenVault {
 #[cfg(test)]
 mod tests {
     use super::{
-        ClientIdSource, Duration, ErrorKind, NotAuthorized, RateLimitGate, anyhow, artwork_url,
-        classify_error, resolve_configuration, valid_client_id,
+        ClientIdSource, Duration, ErrorKind, NotAuthorized, PACE_BURST, PACE_INTERVAL, Pacer,
+        RateLimitGate, anyhow, artwork_url, classify_error, resolve_configuration, valid_client_id,
     };
     use rspotify::model::Image;
 
@@ -1388,6 +1539,8 @@ mod tests {
             client,
             refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             gate: Arc::new(RateLimitGate::default()),
+            pacer: Arc::new(Pacer::new()),
+            top_artists: Arc::default(),
             top_tracks_unavailable: Arc::new(AtomicBool::new(false)),
         };
         let id = "7a3LWj5xSFhFRYmztS8wgK";
@@ -1452,6 +1605,8 @@ mod tests {
             client,
             refresh_lock: Arc::default(),
             gate: Arc::default(),
+            pacer: Arc::new(Pacer::new()),
+            top_artists: Arc::default(),
             top_tracks_unavailable: Arc::default(),
         }
     }
@@ -1924,6 +2079,33 @@ mod tests {
         let images = [image(Some(64), "small"), image(Some(200), "medium")];
 
         assert_eq!(artwork_url(&images).as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn the_pacer_allows_a_small_burst_then_one_request_per_interval() {
+        let pacer = Pacer::new();
+        let start = std::time::Instant::now();
+        // The burst goes out at once.
+        for _ in 0..PACE_BURST {
+            assert_eq!(pacer.reserve_at(start), Duration::ZERO);
+        }
+        // Then each request waits one more interval than the one before.
+        assert_eq!(pacer.reserve_at(start), PACE_INTERVAL);
+        assert_eq!(pacer.reserve_at(start), PACE_INTERVAL * 2);
+        // A long quiet spell refills the burst.
+        let later = start + Duration::from_secs(60);
+        assert_eq!(pacer.reserve_at(later), Duration::ZERO);
+    }
+
+    #[test]
+    fn the_pacer_holds_a_sustained_flood_to_the_paced_rate() {
+        let pacer = Pacer::new();
+        let start = std::time::Instant::now();
+        let total = 100u32;
+        let last_wait = (0..total).map(|_| pacer.reserve_at(start)).last().unwrap();
+        // 100 requests issued in the same instant finish no faster than the
+        // sustained rate, after the initial burst.
+        assert_eq!(last_wait, PACE_INTERVAL * (total - PACE_BURST));
     }
 
     #[test]

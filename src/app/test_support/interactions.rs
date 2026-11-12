@@ -927,6 +927,213 @@ fn track_and_header_artist_links_work_inside_an_album_without_playing() {
     }
 }
 
+/// Opens the credited album with `count` plain tracks on the album page.
+fn open_review_album(count: usize) -> Fixture {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|_, cx| cx.set_reduce_motion(true));
+    let workspace = fixture.workspace.clone().unwrap();
+    fixture.update(|_, cx| {
+        workspace.upgrade().unwrap().update(cx, |workspace, cx| {
+            workspace.open_album(credited_track().album_ref.unwrap(), Route::LikedSongs, cx);
+        })
+    });
+    let BackendCommand::LoadAlbum { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("album request")
+    };
+    respond
+        .send(Ok((
+            model::Album {
+                provider: model::Provider::Spotify,
+                source_id: "album-grease".into(),
+                spotify_uri: None,
+                name: "Grease".into(),
+                artists: credited_track().artists,
+                release_date: None,
+                artwork_url: None,
+                track_count: Some(count as u32),
+            },
+            (0..count).map(track).collect(),
+        )))
+        .unwrap();
+    fixture.update(|_, _| {});
+    fixture
+}
+
+#[test]
+fn album_review_unlocks_one_track_at_a_time_and_copies_the_result() {
+    let mut fixture = open_review_album(3);
+    let settle = |fixture: &mut Fixture| {
+        fixture.cx.advance_clock(Duration::from_millis(400));
+        fixture.update(|_, _| {});
+    };
+    fixture.update(|window, cx| window.click("album-review", cx));
+    settle(&mut fixture);
+    assert!(matches!(
+        fixture.backend.commands.try_recv().unwrap(),
+        BackendCommand::PlayContext { index: 0, .. }
+    ));
+    fixture.update(|window, _| {
+        assert!(
+            window
+                .within(("review-item", 0usize))
+                .try_find("review-panel")
+                .is_some()
+        );
+        assert!(
+            window
+                .within(("review-item", 1usize))
+                .try_find("review-panel")
+                .is_none()
+        );
+    });
+    // Locking in with no rating does nothing.
+    fixture.update(|window, cx| window.click("review-lock-in", cx));
+    fixture.update(|window, _| {
+        assert!(
+            window
+                .within(("review-item", 0usize))
+                .try_find("review-panel")
+                .is_some()
+        );
+    });
+    // Mouse: rate, then lock in.
+    fixture.update(|window, cx| {
+        window.click(("review-star", 4usize), cx);
+        window.click("review-lock-in", cx);
+    });
+    fixture.update(|window, _| {
+        assert!(
+            window
+                .within(("review-item", 0usize))
+                .try_find("review-panel")
+                .is_none()
+        );
+        assert!(
+            window
+                .within(("review-item", 1usize))
+                .try_find("review-panel")
+                .is_some()
+        );
+    });
+    // Keyboard: digits rate, Enter locks in.
+    fixture.update(|window, cx| {
+        window.press("5", cx);
+        window.press("enter", cx);
+    });
+    fixture.update(|window, _| {
+        assert!(
+            window
+                .within(("review-item", 2usize))
+                .try_find("review-panel")
+                .is_some()
+        );
+        assert!(window.try_find("review-finish").is_none());
+    });
+    fixture.update(|window, cx| {
+        window.press("3", cx);
+        window.press("enter", cx);
+    });
+    settle(&mut fixture);
+    fixture.update(|window, cx| {
+        assert!(window.try_find("review-finish").is_some());
+        assert!(window.try_find("review-panel").is_none());
+        window.click("review-copy-text", cx);
+        let copied = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .unwrap();
+        assert!(copied.contains("8.0 / 10"), "{copied}");
+        assert!(copied.contains("Reviewed in Sonder"));
+    });
+}
+
+#[test]
+fn a_finished_review_copies_a_png_to_the_clipboard() {
+    let mut fixture = open_review_album(2);
+    fixture.update(|window, cx| window.click("album-review", cx));
+    for stars in ["4", "5"] {
+        fixture.update(|window, cx| {
+            window.press(stars, cx);
+            window.press("enter", cx);
+        });
+    }
+    fixture.update(|window, cx| window.click("review-copy-image", cx));
+    fixture.cx.run_until_parked();
+    fixture.update(|_, cx| {
+        let item = cx.read_from_clipboard().expect("an image was copied");
+        let png = item
+            .entries()
+            .iter()
+            .find_map(|entry| match entry {
+                gpui_kit::ClipboardEntry::Image(image) => Some(image.bytes().to_vec()),
+                _ => None,
+            })
+            .expect("the clipboard holds an image");
+        let decoded = image::load_from_memory(&png).unwrap();
+        assert_eq!(decoded.width(), 1600);
+        assert!(decoded.height() > 700);
+    });
+}
+
+#[test]
+fn locked_review_rows_do_not_play_and_leaving_the_album_ends_the_review() {
+    let mut fixture = open_review_album(3);
+    fixture.update(|window, cx| window.click("album-review", cx));
+    let _ = fixture.backend.commands.try_recv();
+    fixture.update(|window, cx| window.double_click(("review-row", 2usize), cx));
+    fixture.no_commands();
+    fixture.update(|window, cx| window.double_click(("review-row", 0usize), cx));
+    assert!(matches!(
+        fixture.backend.commands.try_recv().unwrap(),
+        BackendCommand::PlayContext { index: 0, .. }
+    ));
+    fixture.update(|window, cx| window.click("album-review", cx));
+    fixture.update(|window, _| assert!(window.try_find("review-list").is_none()));
+}
+
+#[test]
+fn repeating_the_same_search_does_not_ask_spotify_again() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|window, cx| {
+        window.click("search-input", cx);
+        window.input("Grease", cx);
+        window.press("enter", cx);
+        // Held or repeated Return while the search is still running.
+        window.press("enter", cx);
+        window.press("enter", cx);
+    });
+    let BackendCommand::SearchCatalog { respond, .. } =
+        fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("search")
+    };
+    fixture.no_commands();
+    respond
+        .send(Ok(model::CatalogSearchResults {
+            artists: vec![],
+            tracks: vec![credited_track()],
+            albums: vec![],
+        }))
+        .unwrap();
+    fixture.update(|_, _| {});
+    // Again once answered, with different capitalisation: still no request.
+    fixture.update(|window, cx| {
+        window.click("search-input", cx);
+        window.press("enter", cx);
+    });
+    fixture.no_commands();
+    // A different query does search.
+    fixture.update(|window, cx| {
+        window.input(" 2", cx);
+        window.press("enter", cx);
+    });
+    assert!(matches!(
+        fixture.backend.commands.try_recv().unwrap(),
+        BackendCommand::SearchCatalog { .. }
+    ));
+}
+
 #[test]
 fn search_track_album_links_use_loaded_metadata_without_searching_again() {
     let mut fixture = Fixture::new(false);
@@ -2046,7 +2253,7 @@ fn playlist_fetches_small_pages_only_near_the_scroll_end_and_preserves_playback_
         );
     });
     fixture.no_commands();
-    fixture.cx.advance_clock(Duration::from_millis(100));
+    fixture.cx.advance_clock(Duration::from_millis(300));
     fixture.update(|_, _| {});
     let BackendCommand::LoadPlaylist {
         offset, respond, ..
@@ -2129,7 +2336,7 @@ fn playlist_keeps_raw_offsets_for_unavailable_rows_and_retries_visible_pages() {
             cx,
         );
     });
-    fixture.cx.advance_clock(Duration::from_millis(100));
+    fixture.cx.advance_clock(Duration::from_millis(300));
     fixture.update(|_, _| {});
     let BackendCommand::LoadPlaylist {
         offset, respond, ..
@@ -2144,7 +2351,7 @@ fn playlist_keeps_raw_offsets_for_unavailable_rows_and_retries_visible_pages() {
     fixture.update(|_, _| {});
     fixture.no_commands(); // an error banner resizing the viewport must not trigger retries
     fixture.update(|window, cx| window.click("playlist-retry-page", cx));
-    fixture.cx.advance_clock(Duration::from_millis(100));
+    fixture.cx.advance_clock(Duration::from_millis(300));
     fixture.update(|_, _| {});
     assert!(matches!(
         fixture.backend.commands.try_recv().unwrap(),
@@ -2198,7 +2405,7 @@ fn playlist_scroll_jumps_directly_to_the_final_viewport_after_debounce() {
         });
     }
     fixture.update(|_, _| {});
-    fixture.cx.advance_clock(Duration::from_millis(99));
+    fixture.cx.advance_clock(Duration::from_millis(299));
     fixture.update(|_, _| {});
     fixture.no_commands();
     fixture.cx.advance_clock(Duration::from_millis(1));
@@ -2638,11 +2845,59 @@ fn search_places_artists_above_tracks_and_opens_the_selected_artist() {
     fixture.update(|_, _| {});
     fixture.update(|window, cx| {
         assert!(
-            window.find(("search-artist", 0usize)).bounds().bottom()
+            window.find("search-top-result").bounds().top()
                 <= window.find(("spotify-track", 0usize)).bounds().top()
+        );
+        assert!(
+            window.find(("spotify-track", 0usize)).bounds().bottom()
+                <= window.find(("search-artist", 0usize)).bounds().top()
         );
         window.click(("search-artist", 0usize), cx);
     });
+    assert_eq!(fixture.requested_artist(), "glaive-id");
+    fixture.no_commands();
+}
+
+#[test]
+fn search_filters_narrow_results_and_the_top_result_opens_its_artist() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|window, cx| {
+        window.click("search-input", cx);
+        window.input("glaive", cx);
+        window.press("enter", cx);
+    });
+    let BackendCommand::SearchCatalog { respond, .. } =
+        fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("search request")
+    };
+    respond
+        .send(Ok(model::CatalogSearchResults {
+            artists: vec![model::Artist {
+                provider: model::Provider::Spotify,
+                source_id: "glaive-id".into(),
+                spotify_uri: None,
+                name: "glaive".into(),
+                artwork_url: None,
+            }],
+            tracks: vec![track(0)],
+            albums: vec![],
+        }))
+        .unwrap();
+    fixture.update(|_, _| {});
+    fixture.update(|window, _| {
+        assert!(window.try_find("search-top-result").is_some());
+        assert!(window.try_find(("spotify-track", 0usize)).is_some());
+        assert!(window.try_find(("search-artist", 0usize)).is_some());
+    });
+    fixture.update(|window, cx| window.click(("search-filter", 2usize), cx));
+    fixture.update(|window, _| {
+        assert!(window.try_find("search-top-result").is_none());
+        assert!(window.try_find(("spotify-track", 0usize)).is_none());
+        assert!(window.try_find(("search-artist", 0usize)).is_some());
+    });
+    fixture.update(|window, cx| window.click(("search-filter", 0usize), cx));
+    fixture.update(|window, cx| window.click("search-top-result", cx));
     assert_eq!(fixture.requested_artist(), "glaive-id");
     fixture.no_commands();
 }
@@ -3195,12 +3450,12 @@ fn gallery_shares_one_scroll_area_and_opens_albums_without_prefetching() {
                     .is_none()
             );
             assert!(
-                window.find("search-artists-heading").bounds().top()
-                    < window.find("search-albums-heading").bounds().top()
+                window.find("search-songs-heading").bounds().top()
+                    < window.find("search-artists-heading").bounds().top()
             );
             assert!(
-                window.find("search-albums-heading").bounds().top()
-                    < window.find("search-songs-heading").bounds().top()
+                window.find("search-artists-heading").bounds().top()
+                    < window.find("search-albums-heading").bounds().top()
             );
             let viewport = window.find("search-scroll").bounds();
             for (id, count) in [("search-artist", 3usize), ("search-album", 4usize)] {
@@ -3212,6 +3467,17 @@ fn gallery_shares_one_scroll_area_and_opens_albums_without_prefetching() {
                     );
                 }
             }
+            // The artists now sit below the songs: bring them into view first.
+            let gap = window.find("search-artists-heading").bounds().top() - viewport.top();
+            window.dispatch_event(
+                gpui_kit::ScrollWheelEvent {
+                    position: viewport.center(),
+                    delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), -(gap - px(40.)))),
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
             let before = window.find("search-artists-heading").bounds().top();
             window.dispatch_event(
                 gpui_kit::ScrollWheelEvent {

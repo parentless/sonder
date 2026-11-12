@@ -4,10 +4,10 @@ use gpui_kit::TestSupportExt as _;
 use gpui_kit::ClickEvent;
 
 /// Breathing room between the Title column and whatever follows it.
-const COLUMN_GUTTER: Rems = Rems(1.);
+pub(super) const COLUMN_GUTTER: Rems = Rems(1.);
 /// The fixed columns; Title and Album flex to share whatever remains.
-const INDEX_COLUMN_WIDTH: Rems = Rems(2.75);
-const TIME_COLUMN_WIDTH: Rems = Rems(3.75);
+pub(super) const INDEX_COLUMN_WIDTH: Rems = Rems(2.75);
+pub(super) const TIME_COLUMN_WIDTH: Rems = Rems(3.75);
 /// How far the actions menu drops below its trigger, and the room it keeps
 /// from the window edges.
 const ACTIONS_MENU_OFFSET: Rems = Rems(0.25);

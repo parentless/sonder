@@ -172,6 +172,14 @@ pub struct ReleaseWatchState {
     pub new: Vec<String>,
 }
 
+/// Per-track ratings (1-5, 0 for not yet rated) and comments for one album
+/// review. Kept small: one JSON preference per reviewed album.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct AlbumReview {
+    pub ratings: Vec<u8>,
+    pub comments: Vec<String>,
+}
+
 pub struct Store {
     connection: Connection,
 }
@@ -603,6 +611,19 @@ impl Store {
         self.set_preference("release_watch", &serde_json::to_string(state)?)
     }
 
+    pub fn album_review(&self, album_id: &str) -> Result<Option<AlbumReview>> {
+        Ok(self
+            .preference(&format!("album_review:{album_id}"))?
+            .and_then(|json| serde_json::from_str(&json).ok()))
+    }
+
+    pub fn set_album_review(&mut self, album_id: &str, review: &AlbumReview) -> Result<()> {
+        self.set_preference(
+            &format!("album_review:{album_id}"),
+            &serde_json::to_string(review)?,
+        )
+    }
+
     fn preference(&self, key: &str) -> Result<Option<String>> {
         let mut statement = self
             .connection
@@ -937,10 +958,27 @@ impl Store {
 
     pub fn clear_library_cache(&mut self) -> Result<()> {
         self.connection.execute(
-            "DELETE FROM preferences WHERE key = 'new_releases_cache'",
+            "DELETE FROM preferences WHERE key = 'new_releases_cache' OR key LIKE 'cache:%'",
             [],
         )?;
         self.replace_library_cache(&[], &[], None)
+    }
+
+    /// A saved answer from Spotify (or another service) and when it was saved
+    /// (Unix seconds). Used so a launch can reuse yesterday's top items rather
+    /// than ask again. Everything under `cache:` goes with the library cache.
+    pub fn cached_json(&self, key: &str) -> Result<Option<(u64, String)>> {
+        Ok(self.preference(&format!("cache:{key}"))?.and_then(|text| {
+            let (saved_at, json) = text.split_once('\n')?;
+            Some((saved_at.parse().ok()?, json.to_owned()))
+        }))
+    }
+
+    pub fn set_cached_json(&mut self, key: &str, json: &str) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        self.set_preference(&format!("cache:{key}"), &format!("{now}\n{json}"))
     }
 
     /// The last "new from your top artists" answer and when it was fetched (Unix
@@ -1147,6 +1185,31 @@ mod tests {
         assert_eq!(albums, [album]);
         store.clear_library_cache().unwrap();
         assert!(store.new_releases_cache().unwrap().is_none());
+    }
+
+    #[test]
+    fn saved_answers_round_trip_and_clear_with_the_library_cache() {
+        let mut store = Store::in_memory().unwrap();
+        assert!(store.cached_json("home").unwrap().is_none());
+        store.set_cached_json("home", "{\"a\":1}").unwrap();
+        let (saved_at, json) = store.cached_json("home").unwrap().unwrap();
+        assert!(saved_at > 0);
+        assert_eq!(json, "{\"a\":1}");
+        store.clear_library_cache().unwrap();
+        assert!(store.cached_json("home").unwrap().is_none());
+    }
+
+    #[test]
+    fn album_reviews_round_trip_per_album() {
+        let mut store = Store::in_memory().unwrap();
+        assert_eq!(store.album_review("a").unwrap(), None);
+        let review = super::AlbumReview {
+            ratings: vec![4, 5, 0],
+            comments: vec![String::new(), "peak".into(), String::new()],
+        };
+        store.set_album_review("a", &review).unwrap();
+        assert_eq!(store.album_review("a").unwrap(), Some(review));
+        assert_eq!(store.album_review("b").unwrap(), None);
     }
 
     #[test]
