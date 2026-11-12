@@ -9,6 +9,7 @@ pub(super) enum SettingsEvent {
     SetAutoplay(bool),
     SetNormaliseVolume(bool),
     SetKeepInTray(bool),
+    SetStreamingQuality(StreamingQuality),
     SetLaunchAtLogin(bool),
     SetDiscord(crate::discord::Config),
     SetLastfm(crate::lastfm::Config),
@@ -145,6 +146,7 @@ impl Settings {
         let normalise_volume = preferences.normalise_volume;
         let keep_in_tray = preferences.keep_in_tray;
         let launch_at_login = preferences.launch_at_login;
+        let streaming_quality = preferences.streaming_quality;
 
         let tab = self.tab;
         // The tab list stays put while the selected group scrolls beside it.
@@ -261,6 +263,33 @@ impl Settings {
                                                 )),
                                         ),
                                     ))
+                                    .child(
+                                        div()
+                                            .mt_5()
+                                            .pt_5()
+                                            .border_t_1()
+                                            .border_color(rgb(palette.border))
+                                            .child(Self::playback_setting_row(
+                                                palette,
+                                                "Streaming quality",
+                                                "Higher quality uses more data. Takes effect the next time playback connects, such as after restarting Sonder.",
+                                                div().flex().flex_wrap().gap_2().children(
+                                                    StreamingQuality::ALL.into_iter().map(|quality| {
+                                                        components::pill(
+                                                            palette,
+                                                            ("settings-streaming-quality", usize::from(quality.kbps())),
+                                                            quality.label(),
+                                                            quality == streaming_quality,
+                                                        )
+                                                        .test_support()
+                                                        .h_9()
+                                                        .on_click(cx.listener(move |_, _, _, cx| {
+                                                            cx.emit(SettingsEvent::SetStreamingQuality(quality));
+                                                        }))
+                                                    }),
+                                                ),
+                                            )),
+                                    )
                                     .child(
                                         div()
                                             .mt_5()

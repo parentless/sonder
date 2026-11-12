@@ -196,6 +196,13 @@ pub const HOME_TRACK_LIMIT: usize = 20;
 pub const SEARCH_ALBUM_LIMIT: usize = 4;
 pub const SEARCH_TRACK_LIMIT: usize = 5;
 
+/// New releases come from this many of the listener's top artists.
+pub const NEW_RELEASE_ARTISTS: usize = 15;
+/// A release counts as new for this many days.
+pub const NEW_RELEASE_DAYS: u64 = 90;
+/// Home shows at most this many new releases.
+pub const NEW_RELEASE_LIMIT: usize = 20;
+
 /// How far back Home looks. Spotify names these short, medium and long term.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum HomeRange {

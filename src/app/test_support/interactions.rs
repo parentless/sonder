@@ -604,6 +604,25 @@ fn tab_rings_the_autoplay_switch_and_space_toggles_it() {
 }
 
 #[test]
+fn streaming_quality_starts_very_high_and_follows_the_choice() {
+    let mut fixture = Fixture::new(true);
+    fixture.update(|_, cx| {
+        assert_eq!(
+            services::AppServices::preferences(cx).streaming_quality,
+            crate::storage::StreamingQuality::VeryHigh
+        );
+    });
+    fixture.update(|window, cx| window.click(("settings-streaming-quality", 160usize), cx));
+    fixture.update(|_, cx| {
+        assert_eq!(
+            services::AppServices::preferences(cx).streaming_quality,
+            crate::storage::StreamingQuality::High
+        );
+    });
+    fixture.no_commands();
+}
+
+#[test]
 fn queue_toggle_and_close_button_control_the_panel_without_backend_commands() {
     let mut fixture = Fixture::new(false);
     fixture.update(|window, cx| {
@@ -3541,6 +3560,32 @@ fn settings_tabs_show_one_group_at_a_time() {
     fixture.no_commands();
 }
 
+fn release_album() -> model::Album {
+    model::Album {
+        provider: model::Provider::Spotify,
+        source_id: "release-1".into(),
+        spotify_uri: Some("spotify:album:release-1".into()),
+        name: "Fresh Release".into(),
+        artists: vec![model::ArtistRef {
+            name: "Top Artist".into(),
+            source_id: Some("artist-1".into()),
+            spotify_uri: None,
+        }],
+        release_date: Some("2026-11-07".into()),
+        artwork_url: None,
+        track_count: None,
+    }
+}
+
+/// Answers the new-releases request Home makes alongside its top items.
+fn answer_new_releases(fixture: &mut Fixture, result: anyhow::Result<Vec<model::Album>>) {
+    let BackendCommand::LoadNewReleases { respond } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a new-releases request")
+    };
+    respond.send(result).unwrap();
+}
+
 #[test]
 fn home_loads_top_items_once_when_opened_and_opens_an_artist() {
     let mut fixture = Fixture::new(false);
@@ -3562,6 +3607,7 @@ fn home_loads_top_items_once_when_opened_and_opens_an_artist() {
             tracks: vec![credited_track()],
         }))
         .unwrap();
+    answer_new_releases(&mut fixture, Ok(vec![release_album()]));
     fixture.update(|_, _| {});
     // Leaving and returning within the freshness window must not refetch.
     fixture.update(|window, cx| window.click("nav-recent", cx));
@@ -3569,6 +3615,30 @@ fn home_loads_top_items_once_when_opened_and_opens_an_artist() {
     fixture.no_commands();
     fixture.update(|window, cx| window.click(("home-artist", 0usize), cx));
     assert_eq!(fixture.route(), Route::Artist);
+}
+
+#[test]
+fn home_lists_new_releases_from_top_artists_and_opens_one() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|window, cx| window.click("nav-home", cx));
+    let BackendCommand::LoadHome { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a Home request")
+    };
+    respond
+        .send(Ok(model::HomeData {
+            artists: vec![],
+            tracks: vec![credited_track()],
+        }))
+        .unwrap();
+    answer_new_releases(&mut fixture, Ok(vec![release_album()]));
+    fixture.update(|_, _| {});
+    fixture.update(|window, _| {
+        assert!(window.try_find("home-releases-heading").is_some());
+        assert!(window.try_find(("home-release", 0usize)).is_some());
+    });
+    fixture.update(|window, cx| window.click(("home-release", 0usize), cx));
+    assert_eq!(fixture.route(), Route::Album);
 }
 
 #[test]
@@ -3585,6 +3655,7 @@ fn home_time_ranges_load_once_each_and_are_remembered() {
         respond.send(Ok(model::HomeData::default())).unwrap();
     };
     reply(&mut fixture, model::HomeRange::Months);
+    answer_new_releases(&mut fixture, Ok(Vec::new()));
     fixture.update(|_, _| {});
     fixture.update(|window, cx| window.click(("home-range", 0usize), cx));
     reply(&mut fixture, model::HomeRange::Weeks);
@@ -3610,6 +3681,7 @@ fn home_asks_for_a_new_sign_in_when_the_permission_is_missing() {
     respond
         .send(Err(model::HomePermissionMissing.into()))
         .unwrap();
+    answer_new_releases(&mut fixture, Err(model::HomePermissionMissing.into()));
     fixture.update(|_, _| {});
     fixture.update(|window, _| assert!(window.try_find("home-sign-in-again").is_some()));
     // Revisiting does not hammer a request that cannot succeed.

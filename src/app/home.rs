@@ -9,6 +9,9 @@ use std::time::SystemTime;
 
 /// Top items drift over weeks, so there is no reason to fetch them often.
 const HOME_STALE_TIME: Duration = Duration::from_secs(30 * 60);
+/// New releases move more slowly, and finding them costs a request per artist.
+const RELEASES_STALE_TIME: Duration = Duration::from_secs(6 * 60 * 60);
+const RELEASE_CARD_WIDTH: Rems = Rems(9.5);
 
 /// One time range's fetched lists, kept so switching back needs no request.
 struct RangeData {
@@ -25,12 +28,20 @@ impl RangeData {
     }
 }
 
+struct Releases {
+    albums: Arc<[model::Album]>,
+    loaded_at: SystemTime,
+}
+
 pub(super) struct HomePage {
     backend: BackendHandle,
     session: Entity<session::Session>,
     track_list: Entity<track_list::TrackList>,
     range: model::HomeRange,
     data: [Option<RangeData>; 3],
+    releases: Option<Releases>,
+    releases_loading: bool,
+    releases_request: Option<gpui_kit::Task<()>>,
     loading: bool,
     error: Option<SharedString>,
     /// The saved sign-in lacks the permission to read top items.
@@ -59,6 +70,9 @@ impl HomePage {
             track_list,
             range: model::HomeRange::default(),
             data: [None, None, None],
+            releases: None,
+            releases_loading: false,
+            releases_request: None,
             loading: false,
             error: None,
             permission_missing: false,
@@ -78,6 +92,7 @@ impl HomePage {
                 self.reset(cx);
                 if self.visible {
                     self.load(cx);
+                    self.load_releases_if_needed(cx);
                 }
             }
             _ => {}
@@ -88,6 +103,9 @@ impl HomePage {
         self.request = None;
         self.loading = false;
         self.data = [None, None, None];
+        self.releases = None;
+        self.releases_loading = false;
+        self.releases_request = None;
         self.error = None;
         self.permission_missing = false;
         self.track_list.update(cx, |list, cx| list.clear(cx));
@@ -105,6 +123,7 @@ impl HomePage {
             return;
         }
         self.load_if_needed(cx);
+        self.load_releases_if_needed(cx);
     }
 
     fn current(&self) -> Option<&RangeData> {
@@ -116,6 +135,42 @@ impl HomePage {
         if !fresh && !self.loading && !self.permission_missing {
             self.load(cx);
         }
+    }
+
+    fn load_releases_if_needed(&mut self, cx: &mut Context<Self>) {
+        let fresh = self.releases.as_ref().is_some_and(|releases| {
+            releases
+                .loaded_at
+                .elapsed()
+                .is_ok_and(|elapsed| elapsed < RELEASES_STALE_TIME)
+        });
+        if fresh || self.releases_loading || self.permission_missing {
+            return;
+        }
+        self.releases_loading = true;
+        let reply = catalog::request(&self.backend, |respond| BackendCommand::LoadNewReleases {
+            respond,
+        });
+        self.releases_request = Some(cx.spawn(async move |this, cx| {
+            let result = reply.await;
+            let _ = this.update(cx, |page, cx| {
+                page.releases_request = None;
+                page.releases_loading = false;
+                match result {
+                    Ok(mut albums) => {
+                        albums.truncate(model::NEW_RELEASE_LIMIT);
+                        page.releases = Some(Releases {
+                            albums: albums.into(),
+                            loaded_at: SystemTime::now(),
+                        });
+                    }
+                    // A missing section is better than an error banner for
+                    // something Home can do without; try again on the next visit.
+                    Err(error) => log::warn!("home: could not load new releases: {error}"),
+                }
+                cx.notify();
+            });
+        }));
     }
 
     fn select_range(&mut self, range: model::HomeRange, cx: &mut Context<Self>) {
@@ -173,6 +228,79 @@ impl HomePage {
             });
         }));
         cx.notify();
+    }
+
+    fn release_card(
+        &self,
+        album: &model::Album,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let palette = appearance::Appearance::palette(cx);
+        let cache = services::AppServices::image_cache(cx);
+        let mut detail = album
+            .artists
+            .iter()
+            .map(|artist| artist.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if let Some(date) = album.release_date.as_deref().and_then(release_label) {
+            if !detail.is_empty() {
+                detail.push_str(" · ");
+            }
+            detail.push_str(&date);
+        }
+        components::button(palette, ("home-release", index))
+            .test_support()
+            .w(RELEASE_CARD_WIDTH + Rems(0.75))
+            .min_w_0()
+            .p_1p5()
+            .flex_col()
+            .items_start()
+            .justify_start()
+            .gap_1p5()
+            .rounded_xl()
+            .hover(|style| style.bg(rgb(palette.surface_hover)))
+            .child(components::artwork(
+                palette,
+                &cache,
+                album.artwork_url.as_deref(),
+                tokens::ArtworkSize {
+                    size: RELEASE_CARD_WIDTH,
+                    radius: Rems(0.625),
+                },
+                CadenceIcon::MusicNote,
+            ))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .w_full()
+                            .truncate()
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .child(album.name.clone()),
+                    )
+                    .child(components::page_detail(palette, detail).w_full().truncate()),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if let Some(album) = this
+                    .releases
+                    .as_ref()
+                    .and_then(|releases| releases.albums.get(index))
+                {
+                    cx.emit(PageEvent::OpenAlbum(model::AlbumRef {
+                        name: album.name.clone(),
+                        source_id: Some(album.source_id.clone()),
+                        spotify_uri: album.spotify_uri.clone(),
+                        artwork_url: album.artwork_url.clone(),
+                    }));
+                }
+            }))
+            .into_any_element()
     }
 
     fn artist_card(
@@ -330,6 +458,15 @@ impl Render for HomePage {
             self.track_list.update(cx, |list, cx| {
                 list.show(("home-tracks", self.range.index()), tracks.clone(), cx);
             });
+            let releases: Arc<[model::Album]> = self
+                .releases
+                .as_ref()
+                .map(|releases| releases.albums.clone())
+                .unwrap_or_default();
+            let mut release_cards = div().flex().flex_wrap().gap_4();
+            for (index, album) in releases.iter().enumerate() {
+                release_cards = release_cards.child(self.release_card(album, index, cx));
+            }
             div()
                 .flex()
                 .flex_col()
@@ -342,6 +479,19 @@ impl Render for HomePage {
                             .gap_3()
                             .child(heading("home-artists-heading", "Your top artists"))
                             .child(cards),
+                    )
+                })
+                .when(!releases.is_empty(), |content| {
+                    content.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(heading(
+                                "home-releases-heading",
+                                "New from artists you listen to",
+                            ))
+                            .child(release_cards),
                     )
                 })
                 .when(!tracks.is_empty(), |content| {
@@ -385,5 +535,31 @@ impl Render for HomePage {
                             .child(div().mt_5().child(content)),
                     ),
             )
+    }
+}
+
+/// `2026-11-07` as `Nov 7`; anything not an exact date gives nothing.
+fn release_label(date: &str) -> Option<String> {
+    let mut parts = date.split('-');
+    let _year: u32 = parts.next()?.parse().ok()?;
+    let month: usize = parts.next()?.parse().ok()?;
+    let day: u32 = parts.next()?.parse().ok()?;
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    Some(format!("{} {day}", MONTHS.get(month.checked_sub(1)?)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::release_label;
+
+    #[test]
+    fn release_dates_read_as_month_and_day() {
+        assert_eq!(release_label("2026-11-07").as_deref(), Some("Nov 7"));
+        assert_eq!(release_label("2026-01-31").as_deref(), Some("Jan 31"));
+        assert_eq!(release_label("2026-11"), None);
+        assert_eq!(release_label("2026"), None);
+        assert_eq!(release_label("2026-13-01"), None);
     }
 }

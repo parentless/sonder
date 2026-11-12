@@ -140,6 +140,16 @@ impl Workspace {
                     }
                     cx.notify();
                 }
+                settings::SettingsEvent::SetStreamingQuality(quality) => {
+                    let result = services::AppServices::set_streaming_quality(*quality, cx);
+                    let result = services::require_settings_storage(result);
+                    if let Some(error) =
+                        services::preference_save_error("streaming quality", result)
+                    {
+                        this.last_error = Some(error);
+                    }
+                    cx.notify();
+                }
                 settings::SettingsEvent::SetKeepInTray(keep) => {
                     let result = services::AppServices::set_keep_in_tray(*keep, cx);
                     let result = services::require_settings_storage(result);

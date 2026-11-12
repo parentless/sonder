@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use anyhow::{Context as _, Result, anyhow, bail};
-use futures::TryStreamExt;
+use futures::{StreamExt as _, TryStreamExt};
 use gpui_kit::SharedString;
 use keyring::Entry;
 use rspotify::{
@@ -453,17 +453,7 @@ impl Spotify {
             HomeRange::AllTime => TimeRange::LongTerm,
         };
         self.gated(async {
-            let authorized = self
-                .client
-                .token
-                .lock()
-                .await
-                .map_err(|_| anyhow!("could not lock Spotify token state"))?
-                .as_ref()
-                .is_some_and(|token| token.scopes.contains("user-top-read"));
-            if !authorized {
-                return Err(crate::model::HomePermissionMissing.into());
-            }
+            self.require_top_read().await?;
             let (artists, tracks) = futures::try_join!(
                 self.client.current_user_top_artists_manual(
                     Some(range),
@@ -486,6 +476,95 @@ impl Spotify {
                     .filter(Track::is_displayable)
                     .collect(),
             })
+        })
+        .await
+    }
+
+    async fn require_top_read(&self) -> Result<()> {
+        let authorized = self
+            .client
+            .token
+            .lock()
+            .await
+            .map_err(|_| anyhow!("could not lock Spotify token state"))?
+            .as_ref()
+            .is_some_and(|token| token.scopes.contains("user-top-read"));
+        if authorized {
+            Ok(())
+        } else {
+            Err(crate::model::HomePermissionMissing.into())
+        }
+    }
+
+    /// Recent albums and singles from the artists the listener plays most.
+    /// Spotify's own "new releases" feed is gone, so this asks each of the top
+    /// artists for their latest releases, a few at a time.
+    pub async fn new_from_top_artists(&self) -> Result<Vec<Album>> {
+        self.gated(async {
+            self.require_top_read().await?;
+            let artists = self
+                .client
+                .current_user_top_artists_manual(
+                    Some(TimeRange::MediumTerm),
+                    Some(crate::model::NEW_RELEASE_ARTISTS as u32),
+                    Some(0),
+                )
+                .await
+                .context("could not load Spotify top artists")?;
+            let results: Vec<Result<Vec<SimplifiedAlbum>>> =
+                futures::stream::iter(artists.items.into_iter().map(|artist| async move {
+                    let page = self
+                        .client
+                        .artist_albums_manual(
+                            artist.id,
+                            [AlbumType::Album, AlbumType::Single],
+                            None,
+                            Some(5),
+                            Some(0),
+                        )
+                        .await
+                        .context("could not load Spotify artist releases")?;
+                    Ok(page.items)
+                }))
+                .buffer_unordered(4)
+                .collect()
+                .await;
+            let cutoff = release_cutoff(crate::model::NEW_RELEASE_DAYS);
+            let mut first_error = None;
+            let mut albums: Vec<Album> = Vec::new();
+            for result in results {
+                match result {
+                    Ok(items) => albums.extend(
+                        items
+                            .into_iter()
+                            .filter_map(convert_simplified_album)
+                            // Only exact dates can be placed in the window.
+                            .filter(|album| {
+                                album
+                                    .release_date
+                                    .as_deref()
+                                    .is_some_and(|date| date.len() == 10 && date >= cutoff.as_str())
+                            }),
+                    ),
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
+            if albums.is_empty()
+                && let Some(error) = first_error
+            {
+                return Err(error);
+            }
+            albums.sort_by(|a, b| {
+                b.release_date
+                    .cmp(&a.release_date)
+                    .then_with(|| a.name.cmp(&b.name))
+            });
+            let mut seen = std::collections::HashSet::new();
+            albums.retain(|album| seen.insert(album.source_id.clone()));
+            albums.truncate(crate::model::NEW_RELEASE_LIMIT);
+            Ok(albums)
         })
         .await
     }
@@ -1008,6 +1087,33 @@ fn joined_artist_names(artists: &[ArtistRef]) -> SharedString {
         .collect::<Vec<_>>()
         .join(", ")
         .into()
+}
+
+/// The date `days` ago as `YYYY-MM-DD` (UTC), for comparing with release dates.
+fn release_cutoff(days: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    civil_date(now / 86_400 - days.min(now / 86_400))
+}
+
+/// Days since 1970-01-01 as `YYYY-MM-DD` (Howard Hinnant's civil-from-days).
+fn civil_date(days: u64) -> String {
+    let z = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 fn convert_artist_ref(artist: SimplifiedArtist) -> ArtistRef {
@@ -1712,5 +1818,18 @@ mod tests {
         let images = [image(Some(64), "small"), image(Some(200), "medium")];
 
         assert_eq!(artwork_url(&images).as_deref(), Some("medium"));
+    }
+}
+
+#[cfg(test)]
+mod release_date_tests {
+    use super::civil_date;
+
+    #[test]
+    fn civil_dates_match_known_days() {
+        assert_eq!(civil_date(0), "1970-01-01");
+        assert_eq!(civil_date(10_957), "2000-01-01");
+        assert_eq!(civil_date(19_782), "2024-02-29");
+        assert_eq!(civil_date(20_400), "2025-11-08");
     }
 }

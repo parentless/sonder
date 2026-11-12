@@ -315,6 +315,9 @@ pub enum BackendCommand {
         range: crate::model::HomeRange,
         respond: Reply<crate::model::HomeData>,
     },
+    LoadNewReleases {
+        respond: Reply<Vec<Album>>,
+    },
     SearchCatalog {
         query: String,
         respond: Reply<crate::model::CatalogSearchResults>,
@@ -1285,6 +1288,10 @@ impl Worker {
             }
             BackendCommand::LoadHome { range, respond } => {
                 self.catalog.home(self.spotify.clone(), range, respond);
+                Ok(())
+            }
+            BackendCommand::LoadNewReleases { respond } => {
+                self.catalog.new_releases(self.spotify.clone(), respond);
                 Ok(())
             }
             BackendCommand::SearchCatalog { query, respond } => {
@@ -2581,6 +2588,7 @@ struct CatalogFetches {
     reload: Option<tokio::task::JoinHandle<()>>,
     search: Option<tokio::task::JoinHandle<()>>,
     home: Option<tokio::task::JoinHandle<()>>,
+    new_releases: Option<tokio::task::JoinHandle<()>>,
     playlist: Option<tokio::task::JoinHandle<()>>,
     artist: Option<tokio::task::JoinHandle<()>>,
     artist_albums: Option<tokio::task::JoinHandle<()>>,
@@ -2625,6 +2633,15 @@ impl CatalogFetches {
         Self::start(&mut self.home, respond, "Spotify top items", async move {
             spotify.home(range).await
         });
+    }
+
+    fn new_releases(&mut self, spotify: Spotify, respond: Reply<Vec<Album>>) {
+        Self::start(
+            &mut self.new_releases,
+            respond,
+            "Spotify new releases",
+            async move { spotify.new_from_top_artists().await },
+        );
     }
 
     fn search(
@@ -2717,6 +2734,7 @@ impl CatalogFetches {
         abort_task(&mut self.reload);
         abort_task(&mut self.search);
         abort_task(&mut self.home);
+        abort_task(&mut self.new_releases);
         abort_task(&mut self.playlist);
         abort_task(&mut self.artist);
         abort_task(&mut self.artist_albums);

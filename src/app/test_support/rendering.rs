@@ -344,9 +344,12 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 Scene::Home | Scene::HomePermission => {
                     workspace.navigate(Route::Home, cx);
                     let BackendCommand::LoadHome { respond, .. } = backend.commands.try_recv().unwrap() else { panic!("home request") };
+                    let BackendCommand::LoadNewReleases { respond: releases } = backend.commands.try_recv().unwrap() else { panic!("new releases request") };
                     if matches!(scene, Scene::HomePermission) {
                         respond.send(Err(model::HomePermissionMissing.into())).unwrap();
+                        releases.send(Err(model::HomePermissionMissing.into())).unwrap();
                     } else {
+                        releases.send(Ok(super::gallery_results().albums.into_iter().take(5).map(|mut album| { album.release_date = Some("2026-11-07".into()); album }).collect())).unwrap();
                         let results = super::gallery_results();
                         respond.send(Ok(model::HomeData {
                             artists: (0..7).map(|index| model::Artist {

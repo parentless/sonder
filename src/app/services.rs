@@ -89,6 +89,7 @@ impl AppServices {
     ) -> BackendHandle {
         // Before the backend can connect playback.
         crate::playback::set_normalisation(preferences.normalise_volume);
+        crate::playback::set_streaming_kbps(preferences.streaming_quality.kbps());
         let (backend, events) = Backend::start();
         let handle = backend.handle();
         let player =
@@ -418,6 +419,23 @@ impl AppServices {
             let _ = crate::startup::set_enabled(!launch);
         }
         Some(result)
+    }
+
+    pub(super) fn set_streaming_quality(
+        quality: StreamingQuality,
+        cx: &mut App,
+    ) -> Option<anyhow::Result<()>> {
+        let services = cx.global_mut::<Self>();
+        let result = services
+            .store
+            .as_mut()
+            .map(|store| store.set_streaming_quality(quality));
+        if result.as_ref().is_some_and(|result| result.is_ok()) {
+            services.preferences.streaming_quality = quality;
+            // Read by the player the next time playback connects.
+            crate::playback::set_streaming_kbps(quality.kbps());
+        }
+        result
     }
 
     pub(super) fn set_keep_in_tray(keep: bool, cx: &mut App) -> Option<anyhow::Result<()>> {

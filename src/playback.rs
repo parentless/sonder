@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU16, Ordering},
     },
     time::Duration,
 };
@@ -13,7 +13,7 @@ use librespot::{
     core::{SpotifyUri, authentication::Credentials, config::SessionConfig, session::Session},
     oauth::OAuthClientBuilder,
     playback::{
-        config::{AudioFormat, PlayerConfig, VolumeCtrl},
+        config::{AudioFormat, Bitrate, PlayerConfig, VolumeCtrl},
         mixer::{self, Mixer, MixerConfig},
         player::{Player, PlayerEventChannel},
     },
@@ -241,6 +241,11 @@ impl Playback {
         let player_config = PlayerConfig {
             position_update_interval: Some(Duration::from_millis(500)),
             normalisation: NORMALISE_VOLUME.load(Ordering::Relaxed),
+            bitrate: match STREAMING_KBPS.load(Ordering::Relaxed) {
+                96 => Bitrate::Bitrate96,
+                160 => Bitrate::Bitrate160,
+                _ => Bitrate::Bitrate320,
+            },
             ..PlayerConfig::default()
         };
         let player = Player::new(player_config, session.clone(), volume, move || {
@@ -383,6 +388,14 @@ async fn persist_playback_refresh_token(refresh_token: String) -> Result<()> {
 /// Whether the next playback connection evens out loudness. Set from the saved
 /// preference at startup and whenever the listener changes it.
 static NORMALISE_VOLUME: AtomicBool = AtomicBool::new(false);
+
+/// The streaming bitrate in kbps, read when playback connects. Very high
+/// (320) unless the listener chose lower.
+static STREAMING_KBPS: AtomicU16 = AtomicU16::new(320);
+
+pub fn set_streaming_kbps(kbps: u16) {
+    STREAMING_KBPS.store(kbps, Ordering::Relaxed);
+}
 
 pub fn set_normalisation(enabled: bool) {
     NORMALISE_VOLUME.store(enabled, Ordering::Relaxed);
