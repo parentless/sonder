@@ -2653,12 +2653,21 @@ impl CatalogFetches {
     }
 
     fn upcoming(&mut self, spotify: Spotify, respond: Reply<Vec<crate::model::UpcomingRelease>>) {
-        Self::start(
-            &mut self.upcoming,
-            respond,
-            "announced releases",
-            async move { spotify.upcoming_from_top_artists().await },
-        );
+        // MusicBrainz allows one request a second, so a sweep outlasts the
+        // catalog timeout; it keeps partial results and bounds itself instead.
+        abort_task(&mut self.upcoming);
+        let mut respond = respond;
+        self.upcoming = Some(tokio::spawn(async move {
+            tokio::select! {
+                biased;
+                _ = respond.closed() => {}
+                result = run_with_timeout(90, "announced releases", async move {
+                    spotify.upcoming_from_top_artists().await
+                }) => {
+                    let _ = respond.send(result);
+                }
+            }
+        }));
     }
 
     fn search(

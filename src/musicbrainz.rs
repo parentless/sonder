@@ -15,20 +15,6 @@ const SPACING: Duration = Duration::from_millis(1100);
 const HORIZON_YEARS: i64 = 2;
 
 #[derive(Deserialize)]
-struct ArtistSearch {
-    #[serde(default)]
-    artists: Vec<FoundArtist>,
-}
-
-#[derive(Deserialize)]
-struct FoundArtist {
-    id: String,
-    name: String,
-    #[serde(default)]
-    score: u32,
-}
-
-#[derive(Deserialize)]
 struct GroupSearch {
     #[serde(rename = "release-groups", default)]
     groups: Vec<Group>,
@@ -43,6 +29,21 @@ struct Group {
     kind: Option<String>,
     #[serde(rename = "secondary-types", default)]
     secondary: Vec<String>,
+    #[serde(rename = "artist-credit", default)]
+    credits: Vec<Credit>,
+}
+
+#[derive(Deserialize)]
+struct Credit {
+    #[serde(default)]
+    name: String,
+    artist: Option<CreditedArtist>,
+}
+
+#[derive(Deserialize)]
+struct CreditedArtist {
+    #[serde(default)]
+    name: String,
 }
 
 fn client() -> Result<reqwest::Client> {
@@ -76,23 +77,34 @@ async fn get(client: &reqwest::Client, url: &str, query: &[(&str, &str)]) -> Res
     unreachable!()
 }
 
+/// How long the whole sweep may run. Whatever has been found by then is returned,
+/// so a slow MusicBrainz costs a few artists, not the whole row.
+const BUDGET: Duration = Duration::from_secs(50);
+
 /// Upcoming albums, EPs and singles for these artist names, soonest first. An
-/// artist that cannot be matched exactly or answered for is skipped.
+/// artist that cannot be answered for is skipped.
 pub async fn upcoming(names: &[String], today: &str) -> Result<Vec<UpcomingRelease>> {
     let client = client()?;
     let horizon = format!("{}{}", horizon_year(today), &today[4..]);
+    let started = std::time::Instant::now();
     let mut found = Vec::new();
     for name in names {
+        if started.elapsed() > BUDGET {
+            break;
+        }
         match artist_upcoming(&client, name, today, &horizon).await {
             Ok(mut releases) => found.append(&mut releases),
             Err(error) => log::debug!("musicbrainz: {name}: {error:#}"),
         }
+        tokio::time::sleep(SPACING).await;
     }
     found.sort_by(|a, b| a.date.cmp(&b.date).then_with(|| a.title.cmp(&b.title)));
     found.dedup_by(|a, b| a.artist == b.artist && a.title == b.title);
     Ok(found)
 }
 
+/// One request per artist: release groups credited to this name whose first
+/// release date is still ahead.
 async fn artist_upcoming(
     client: &reqwest::Client,
     name: &str,
@@ -100,29 +112,8 @@ async fn artist_upcoming(
     horizon: &str,
 ) -> Result<Vec<UpcomingRelease>> {
     let escaped = name.replace(['"', '\\'], " ");
-    let bytes = get(
-        client,
-        &format!("{API}/artist/"),
-        &[
-            ("query", &format!("artist:\"{escaped}\"")),
-            ("fmt", "json"),
-            ("limit", "3"),
-        ],
-    )
-    .await?;
-    tokio::time::sleep(SPACING).await;
-    let search: ArtistSearch = serde_json::from_slice(&bytes)?;
-    // A wrong artist is worse than none: insist on the same name.
-    let Some(artist) = search
-        .artists
-        .into_iter()
-        .find(|artist| artist.score >= 95 && artist.name.eq_ignore_ascii_case(name))
-    else {
-        return Ok(Vec::new());
-    };
     let query = format!(
-        "arid:{} AND firstreleasedate:[{today} TO {horizon}] AND (primarytype:album OR primarytype:ep OR primarytype:single)",
-        artist.id
+        "artist:\"{escaped}\" AND firstreleasedate:[{today} TO {horizon}] AND (primarytype:album OR primarytype:ep OR primarytype:single)"
     );
     let bytes = get(
         client,
@@ -130,14 +121,13 @@ async fn artist_upcoming(
         &[("query", &query), ("fmt", "json"), ("limit", "10")],
     )
     .await?;
-    tokio::time::sleep(SPACING).await;
     let groups: GroupSearch = serde_json::from_slice(&bytes)?;
     Ok(groups
         .groups
         .into_iter()
-        .filter(|group| usable(group, today, horizon))
+        .filter(|group| usable(group, name, today, horizon))
         .map(|group| UpcomingRelease {
-            artist: artist.name.clone(),
+            artist: name.to_owned(),
             title: group.title,
             date: group.date,
             kind: group.kind.unwrap_or_default(),
@@ -145,9 +135,20 @@ async fn artist_upcoming(
         .collect())
 }
 
+/// Only releases credited to this exact artist, with a whole date in range, and
+/// only the studio kinds the listener plays. A different artist who shares part
+/// of the name is worse than none.
 /// Only whole dates in range, and only the studio kinds the listener plays.
-fn usable(group: &Group, today: &str, horizon: &str) -> bool {
-    group.date.len() == 10
+fn usable(group: &Group, name: &str, today: &str, horizon: &str) -> bool {
+    let credited = group.credits.iter().any(|credit| {
+        credit.name.eq_ignore_ascii_case(name)
+            || credit
+                .artist
+                .as_ref()
+                .is_some_and(|artist| artist.name.eq_ignore_ascii_case(name))
+    });
+    credited
+        && group.date.len() == 10
         && group.date.as_str() >= today
         && group.date.as_str() <= horizon
         && group.secondary.is_empty()
@@ -165,28 +166,49 @@ fn horizon_year(today: &str) -> i64 {
 mod tests {
     use super::*;
 
-    fn group(date: &str, secondary: &[&str]) -> Group {
+    fn group(date: &str, secondary: &[&str], credit: &str) -> Group {
         Group {
             title: "T".into(),
             date: date.into(),
             kind: Some("Album".into()),
             secondary: secondary.iter().map(|s| s.to_string()).collect(),
+            credits: vec![Credit {
+                name: credit.into(),
+                artist: None,
+            }],
         }
     }
 
     #[test]
-    fn keeps_only_whole_future_studio_dates() {
+    fn keeps_only_whole_future_studio_dates_by_the_artist() {
         let (today, horizon) = ("2026-11-12", "2028-11-12");
-        assert!(usable(&group("2027-03-01", &[]), today, horizon));
-        assert!(usable(&group("2026-11-12", &[]), today, horizon));
-        assert!(!usable(&group("2026-11-11", &[]), today, horizon));
-        assert!(!usable(&group("2027", &[]), today, horizon));
-        assert!(!usable(&group("2030-01-01", &[]), today, horizon));
-        assert!(!usable(&group("2027-03-01", &["Live"]), today, horizon));
+        let ok = |g: Group| usable(&g, "glaive", today, horizon);
+        assert!(ok(group("2027-03-01", &[], "glaive")));
+        assert!(ok(group("2026-11-12", &[], "GLAIVE")));
+        assert!(!ok(group("2026-11-11", &[], "glaive")));
+        assert!(!ok(group("2027", &[], "glaive")));
+        assert!(!ok(group("2030-01-01", &[], "glaive")));
+        assert!(!ok(group("2027-03-01", &["Live"], "glaive")));
+        assert!(!ok(group("2027-03-01", &[], "someone else")));
     }
 
     #[test]
     fn horizon_is_two_years_out() {
         assert_eq!(horizon_year("2026-11-12"), 2028);
+    }
+
+    /// Live check against MusicBrainz: `cargo test --lib live_upcoming -- --ignored`.
+    #[tokio::test]
+    #[ignore = "needs the network"]
+    async fn live_upcoming_finds_an_announced_album() {
+        let found = upcoming(&["glaive".to_owned()], "2026-11-12")
+            .await
+            .unwrap();
+        println!("{found:?}");
+        assert!(
+            found
+                .iter()
+                .any(|release| release.title == "Polesden Lacey")
+        );
     }
 }
