@@ -108,6 +108,12 @@ are public; Sonder never needs your client secret.
 Sonder stores the Client ID in app preferences and keeps login and playback
 tokens in macOS Keychain or Windows Credential Manager.
 
+Spotify refuses to unlock songs for many accounts created since 2024 in players
+built on librespot, Sonder included ([librespot#1649](https://github.com/librespot-org/librespot/issues/1649)).
+Sonder says so when it happens; the library, playlists and search still work.
+If playback ever stops connecting, the dialog that appears can set up its
+Spotify approval again without signing out.
+
 ## Run From Source
 
 On Windows, follow the [MSVC and Windows SDK build instructions](docs/WINDOWS.md).
