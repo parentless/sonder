@@ -321,7 +321,21 @@ Folders are walked off the UI thread on a blocking task. A rescan only reads
 file sizes and modification times for files it already knows, and files that
 could not be read are remembered, so they are not probed again. Leaving the
 page or removing a folder drops the reply, which cancels the scan between
-files. Rescans happen when Local Files is opened, at most once a minute.
+files. Rescans happen when Local Files is opened, at most once a minute, and
+when the folders change.
+
+Changes are noticed with one operating-system watch per folder (FSEvents on
+macOS, `ReadDirectoryChangesW` on Windows, through `notify`, which the UI kit
+already builds). The watch costs no polling and no thread per folder. Only
+music files, and paths that were removed, ask for a rescan; covers, lyrics and
+anything in a hidden folder do not. A change waits until the folders have been
+quiet for 1.5 seconds, so copying an album or retagging it is one rescan, and a
+change during a scan queues one more scan after it rather than starting a
+second one.
+
+Searching the page filters the list already in memory, without a query to the
+backend or SQLite. The result is kept until the list or the query changes, so
+repaints don't search again.
 
 The list is one shared `Arc<[Track]>` capped at 20,000 tracks, with a note on
 the page when a library is larger. A track takes about the same memory as a

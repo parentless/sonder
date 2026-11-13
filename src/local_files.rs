@@ -428,6 +428,62 @@ pub fn is_local_uri(uri: &str) -> bool {
     uri.starts_with("spotify:local:")
 }
 
+/// Watches the Local Files folders and calls `changed` when something in them
+/// that could be music is added, removed, renamed or rewritten. It holds one
+/// operating-system watch per folder and stops when dropped.
+pub struct FolderWatcher {
+    _watcher: notify::RecommendedWatcher,
+}
+
+impl FolderWatcher {
+    /// `None` when no folder could be watched; Local Files then still
+    /// rescans whenever it is opened.
+    pub fn new(folders: &[PathBuf], changed: impl Fn() + Send + 'static) -> Option<Self> {
+        use notify::Watcher as _;
+        let roots = folders.to_vec();
+        let mut watcher =
+            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+                let Ok(event) = event else {
+                    return;
+                };
+                if !matches!(event.kind, notify::EventKind::Access(_))
+                    && event.paths.iter().any(|path| worth_a_rescan(path, &roots))
+                {
+                    changed();
+                }
+            })
+            .inspect_err(|error| log::warn!("local files: cannot watch folders: {error}"))
+            .ok()?;
+        let mut watching = 0;
+        for folder in folders {
+            match watcher.watch(folder, notify::RecursiveMode::Recursive) {
+                Ok(()) => watching += 1,
+                Err(error) => {
+                    log::warn!("local files: cannot watch {}: {error}", folder.display())
+                }
+            }
+        }
+        (watching > 0).then_some(Self { _watcher: watcher })
+    }
+}
+
+/// Everything but other kinds of files (covers, lyrics, part-downloaded
+/// files) and anything inside a hidden folder, which the scan skips too. A
+/// path that is gone can't be told apart, so it always counts.
+fn worth_a_rescan(path: &Path, roots: &[PathBuf]) -> bool {
+    let inside = roots
+        .iter()
+        .find_map(|root| path.strip_prefix(root).ok())
+        .unwrap_or(path);
+    if inside
+        .iter()
+        .any(|part| part.to_str().is_some_and(|part| part.starts_with('.')))
+    {
+        return false;
+    }
+    is_music_file(path) || !path.is_file()
+}
+
 /// The embedded cover picture of a local file, if it has one.
 pub fn embedded_artwork(path: &Path) -> Option<Vec<u8>> {
     let (mut reader, outer) = open(path).ok()?;
@@ -625,5 +681,70 @@ mod tests {
 
         assert!(scan(std::slice::from_ref(&folder), Vec::new(), &|| true).is_none());
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn only_music_and_removals_outside_hidden_folders_ask_for_a_rescan() {
+        let folder = temp_folder("worth");
+        std::fs::write(folder.join("cover.jpg"), b"x").unwrap();
+        std::fs::write(folder.join("song.flac"), b"x").unwrap();
+        let roots = [folder.clone()];
+        assert!(worth_a_rescan(&folder.join("song.flac"), &roots));
+        assert!(worth_a_rescan(&folder.join("Album"), &roots));
+        assert!(worth_a_rescan(&folder.join("gone.txt"), &roots));
+        assert!(!worth_a_rescan(&folder.join("cover.jpg"), &roots));
+        assert!(!worth_a_rescan(
+            &folder.join(".sync").join("song.flac"),
+            &roots
+        ));
+        assert!(!worth_a_rescan(&folder.join(".partial.flac"), &roots));
+        // A dot in the folder above the music folder doesn't hide it.
+        let dotted = folder.join(".parent").join("Music");
+        std::fs::create_dir_all(&dotted).unwrap();
+        assert!(worth_a_rescan(
+            &dotted.join("song.mp3"),
+            std::slice::from_ref(&dotted)
+        ));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn the_watcher_reports_new_music_and_ignores_other_files() {
+        let folder = temp_folder("watch");
+        let (sent, changes) = std::sync::mpsc::channel();
+        let _watcher = FolderWatcher::new(std::slice::from_ref(&folder), move || {
+            let _ = sent.send(());
+        })
+        .expect("a temporary folder can be watched");
+        // Some systems still report the folder's own creation; let it pass.
+        while changes
+            .recv_timeout(std::time::Duration::from_millis(300))
+            .is_ok()
+        {}
+
+        std::fs::write(folder.join("notes.txt"), b"x").unwrap();
+        std::fs::create_dir_all(folder.join(".hidden")).unwrap();
+        std::fs::write(folder.join(".hidden").join("song.flac"), b"x").unwrap();
+        assert!(
+            changes
+                .recv_timeout(std::time::Duration::from_millis(750))
+                .is_err(),
+            "other files and hidden folders ask for no rescan"
+        );
+
+        std::fs::write(folder.join("song.flac"), b"x").unwrap();
+        assert!(
+            changes
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .is_ok(),
+            "a new song asks for a rescan"
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_missing_folder_is_not_watched() {
+        let folder = temp_folder("unwatched").join("missing");
+        assert!(FolderWatcher::new(&[folder], || {}).is_none());
     }
 }

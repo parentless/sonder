@@ -137,11 +137,45 @@ fn group_digits(value: usize) -> String {
     grouped
 }
 
+/// The tracks whose title, artist or album contain every word of `query`,
+/// ignoring case. An empty query keeps the same list.
+pub(super) fn search_tracks(tracks: &Arc<[model::Track]>, query: &str) -> Arc<[model::Track]> {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if words.is_empty() {
+        return tracks.clone();
+    }
+    tracks
+        .iter()
+        .filter(|track| {
+            let text = format!("{}\n{}\n{}", track.title, track.artist, track.album).to_lowercase();
+            words.iter().all(|word| text.contains(word.as_str()))
+        })
+        .cloned()
+        .collect()
+}
+
+/// A page's search field, and the list it last produced.
+struct TrackSearch {
+    input: Entity<InputState>,
+    query: String,
+    results: Option<SearchResults>,
+    _subscription: Subscription,
+}
+
+/// What a search found, with the list and query it came from, so a repaint
+/// or a rescan that changed nothing does not search again.
+struct SearchResults {
+    source: Arc<[model::Track]>,
+    query: String,
+    tracks: Arc<[model::Track]>,
+}
+
 /// A saved collection of tracks, listed straight from the library.
 pub(super) struct LibraryTracksPage {
     section: LibrarySection,
     library: Entity<library::Library>,
     tracks: Entity<track_list::TrackList>,
+    search: Option<TrackSearch>,
     _tracks_subscription: Subscription,
 }
 
@@ -162,7 +196,112 @@ impl LibraryTracksPage {
             library: services::AppServices::library(cx),
             _tracks_subscription: page::forward(&tracks, cx),
             tracks,
+            search: None,
         }
+    }
+
+    /// Gives the page a field that narrows its list as the listener types.
+    pub(super) fn with_search(
+        mut self,
+        placeholder: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+        let subscription = cx.subscribe(&input, |page, input, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change)
+                && let Some(search) = page.search.as_mut()
+            {
+                search.query = input.read(cx).value().trim().to_owned();
+                cx.notify();
+            }
+        });
+        self.search = Some(TrackSearch {
+            input,
+            query: String::new(),
+            results: None,
+            _subscription: subscription,
+        });
+        self
+    }
+
+    /// Empties the search field, returning whether it held anything.
+    pub(super) fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(search) = self
+            .search
+            .as_ref()
+            .filter(|search| !search.query.is_empty())
+        else {
+            return false;
+        };
+        let input = search.input.clone();
+        input.update(cx, |input, cx| input.set_value("", window, cx));
+        if let Some(search) = self.search.as_mut() {
+            search.query.clear();
+            search.results = None;
+        }
+        cx.notify();
+        true
+    }
+
+    /// The part of `tracks` the search field lets through.
+    fn searched(&mut self, tracks: Arc<[model::Track]>) -> Arc<[model::Track]> {
+        let Some(search) = self.search.as_mut() else {
+            return tracks;
+        };
+        if search.query.is_empty() {
+            search.results = None;
+            return tracks;
+        }
+        if let Some(results) = &search.results
+            && Arc::ptr_eq(&results.source, &tracks)
+            && results.query == search.query
+        {
+            return results.tracks.clone();
+        }
+        let found = search_tracks(&tracks, &search.query);
+        search.results = Some(SearchResults {
+            source: tracks,
+            query: search.query.clone(),
+            tracks: found.clone(),
+        });
+        found
+    }
+
+    fn search_field(
+        &self,
+        palette: CadencePalette,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let search = self.search.as_ref()?;
+        Some(
+            components::glass_search_frame(palette, &search.input, window, cx)
+                .id("page-search-field")
+                .test_support()
+                .flex_none()
+                .w(tokens::PAGE_SEARCH_FIELD_WIDTH)
+                .h_10()
+                .gap_2p5()
+                .text_sm()
+                .text_color(rgb(palette.text))
+                .child(components::icon(
+                    CadenceIcon::Search,
+                    tokens::FIELD_ICON,
+                    palette.text_primary,
+                ))
+                .child(
+                    Input::new(&search.input)
+                        .id("page-search-input")
+                        .appearance(false)
+                        .text_color(rgb(palette.text_primary))
+                        .bordered(false)
+                        .focus_bordered(false)
+                        .flex_1()
+                        .min_w_0()
+                        .h_full(),
+                ),
+        )
     }
 
     /// Takes down any open row menu, for a route change no click drove.
@@ -172,7 +311,7 @@ impl LibraryTracksPage {
 }
 
 impl Render for LibraryTracksPage {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
         let section = self.section;
         let (tracks, loaded, detail, no_folders) = {
@@ -185,7 +324,14 @@ impl Render for LibraryTracksPage {
                 section == LibrarySection::LocalFiles && !library.has_local_files(),
             )
         };
-        let content = if tracks.is_empty() {
+        let listed = self.searched(tracks.clone());
+        let content = if !tracks.is_empty() && listed.is_empty() {
+            let query = self
+                .search
+                .as_ref()
+                .map_or("", |search| search.query.as_str());
+            components::empty_state(palette, format!("No songs match “{query}”")).into_any_element()
+        } else if tracks.is_empty() {
             let message = if no_folders {
                 "Add a folder to list the music in it here."
             } else if loaded {
@@ -196,19 +342,36 @@ impl Render for LibraryTracksPage {
             components::empty_state(palette, message).into_any_element()
         } else {
             self.tracks
-                .update(cx, |list, cx| list.show(section.list_id(), tracks, cx));
+                .update(cx, |list, cx| list.show(section.list_id(), listed, cx));
             self.tracks.clone().into_any_element()
         };
 
+        // The field stays while it holds a query, so a search with no matches
+        // can still be cleared; it is hidden only when there is nothing to search.
+        let searching = self
+            .search
+            .as_ref()
+            .is_some_and(|search| !search.query.is_empty());
+        let search = (searching || !tracks.is_empty())
+            .then(|| self.search_field(palette, window, cx))
+            .flatten();
         let heading = components::page_heading(palette, section.title(), detail).when(
             section == LibrarySection::LocalFiles,
             |heading| {
                 heading.child(
-                    components::settings_button(palette, "local-files-folders", "Folders")
-                        .test_support()
+                    div()
+                        .flex()
                         .flex_none()
-                        .on_click(
-                            cx.listener(|_, _, _, cx| cx.emit(PageEvent::OpenLocalFilesSettings)),
+                        .items_center()
+                        .gap_2()
+                        .children(search)
+                        .child(
+                            components::settings_button(palette, "local-files-folders", "Folders")
+                                .test_support()
+                                .flex_none()
+                                .on_click(cx.listener(|_, _, _, cx| {
+                                    cx.emit(PageEvent::OpenLocalFilesSettings)
+                                })),
                         ),
                 )
             },

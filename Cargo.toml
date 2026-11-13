@@ -40,6 +40,8 @@ url = "2.5"
 # Reads tags and lengths of local music files. The same build librespot
 # decodes them with, so it adds no second copy.
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "vorbis", "flac", "isomp4", "aac", "alac", "wav", "pcm"] }
+# Watches Local Files folders for changes. gpui-kit already builds it.
+notify = "7"
 souvlaki = { version = "0.8.3", default-features = false }
 log = "0.4.33"
 

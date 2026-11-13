@@ -13,6 +13,9 @@ const REVALIDATION_DEBOUNCE: Duration = Duration::from_secs(5 * 60);
 /// Opening Local Files rescans the folders at most this often. A rescan of
 /// unchanged folders only reads file sizes and dates.
 const LOCAL_RESCAN_DEBOUNCE: Duration = Duration::from_secs(60);
+/// How long folders stay quiet before a change is scanned, so a copy or a
+/// tag editor finishes first and a burst of changes needs one scan.
+const LOCAL_CHANGE_SETTLE: Duration = Duration::from_millis(1500);
 
 /// Everything Sonder knows about the listener's music: what Spotify holds for
 /// the account, and what Sonder keeps locally about it.
@@ -50,6 +53,10 @@ struct LocalFiles {
     /// Dropping it stops the backend's walk.
     scan: Option<gpui_kit::Task<()>>,
     scanned_at: Option<SystemTime>,
+    /// The folders changed while a scan was running; scan again after it.
+    rescan_queued: bool,
+    /// Owns the folder watcher; dropping it stops watching.
+    watch: Option<gpui_kit::Task<()>>,
 }
 
 /// Raised when fresh contents arrived, so stale failures can be cleared.
@@ -196,6 +203,7 @@ impl Library {
     /// the page fills at once, then a scan for what changed while closed.
     pub(super) fn open_local_files(&mut self, folders: Vec<PathBuf>, cx: &mut Context<Self>) {
         self.local.folders = folders.into();
+        self.watch_local_folders(cx);
         self.scan_local_files(true, cx);
     }
 
@@ -257,6 +265,7 @@ impl Library {
             return Some(format!("Could not save Local Files folders: {error}").into());
         }
         self.local.folders = folders.into();
+        self.watch_local_folders(cx);
         if self.local.folders.is_empty() {
             // Nothing to show; the scan below also empties the saved index.
             self.local.tracks = Arc::default();
@@ -267,8 +276,57 @@ impl Library {
         None
     }
 
+    /// Watches the current folders, replacing any earlier watch. The watcher
+    /// is made off the UI thread, since some systems walk every subfolder.
+    fn watch_local_folders(&mut self, cx: &mut Context<Self>) {
+        self.local.watch = None;
+        if self.local.folders.is_empty() {
+            return;
+        }
+        let folders = self.local.folders.to_vec();
+        let (changed, changes) = async_channel::bounded::<()>(1);
+        self.local.watch = Some(cx.spawn(async move |this, cx| {
+            let watcher = cx
+                .background_executor()
+                .spawn(async move {
+                    crate::local_files::FolderWatcher::new(&folders, move || {
+                        // A full channel already holds a pending change.
+                        let _ = changed.try_send(());
+                    })
+                })
+                .await;
+            let Some(_watcher) = watcher else {
+                return;
+            };
+            while changes.recv().await.is_ok() {
+                cx.background_executor().timer(LOCAL_CHANGE_SETTLE).await;
+                while changes.try_recv().is_ok() {}
+                if this
+                    .update(cx, |library, cx| library.rescan_after_change(cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Something changed in the folders: scan now, or right after the scan
+    /// that is running, which may have walked past the change.
+    pub(super) fn rescan_after_change(&mut self, cx: &mut Context<Self>) {
+        if !self.has_local_files() {
+            return;
+        }
+        if self.local.scan.is_some() {
+            self.local.rescan_queued = true;
+        } else {
+            self.scan_local_files(false, cx);
+        }
+    }
+
     /// Replaces any scan in flight, whose folders are now out of date.
     fn scan_local_files(&mut self, saved_first: bool, cx: &mut Context<Self>) {
+        self.local.rescan_queued = false;
         let backend = self.backend.clone();
         let folders = self.local.folders.to_vec();
         self.local.scan = Some(cx.spawn(async move |this, cx| {
@@ -303,6 +361,9 @@ impl Library {
                     None => log::warn!("local files: backend stopped before answering"),
                 }
                 library.local.loaded = true;
+                if std::mem::take(&mut library.local.rescan_queued) {
+                    library.scan_local_files(false, cx);
+                }
                 cx.notify();
             });
         }));

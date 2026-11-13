@@ -979,6 +979,7 @@ dependencies = [
  "librespot",
  "log",
  "md-5",
+ "notify",
  "oauth2",
  "objc",
  "open",

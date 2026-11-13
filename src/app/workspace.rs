@@ -89,7 +89,13 @@ impl Workspace {
         };
         let liked_songs = library_page(LibrarySection::LikedSongs, cx);
         let recent = library_page(LibrarySection::Recent, cx);
-        let local_files = library_page(LibrarySection::LocalFiles, cx);
+        let local_files = cx.new(|cx| {
+            library_pages::LibraryTracksPage::new(LibrarySection::LocalFiles, cx).with_search(
+                "Search in Local Files",
+                window,
+                cx,
+            )
+        });
         let playlists = cx.new(library_pages::PlaylistsPage::new);
         let home = cx.new(|cx| home::HomePage::new(backend.clone(), cx));
         let search = cx.new(|cx| catalog::SearchPage::new(backend.clone(), cx));

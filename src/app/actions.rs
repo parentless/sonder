@@ -40,7 +40,7 @@ impl Workspace {
     pub(super) fn dismiss_overlay(
         &mut self,
         _: &DismissOverlay,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // An in-flight scrub is the most immediate thing Escape can undo, so it
@@ -51,6 +51,13 @@ impl Workspace {
         if self
             .toolbar
             .update(cx, |toolbar, cx| toolbar.close_suggestions(cx))
+        {
+            return;
+        }
+        if self.router.route() == Route::LocalFiles
+            && self
+                .local_files
+                .update(cx, |page, cx| page.clear_search(window, cx))
         {
             return;
         }
