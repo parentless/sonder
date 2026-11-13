@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Sender as StdSender},
     },
     thread,
@@ -10,7 +10,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, anyhow};
-use librespot::{core::SpotifyUri, playback::player::PlayerEvent};
+use librespot::playback::player::PlayerEvent;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::{
@@ -383,6 +383,13 @@ pub enum BackendCommand {
     PlayContext {
         tracks: Vec<Track>,
         index: usize,
+    },
+    /// Answers with the saved Local Files index; with `rescan`, first walks
+    /// `folders` and saves what changed. Dropping the reply stops the walk.
+    LoadLocalFiles {
+        folders: Vec<std::path::PathBuf>,
+        rescan: bool,
+        respond: Reply<crate::local_files::LocalLibrary>,
     },
     PlayNext(Track),
     AppendToQueue(Track),
@@ -1359,6 +1366,16 @@ impl Worker {
                 self.catalog.album(self.spotify.clone(), source_id, respond);
                 Ok(())
             }
+            BackendCommand::StartRadio { request_id, seed } if seed.is_local() => {
+                let _ = self
+                    .events
+                    .send(BackendEvent::RadioFailed {
+                        request_id,
+                        error: "Track radio needs a song from Spotify".to_owned(),
+                    })
+                    .await;
+                Ok(())
+            }
             BackendCommand::StartRadio { request_id, seed } => {
                 self.radio
                     .start(
@@ -1391,6 +1408,19 @@ impl Worker {
             } => {
                 self.prepare_playlist_context(next_offset.map(|offset| (playlist, offset)));
                 self.play_context(tracks, index).await
+            }
+            BackendCommand::LoadLocalFiles {
+                folders,
+                rescan,
+                respond,
+            } => {
+                tokio::spawn(load_local_files(
+                    self.store.clone(),
+                    folders,
+                    rescan,
+                    respond,
+                ));
+                Ok(())
             }
             BackendCommand::PlayNext(track) => self.play_next(track).await,
             BackendCommand::AppendToQueue(track) => self.append_to_queue(track).await,
@@ -2295,6 +2325,11 @@ impl Worker {
         let Some(seed) = self.queue.tracks.get(index).cloned() else {
             return;
         };
+        // Spotify radio is seeded by a Spotify track; a local file has no
+        // place in its catalog, so the queue simply ends.
+        if seed.is_local() {
+            return;
+        }
         if self.autoplay.fruitless_seed.as_deref() == Some(seed.source_id.as_str()) {
             return;
         }
@@ -3353,6 +3388,60 @@ fn observe_playback(player: &Playback, events: &EventSender) -> tokio::task::Joi
     })
 }
 
+/// Serves the Local Files index, walking the folders first when asked. The
+/// walk runs on the blocking pool: it is file I/O, and an unchanged file costs
+/// one `stat`. It stops as soon as nobody waits for the answer.
+async fn load_local_files(
+    store: BlockingStore,
+    folders: Vec<std::path::PathBuf>,
+    rescan: bool,
+    mut respond: Reply<crate::local_files::LocalLibrary>,
+) {
+    use crate::local_files::{LocalLibrary, scan};
+    let saved = match store.call(|store| store.local_index()).await {
+        Ok(saved) => saved,
+        Err(error) => {
+            let _ = respond.send(Err(error));
+            return;
+        }
+    };
+    if !rescan {
+        let _ = respond.send(Ok(LocalLibrary::from_index(saved)));
+        return;
+    }
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let walk = tokio::task::spawn_blocking({
+        let cancelled = cancelled.clone();
+        let previous = saved.clone();
+        move || scan(&folders, previous, &|| cancelled.load(Ordering::Relaxed))
+    });
+    let entries = tokio::select! {
+        entries = walk => entries,
+        () = respond.closed() => {
+            cancelled.store(true, Ordering::Relaxed);
+            return;
+        }
+    };
+    let entries = match entries {
+        Ok(Some(entries)) => entries,
+        Ok(None) => return,
+        Err(error) => {
+            let _ = respond.send(Err(anyhow!("local files scan stopped: {error}")));
+            return;
+        }
+    };
+    if entries != saved {
+        let saved_entries = entries.clone();
+        if let Err(error) = store
+            .call(move |store| store.replace_local_index(&saved_entries))
+            .await
+        {
+            log::warn!("local files: could not save the index: {error:#}");
+        }
+    }
+    let _ = respond.send(Ok(LocalLibrary::from_index(entries)));
+}
+
 async fn load_context_track(
     playback: &Option<Playback>,
     tracks: &[Track],
@@ -3362,16 +3451,12 @@ async fn load_context_track(
     let track = tracks
         .get(index)
         .context("playback track index is out of bounds")?;
-    let spotify_uri = track
-        .spotify_uri
-        .as_deref()
-        .context("track has no Spotify playback URI")?;
-    let spotify_uri = SpotifyUri::from_uri(spotify_uri).context("invalid Spotify track URI")?;
+    let uri = crate::playback::playback_uri(track)?;
     let player = playback
         .as_ref()
         .context("Spotify playback is not connected")?;
     send_playback_context(tracks, index, events).await;
-    player.load(spotify_uri, true, 0);
+    player.load_track(track, uri, true, 0);
     Ok(())
 }
 
@@ -3387,16 +3472,12 @@ async fn restore_context_track(
     let track = tracks
         .get(index)
         .context("playback track index is out of bounds")?;
-    let spotify_uri = track
-        .spotify_uri
-        .as_deref()
-        .context("track has no Spotify playback URI")?;
-    let spotify_uri = SpotifyUri::from_uri(spotify_uri).context("invalid Spotify track URI")?;
+    let uri = crate::playback::playback_uri(track)?;
     let player = playback
         .as_ref()
         .context("Spotify playback is not connected")?;
     send_playback_context(tracks, index, events).await;
-    player.load(spotify_uri, playing, position_ms);
+    player.load_track(track, uri, playing, position_ms);
     Ok(())
 }
 

@@ -1,5 +1,7 @@
 use super::*;
 
+use std::path::{Path, PathBuf};
+
 /// Debounce between revalidations, so rapid window switches coalesce. Short
 /// on purpose: a revalidation is a two-request head probe unless something
 /// changed, and Spotify's rate limit is a rolling 30-second window. Wall
@@ -7,6 +9,10 @@ use super::*;
 /// Coming back to the window re-checks the library at most this often; each
 /// check is two Spotify requests.
 const REVALIDATION_DEBOUNCE: Duration = Duration::from_secs(5 * 60);
+
+/// Opening Local Files rescans the folders at most this often. A rescan of
+/// unchanged folders only reads file sizes and dates.
+const LOCAL_RESCAN_DEBOUNCE: Duration = Duration::from_secs(60);
 
 /// Everything Sonder knows about the listener's music: what Spotify holds for
 /// the account, and what Sonder keeps locally about it.
@@ -28,6 +34,22 @@ pub(super) struct Library {
     /// When the contents last arrived, so returning to the window repeatedly
     /// does not refetch the whole library every time.
     refreshed_at: Option<SystemTime>,
+    local: LocalFiles,
+}
+
+/// Music from folders on this computer. Empty, and never scanned, until the
+/// listener adds a folder.
+#[derive(Default)]
+struct LocalFiles {
+    folders: Arc<[PathBuf]>,
+    tracks: Arc<[model::Track]>,
+    unreadable: usize,
+    truncated: bool,
+    /// The saved index or a scan has answered at least once.
+    loaded: bool,
+    /// Dropping it stops the backend's walk.
+    scan: Option<gpui_kit::Task<()>>,
+    scanned_at: Option<SystemTime>,
 }
 
 /// Raised when fresh contents arrived, so stale failures can be cleared.
@@ -53,6 +75,7 @@ impl Library {
             spotify_like_request: None,
             boot_refreshing: false,
             refreshed_at: None,
+            local: LocalFiles::default(),
         }
     }
 
@@ -136,6 +159,170 @@ impl Library {
 
     pub(super) fn local_loaded(&self) -> bool {
         self.local_loaded
+    }
+
+    /// Whether the listener uses Local Files: at least one folder is added.
+    pub(super) fn has_local_files(&self) -> bool {
+        !self.local.folders.is_empty()
+    }
+
+    pub(super) fn local_folders(&self) -> &Arc<[PathBuf]> {
+        &self.local.folders
+    }
+
+    pub(super) fn local_tracks(&self) -> &Arc<[model::Track]> {
+        &self.local.tracks
+    }
+
+    pub(super) fn local_files_loaded(&self) -> bool {
+        self.local.loaded
+    }
+
+    pub(super) fn local_files_scanning(&self) -> bool {
+        self.local.scan.is_some()
+    }
+
+    /// Music files found in the folders that could not be read.
+    pub(super) fn local_unreadable(&self) -> usize {
+        self.local.unreadable
+    }
+
+    /// The folders hold more than Local Files lists.
+    pub(super) fn local_truncated(&self) -> bool {
+        self.local.truncated
+    }
+
+    /// Starts Local Files with the saved folders: the saved index first, so
+    /// the page fills at once, then a scan for what changed while closed.
+    pub(super) fn open_local_files(&mut self, folders: Vec<PathBuf>, cx: &mut Context<Self>) {
+        self.local.folders = folders.into();
+        self.scan_local_files(true, cx);
+    }
+
+    /// Rescans when Local Files is opened, unless a scan just ran.
+    pub(super) fn refresh_local_files(&mut self, cx: &mut Context<Self>) {
+        let recent = self.local.scanned_at.is_some_and(|scanned_at| {
+            scanned_at
+                .elapsed()
+                .is_ok_and(|elapsed| elapsed < LOCAL_RESCAN_DEBOUNCE)
+        });
+        if self.has_local_files() && self.local.scan.is_none() && !recent {
+            self.scan_local_files(false, cx);
+        }
+    }
+
+    /// Adds folders the listener picked, ignoring ones already added, saves
+    /// them and scans. Returns the save error, if any.
+    pub(super) fn add_local_folders(
+        &mut self,
+        picked: Vec<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> Option<SharedString> {
+        let mut folders = self.local.folders.to_vec();
+        for folder in picked {
+            if !folders.contains(&folder) {
+                folders.push(folder);
+            }
+        }
+        if folders.len() == self.local.folders.len() {
+            return None;
+        }
+        self.set_local_folders(folders, cx)
+    }
+
+    pub(super) fn remove_local_folder(
+        &mut self,
+        folder: &Path,
+        cx: &mut Context<Self>,
+    ) -> Option<SharedString> {
+        let folders: Vec<_> = self
+            .local
+            .folders
+            .iter()
+            .filter(|known| known.as_path() != folder)
+            .cloned()
+            .collect();
+        self.set_local_folders(folders, cx)
+    }
+
+    fn set_local_folders(
+        &mut self,
+        folders: Vec<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> Option<SharedString> {
+        let saved = services::require_settings_storage(services::AppServices::set_local_folders(
+            &folders, cx,
+        ));
+        if let Err(error) = saved {
+            return Some(format!("Could not save Local Files folders: {error}").into());
+        }
+        self.local.folders = folders.into();
+        if self.local.folders.is_empty() {
+            // Nothing to show; the scan below also empties the saved index.
+            self.local.tracks = Arc::default();
+            self.local.unreadable = 0;
+            self.local.truncated = false;
+        }
+        self.scan_local_files(false, cx);
+        None
+    }
+
+    /// Replaces any scan in flight, whose folders are now out of date.
+    fn scan_local_files(&mut self, saved_first: bool, cx: &mut Context<Self>) {
+        let backend = self.backend.clone();
+        let folders = self.local.folders.to_vec();
+        self.local.scan = Some(cx.spawn(async move |this, cx| {
+            let ask = |rescan: bool| {
+                let (respond, reply) = tokio::sync::oneshot::channel();
+                backend
+                    .send(BackendCommand::LoadLocalFiles {
+                        folders: folders.clone(),
+                        rescan,
+                        respond,
+                    })
+                    .then_some(reply)
+            };
+            if saved_first && let Some(reply) = ask(false) {
+                let saved = reply.await;
+                let _ = this.update(cx, |library, cx| {
+                    if let Ok(Ok(saved)) = saved {
+                        library.show_local_files(saved, cx);
+                    }
+                });
+            }
+            let scanned = match ask(true) {
+                Some(reply) => reply.await.ok(),
+                None => None,
+            };
+            let _ = this.update(cx, |library, cx| {
+                library.local.scan = None;
+                library.local.scanned_at = Some(SystemTime::now());
+                match scanned {
+                    Some(Ok(scanned)) => library.show_local_files(scanned, cx),
+                    Some(Err(error)) => log::warn!("local files: scan failed: {error:#}"),
+                    None => log::warn!("local files: backend stopped before answering"),
+                }
+                library.local.loaded = true;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    fn show_local_files(
+        &mut self,
+        found: crate::local_files::LocalLibrary,
+        cx: &mut Context<Self>,
+    ) {
+        self.local.loaded = true;
+        self.local.unreadable = found.unreadable;
+        self.local.truncated = found.truncated;
+        // An unchanged rescan keeps the same Arc, so the list keeps its rows
+        // and scroll position without rebuilding.
+        if self.local.tracks.as_ref() != found.tracks.as_slice() {
+            self.local.tracks = found.tracks.into();
+        }
+        cx.notify();
     }
 
     pub(super) fn is_playlist_pinned(&self, playlist: &model::Playlist) -> bool {

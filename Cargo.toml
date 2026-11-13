@@ -37,6 +37,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.53", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 url = "2.5"
+# Reads tags and lengths of local music files. The same build librespot
+# decodes them with, so it adds no second copy.
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "vorbis", "flac", "isomp4", "aac", "alac", "wav", "pcm"] }
 souvlaki = { version = "0.8.3", default-features = false }
 log = "0.4.33"
 
@@ -77,3 +80,6 @@ debug = "line-tables-only"
 gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
 # Upstream exits the process on a free account; this copy lets Cadence show a screen.
 librespot-core = { path = "vendor/librespot-core" }
+# Local files: any sample rate or channel count, more formats, and paths found
+# from Sonder's own index instead of a folder scan when the player starts.
+librespot-playback = { path = "vendor/librespot-playback" }

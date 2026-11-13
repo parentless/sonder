@@ -21,7 +21,7 @@ struct NavItem {
     route: Route,
 }
 
-const NAV_ITEMS: [NavItem; 4] = [
+const NAV_ITEMS: [NavItem; 5] = [
     NavItem {
         id: "nav-home",
         fill_id: "nav-home-fill",
@@ -53,6 +53,15 @@ const NAV_ITEMS: [NavItem; 4] = [
         icon: CadenceIcon::Clock,
         selected_icon: CadenceIcon::ClockFilled,
         route: Route::Recent,
+    },
+    // Shown only once the listener has added a folder.
+    NavItem {
+        id: "nav-local-files",
+        fill_id: "nav-local-files-fill",
+        label: "Local Files",
+        icon: CadenceIcon::Folder,
+        selected_icon: CadenceIcon::FolderFilled,
+        route: Route::LocalFiles,
     },
 ];
 
@@ -370,9 +379,11 @@ impl Sidebar {
             target_progress,
             row_width,
         };
+        let show_local_files = self.library.read(cx).has_local_files();
         let nav_rows: Vec<_> = NAV_ITEMS
             .iter()
             .zip(&self.nav_focus)
+            .filter(|(item, _)| item.route != Route::LocalFiles || show_local_files)
             .map(|(item, focus_handle)| {
                 self.nav_item(item, focus_handle, &transition, palette, window, cx)
             })

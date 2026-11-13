@@ -35,6 +35,8 @@ enum Scene {
     Settings,
     SettingsAutoplayOff,
     SettingsCache,
+    LocalFiles,
+    SettingsLocalFiles,
     Setup,
     SetupFilled,
     PremiumRequired,
@@ -85,6 +87,8 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("settings", Scene::Settings),
         ("settings-cache", Scene::SettingsCache),
         ("settings-autoplay-off", Scene::SettingsAutoplayOff),
+        ("local-files", Scene::LocalFiles),
+        ("settings-local-files", Scene::SettingsLocalFiles),
         ("setup", Scene::Setup),
         ("setup-filled", Scene::SetupFilled),
         ("premium-required", Scene::PremiumRequired),
@@ -375,6 +379,52 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             .expect("settings store")
                             .expect("save autoplay");
                         workspace.settings.update(cx, |_, cx| cx.notify());
+                    }
+                }
+                Scene::LocalFiles | Scene::SettingsLocalFiles => {
+                    let tracks = super::local_library();
+                    // Embedded artwork, seeded like any other cover.
+                    let cover = image::RgbaImage::from_fn(64, 64, |x, y| {
+                        image::Rgba([170 - (y * 2) as u8, 120 + x as u8, 96, 255])
+                    });
+                    services::AppServices::image_cache(cx).update(cx, |cache, _| {
+                        cache.seed_artist_fixture(
+                            tracks[0].artwork_url.as_ref().unwrap(),
+                            Arc::new(gpui_kit::RenderImage::new([image::Frame::new(cover)])),
+                        )
+                    });
+                    workspace.library.update(cx, |library, cx| {
+                        library.open_local_files(super::local_folders(), cx)
+                    });
+                    let BackendCommand::LoadLocalFiles { respond, .. } =
+                        backend.commands.try_recv().expect("saved Local Files")
+                    else {
+                        panic!("expected a Local Files request")
+                    };
+                    respond
+                        .send(Ok(crate::local_files::LocalLibrary {
+                            tracks: tracks.clone(),
+                            unreadable: 0,
+                            truncated: false,
+                        }))
+                        .unwrap();
+                    if matches!(scene, Scene::LocalFiles) {
+                        services::AppServices::player(cx).update(cx, |player, cx| {
+                            player.handle_backend_event(
+                                BackendEvent::PlaybackSnapshotLoaded {
+                                    current: tracks[0].clone(),
+                                    next: tracks[1..].to_vec(),
+                                    position_ms: 72_000,
+                                },
+                                cx,
+                            );
+                        });
+                        workspace.navigate(Route::LocalFiles, cx);
+                    } else {
+                        workspace.open_settings(cx);
+                        workspace
+                            .settings
+                            .update(cx, |settings, cx| settings.show_local_files(cx));
                     }
                 }
                 Scene::Queue { open, .. } => {
@@ -715,6 +765,21 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             for character in "0123456789abcdef0123456789abcdef".chars() {
                 press_key(&mut cx, handle.into(), &character.to_string());
             }
+        }
+        Scene::LocalFiles | Scene::SettingsLocalFiles => {
+            // The rescan after the saved index finds the same files.
+            while let Ok(command) = backend.commands.try_recv() {
+                if let BackendCommand::LoadLocalFiles { respond, .. } = command {
+                    respond
+                        .send(Ok(crate::local_files::LocalLibrary {
+                            tracks: super::local_library(),
+                            unreadable: 0,
+                            truncated: false,
+                        }))
+                        .unwrap();
+                }
+            }
+            settle(&mut cx, handle.into());
         }
         _ => {}
     }

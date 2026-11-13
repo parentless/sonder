@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::TestSupportExt as _;
 
 use page::PageEvent;
 
@@ -10,6 +11,7 @@ use page::PageEvent;
 pub(super) enum LibrarySection {
     LikedSongs,
     Recent,
+    LocalFiles,
 }
 
 impl LibrarySection {
@@ -17,6 +19,7 @@ impl LibrarySection {
         match self {
             Self::LikedSongs => "liked-songs-page",
             Self::Recent => "recent-page",
+            Self::LocalFiles => "local-files-page",
         }
     }
 
@@ -24,6 +27,7 @@ impl LibrarySection {
         match self {
             Self::LikedSongs => "liked-tracks",
             Self::Recent => "recent-tracks",
+            Self::LocalFiles => "local-tracks",
         }
     }
 
@@ -31,6 +35,7 @@ impl LibrarySection {
         match self {
             Self::LikedSongs => "Liked Songs",
             Self::Recent => "Recently played",
+            Self::LocalFiles => "Local Files",
         }
     }
 
@@ -38,6 +43,9 @@ impl LibrarySection {
         match self {
             Self::LikedSongs => "No liked songs",
             Self::Recent => "No listening history yet",
+            Self::LocalFiles => {
+                "No music found in these folders. Sonder plays MP3, FLAC, Ogg, M4A and WAV files."
+            }
         }
     }
 
@@ -45,6 +53,7 @@ impl LibrarySection {
         match self {
             Self::LikedSongs => "Loading liked songs…",
             Self::Recent => "Loading listening history…",
+            Self::LocalFiles => "Looking for music…",
         }
     }
 
@@ -52,6 +61,7 @@ impl LibrarySection {
         match self {
             Self::LikedSongs => library.liked_tracks().clone(),
             Self::Recent => library.recently_played().clone(),
+            Self::LocalFiles => library.local_tracks().clone(),
         }
     }
 
@@ -61,6 +71,7 @@ impl LibrarySection {
         match self {
             Self::LikedSongs => library.loaded(),
             Self::Recent => library.local_loaded(),
+            Self::LocalFiles => library.local_files_loaded(),
         }
     }
 
@@ -75,8 +86,55 @@ impl LibrarySection {
                 library.reloading(),
             ),
             Self::Recent => "Listening history".to_owned(),
+            Self::LocalFiles => local_files_detail(library, track_count),
         }
     }
+}
+
+/// "1,204 tracks from 2 folders", plus what the listener should know about
+/// the last scan.
+fn local_files_detail(library: &library::Library, track_count: usize) -> String {
+    let folders = library.local_folders().len();
+    let mut detail = format!(
+        "{} from {}",
+        count(track_count, "track", "tracks"),
+        count(folders, "folder", "folders")
+    );
+    if library.local_truncated() {
+        detail.push_str(&format!(
+            " · showing the first {}",
+            group_digits(crate::local_files::MAX_TRACKS)
+        ));
+    }
+    let unreadable = library.local_unreadable();
+    if unreadable > 0 {
+        detail.push_str(&format!(
+            " · {} couldn’t be read",
+            count(unreadable, "file", "files")
+        ));
+    }
+    components::revalidating_detail(detail, library.local_files_scanning())
+}
+
+fn count(value: usize, one: &str, many: &str) -> String {
+    format!(
+        "{} {}",
+        group_digits(value),
+        if value == 1 { one } else { many }
+    )
+}
+
+/// 20000 as "20,000".
+fn group_digits(value: usize) -> String {
+    let digits = value.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
 }
 
 /// A saved collection of tracks, listed straight from the library.
@@ -117,17 +175,20 @@ impl Render for LibraryTracksPage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
         let section = self.section;
-        let (tracks, loaded, detail) = {
+        let (tracks, loaded, detail, no_folders) = {
             let library = self.library.read(cx);
             let tracks = section.tracks(library);
             (
                 tracks.clone(),
                 section.loaded(library),
                 section.detail(library, tracks.len()),
+                section == LibrarySection::LocalFiles && !library.has_local_files(),
             )
         };
         let content = if tracks.is_empty() {
-            let message = if loaded {
+            let message = if no_folders {
+                "Add a folder to list the music in it here."
+            } else if loaded {
                 section.empty_message()
             } else {
                 section.loading_message()
@@ -139,9 +200,22 @@ impl Render for LibraryTracksPage {
             self.tracks.clone().into_any_element()
         };
 
+        let heading = components::page_heading(palette, section.title(), detail).when(
+            section == LibrarySection::LocalFiles,
+            |heading| {
+                heading.child(
+                    components::settings_button(palette, "local-files-folders", "Folders")
+                        .test_support()
+                        .flex_none()
+                        .on_click(
+                            cx.listener(|_, _, _, cx| cx.emit(PageEvent::OpenLocalFilesSettings)),
+                        ),
+                )
+            },
+        );
         components::page(section.page_id())
             .pt_3()
-            .child(components::page_heading(palette, section.title(), detail))
+            .child(heading)
             .child(content)
     }
 }

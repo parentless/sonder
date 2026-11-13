@@ -189,6 +189,7 @@ impl Workspace {
         self.liked_songs.update(cx, |page, cx| page.close_menus(cx));
         self.home.update(cx, |page, cx| page.close_menus(cx));
         self.recent.update(cx, |page, cx| page.close_menus(cx));
+        self.local_files.update(cx, |page, cx| page.close_menus(cx));
         self.search.update(cx, |page, cx| page.close_menus(cx));
         self.playlist.update(cx, |page, cx| page.close_menus(cx));
         self.artist.update(cx, |page, cx| page.close_menus(cx));
@@ -202,6 +203,11 @@ impl Workspace {
 
     pub(super) fn navigate(&mut self, route: Route, cx: &mut Context<Self>) {
         self.router.navigate(route);
+        if route == Route::LocalFiles {
+            // Picks up files added or changed since the last look.
+            self.library
+                .update(cx, |library, cx| library.refresh_local_files(cx));
+        }
         self.settle_navigation(cx);
     }
 
@@ -284,6 +290,11 @@ impl Workspace {
             page::PageEvent::OpenArtist(artist) => self.open_artist(artist.clone(), origin, cx),
             page::PageEvent::OpenAlbum(album) => self.open_album(album.clone(), origin, cx),
             page::PageEvent::StartRadio(track) => self.start_track_radio(track.clone(), cx),
+            page::PageEvent::OpenLocalFilesSettings => {
+                self.settings
+                    .update(cx, |settings, cx| settings.show_local_files(cx));
+                self.open_settings(cx);
+            }
         }
         cx.notify();
     }

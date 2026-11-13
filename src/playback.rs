@@ -1,7 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
+    path::PathBuf,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU16, Ordering},
     },
     time::Duration,
@@ -27,6 +28,7 @@ use tokio::net::TcpListener;
 
 use crate::{
     audio_output, credential_worker,
+    model::Track,
     oauth_callback::receive_callback,
     oauth_page::{OAuthStep, success_page},
 };
@@ -106,6 +108,37 @@ pub struct Playback {
     player: Arc<Player>,
     mixer: Arc<dyn Mixer>,
     session: Session,
+    local_files: LocalFilePaths,
+}
+
+/// How many local files the player can find at once: the one loading, plus
+/// any it has not finished opening when the listener skips on.
+const REMEMBERED_LOCAL_FILES: usize = 8;
+
+/// Which file each recently loaded `spotify:local:` URI means. A local URI
+/// only names tags and a length, so the path comes from the track itself
+/// just before it loads. Nothing scans folders when playback connects.
+#[derive(Clone, Default)]
+struct LocalFilePaths(Arc<Mutex<VecDeque<(SpotifyUri, PathBuf)>>>);
+
+impl LocalFilePaths {
+    fn remember(&self, uri: SpotifyUri, path: PathBuf) {
+        let mut paths = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
+        paths.retain(|(known, _)| *known != uri);
+        paths.push_back((uri, path));
+        while paths.len() > REMEMBERED_LOCAL_FILES {
+            paths.pop_front();
+        }
+    }
+
+    fn find(&self, uri: &SpotifyUri) -> Option<PathBuf> {
+        let paths = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
+        paths
+            .iter()
+            .rev()
+            .find(|(known, _)| known == uri)
+            .map(|(_, path)| path.clone())
+    }
 }
 
 impl Playback {
@@ -238,8 +271,11 @@ impl Playback {
             MixerConfig::default(),
         )?;
         let volume = mixer.get_soft_volume();
+        let local_files = LocalFilePaths::default();
+        let resolver = local_files.clone();
         let player_config = PlayerConfig {
             position_update_interval: Some(Duration::from_millis(500)),
+            local_file_resolver: Some(Arc::new(move |uri| resolver.find(uri))),
             normalisation: NORMALISE_VOLUME.load(Ordering::Relaxed),
             bitrate: match STREAMING_KBPS.load(Ordering::Relaxed) {
                 96 => Bitrate::Bitrate96,
@@ -255,11 +291,18 @@ impl Playback {
             player,
             mixer,
             session,
+            local_files,
         })
     }
 
-    pub fn load(&self, spotify_uri: SpotifyUri, playing: bool, position_ms: u32) {
-        self.player.load(spotify_uri, playing, position_ms);
+    /// Loads a Spotify track, or a local file by the path its track carries.
+    /// `uri` is the track's [`playback_uri`].
+    pub fn load_track(&self, track: &Track, uri: SpotifyUri, playing: bool, position_ms: u32) {
+        if track.is_local() {
+            self.local_files
+                .remember(uri.clone(), PathBuf::from(&track.source_id));
+        }
+        self.player.load(uri, playing, position_ms);
     }
 
     pub fn play(&self) {
@@ -301,6 +344,14 @@ impl Playback {
             .context("Spotify track radio endpoint failed")?;
         extract_track_uris(&response).context("Spotify track radio returned invalid JSON")
     }
+}
+
+pub(crate) fn playback_uri(track: &Track) -> Result<SpotifyUri> {
+    let uri = track
+        .spotify_uri
+        .as_deref()
+        .context("track has no Spotify playback URI")?;
+    SpotifyUri::from_uri(uri).context("invalid Spotify track URI")
 }
 
 fn playback_oauth_client() -> Result<PlaybackOAuthClient> {
@@ -437,7 +488,23 @@ pub async fn delete_playback_refresh_token() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Playback, extract_track_uris, validate_refresh_token};
+    use super::{LocalFilePaths, Playback, extract_track_uris, validate_refresh_token};
+    use librespot::core::SpotifyUri;
+    use std::path::PathBuf;
+
+    #[test]
+    fn local_file_paths_follow_the_latest_load_and_stay_bounded() {
+        let paths = LocalFilePaths::default();
+        let uri = |n: u32| SpotifyUri::from_uri(&format!("spotify:local:A::T{n}:60")).unwrap();
+        paths.remember(uri(0), PathBuf::from("first.mp3"));
+        paths.remember(uri(0), PathBuf::from("moved.mp3"));
+        assert_eq!(paths.find(&uri(0)), Some(PathBuf::from("moved.mp3")));
+        for n in 1..=super::REMEMBERED_LOCAL_FILES as u32 {
+            paths.remember(uri(n), PathBuf::from(format!("{n}.mp3")));
+        }
+        assert_eq!(paths.find(&uri(0)), None);
+        assert_eq!(paths.0.lock().unwrap().len(), super::REMEMBERED_LOCAL_FILES);
+    }
 
     #[test]
     fn empty_refresh_tokens_are_rejected() {
@@ -482,5 +549,139 @@ mod tests {
                 "spotify:track:abcdefghijklmnopqrstuv"
             ]
         );
+    }
+}
+
+/// Local files through librespot's real player, as Sonder configures it,
+/// into a sink that records what would reach the speakers.
+#[cfg(test)]
+mod local_playback_tests {
+    use std::{
+        path::{Path, PathBuf},
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+
+    use librespot::{
+        core::{config::SessionConfig, session::Session},
+        playback::{
+            audio_backend::{Sink, SinkResult},
+            config::PlayerConfig,
+            convert::Converter,
+            decoder::AudioPacket,
+            mixer::NoOpVolume,
+            player::{Player, PlayerEvent},
+        },
+    };
+
+    use super::{LocalFilePaths, playback_uri};
+    use crate::local_files::{LocalLibrary, scan, write_test_wav};
+
+    struct Recorder(Arc<Mutex<usize>>);
+
+    impl Sink for Recorder {
+        fn write(&mut self, packet: AudioPacket, _: &mut Converter) -> SinkResult<()> {
+            *self.0.lock().unwrap() += packet.samples().map_or(0, <[f64]>::len);
+            Ok(())
+        }
+    }
+
+    /// Plays `file` to the end and returns the stereo frames the sink got at
+    /// 44.1 kHz, or `None` when the player reported it unplayable.
+    async fn play_to_end(file: &Path) -> Option<usize> {
+        let folder = file.parent().unwrap().to_path_buf();
+        let entries = scan(&[folder], Vec::new(), &|| false).unwrap();
+        let library = LocalLibrary::from_index(entries);
+        let track = library
+            .tracks
+            .iter()
+            .find(|track| Path::new(&track.source_id) == file)
+            .expect("the scan reads the file")
+            .clone();
+
+        let paths = LocalFilePaths::default();
+        let resolver = paths.clone();
+        let config = PlayerConfig {
+            local_file_resolver: Some(Arc::new(move |uri| resolver.find(uri))),
+            ..PlayerConfig::default()
+        };
+        let samples = Arc::new(Mutex::new(0));
+        let recorded = samples.clone();
+        let player = Player::new(
+            config,
+            Session::new(SessionConfig::default(), None),
+            Box::new(NoOpVolume),
+            move || Box::new(Recorder(recorded)),
+        );
+        let mut events = player.get_player_event_channel();
+        let uri = playback_uri(&track).unwrap();
+        paths.remember(uri.clone(), PathBuf::from(&track.source_id));
+        player.load(uri, true, 0);
+        let finished = tokio::time::timeout(Duration::from_secs(30), async {
+            while let Some(event) = events.recv().await {
+                match event {
+                    PlayerEvent::EndOfTrack { .. } => return true,
+                    PlayerEvent::Unavailable { .. } => return false,
+                    _ => {}
+                }
+            }
+            false
+        })
+        .await
+        .expect("the player answers within 30 seconds");
+        player.stop();
+        finished.then(|| *samples.lock().unwrap() / 2)
+    }
+
+    fn temp_folder(name: &str) -> PathBuf {
+        let folder = std::env::temp_dir().join(format!(
+            "sonder-local-playback-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    /// Spotify's own format and two that upstream librespot refuses: another
+    /// sample rate, and mono.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn local_files_play_through_the_player_at_any_rate_and_channel_count() {
+        for (rate, channels) in [(44_100, 2), (48_000, 1), (22_050, 2)] {
+            let folder = temp_folder(&format!("{rate}-{channels}"));
+            let file = folder.join("Ana Lind - Harbour.wav");
+            write_test_wav(&file, rate, channels, 2);
+            let frames = play_to_end(&file)
+                .await
+                .unwrap_or_else(|| panic!("{rate} Hz, {channels} channel(s) did not play"));
+            // Exactly two seconds at 44.1 kHz.
+            assert_eq!(frames, 88_200, "{rate} Hz, {channels} channel(s)");
+            let _ = std::fs::remove_dir_all(&folder);
+        }
+    }
+
+    /// Real encoded files, when `SONDER_LOCAL_FILES_SAMPLES` names a folder of
+    /// them: each must play to the end with about its own length in audio.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sample_folder_plays_when_provided() {
+        let Some(folder) = std::env::var_os("SONDER_LOCAL_FILES_SAMPLES") else {
+            return;
+        };
+        let entries = scan(&[PathBuf::from(folder)], Vec::new(), &|| false).unwrap();
+        let library = LocalLibrary::from_index(entries);
+        assert_eq!(library.unreadable, 0, "every sample can be read");
+        for track in &library.tracks {
+            let frames = play_to_end(Path::new(&track.source_id))
+                .await
+                .unwrap_or_else(|| panic!("{} did not play", track.source_id));
+            let expected = u64::from(track.duration_ms) * 44_100 / 1000;
+            let difference = (frames as u64).abs_diff(expected);
+            assert!(
+                difference < 44_100 / 4,
+                "{}: {frames} frames, expected about {expected}",
+                track.source_id
+            );
+            eprintln!("played {} ({frames} frames)", track.source_id);
+        }
     }
 }

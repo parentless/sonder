@@ -61,6 +61,7 @@ pub(super) struct Settings {
     lastfm_token: Option<String>,
     lastfm_busy: bool,
     cache_cleared: bool,
+    local_files_error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -124,8 +125,152 @@ impl Settings {
             discord_application_id,
             discord_error: None,
             cache_cleared: false,
+            local_files_error: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Shows the Local Files folders, the last section of the General tab.
+    pub(super) fn show_local_files(&mut self, cx: &mut Context<Self>) {
+        self.tab = SettingsTab::General;
+        self.scroll.scroll_to_bottom();
+        cx.notify();
+    }
+
+    fn pick_local_folders(&mut self, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: true,
+            prompt: Some("Add to Local Files".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(folders))) = picked.await else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.local_files_error = services::AppServices::library(cx)
+                    .update(cx, |library, cx| library.add_local_folders(folders, cx));
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The folders Local Files reads, with a way to add and remove them.
+    fn local_files_section(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
+        let library = services::AppServices::library(cx);
+        let (folders, status) = {
+            let library = library.read(cx);
+            let status = if library.local_files_scanning() {
+                "Looking for music…".to_owned()
+            } else {
+                let tracks = library.local_tracks().len();
+                format!("{tracks} {}", if tracks == 1 { "track" } else { "tracks" })
+            };
+            (library.local_folders().clone(), status)
+        };
+        let add = components::settings_button(palette, "settings-local-files-add", "Add folder")
+            .test_support()
+            .on_click(cx.listener(|this, _, _, cx| this.pick_local_folders(cx)));
+        let card = div()
+            .mt_4()
+            .rounded_2xl()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .bg(rgb(palette.surface_raised))
+            .p_5();
+        let card = if folders.is_empty() {
+            card.child(Self::playback_setting_row(
+                palette,
+                "Folders",
+                "Music in the folders you add appears under Local Files. Sonder plays MP3, FLAC, Ogg, M4A and WAV files.",
+                add,
+            ))
+        } else {
+            card.children(folders.iter().enumerate().map(|(index, folder)| {
+                let removed = folder.clone();
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_3()
+                    .when(index > 0, |row| {
+                        row.mt_3()
+                            .pt_3()
+                            .border_t_1()
+                            .border_color(rgb(palette.border))
+                    })
+                    .child(components::icon(
+                        CadenceIcon::Folder,
+                        tokens::CONTROL_ICON,
+                        palette.text_muted,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(tokens::BODY_TEXT)
+                            .text_color(rgb(palette.text))
+                            .child(folder.display().to_string()),
+                    )
+                    .child(
+                        components::icon_button_sized(
+                            palette,
+                            ("settings-local-files-remove", index),
+                            CadenceIcon::Close,
+                            tokens::MENU_ICON,
+                        )
+                        .test_support()
+                        .size_8()
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new("Remove folder")
+                                .build(window, cx)
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.local_files_error = services::AppServices::library(cx)
+                                .update(cx, |library, cx| {
+                                    library.remove_local_folder(&removed, cx)
+                                });
+                            cx.notify();
+                        })),
+                    )
+            }))
+            .child(
+                h_flex()
+                    .mt_5()
+                    .pt_5()
+                    .border_t_1()
+                    .border_color(rgb(palette.border))
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_size(tokens::BODY_TEXT)
+                            .text_color(rgb(palette.text_muted))
+                            .child(status),
+                    )
+                    .child(add),
+            )
+        };
+        div()
+            .mt_12()
+            .child(Self::settings_section_header(
+                palette,
+                "Local Files",
+                "Play music saved on this computer.",
+            ))
+            .child(card)
+            .when_some(self.local_files_error.clone(), |section, error| {
+                section.child(
+                    div()
+                        .mt_2()
+                        .text_sm()
+                        .text_color(rgb(palette.text))
+                        .child(error),
+                )
+            })
     }
 
     #[cfg(test)]
@@ -384,6 +529,7 @@ impl Settings {
                                     }),
                             ),
                     )
+                    .child(self.local_files_section(palette, cx))
                     )
                     .when(tab == SettingsTab::Connections, |content| content
                     .child(

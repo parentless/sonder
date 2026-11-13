@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub enum Provider {
     Spotify,
     Tidal,
+    /// A music file on this computer, from a folder the listener added.
+    Local,
 }
 
 impl Provider {
@@ -13,6 +15,7 @@ impl Provider {
         match self {
             Self::Spotify => "spotify",
             Self::Tidal => "tidal",
+            Self::Local => "local",
         }
     }
 
@@ -20,6 +23,7 @@ impl Provider {
         match value {
             "spotify" => Some(Self::Spotify),
             "tidal" => Some(Self::Tidal),
+            "local" => Some(Self::Local),
             _ => None,
         }
     }
@@ -79,6 +83,11 @@ pub struct Album {
 }
 
 impl Track {
+    /// A file from Local Files rather than something streamed from Spotify.
+    pub fn is_local(&self) -> bool {
+        self.provider == Provider::Local
+    }
+
     pub fn is_displayable(&self) -> bool {
         !self.title.trim().is_empty() && !self.artist.trim().is_empty() && self.duration_ms > 0
     }

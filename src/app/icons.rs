@@ -40,11 +40,13 @@ pub(super) enum CadenceIcon {
     Star,
     StarFilled,
     Lock,
+    Folder,
+    FolderFilled,
 }
 
 impl CadenceIcon {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 34] = [
+    pub(super) const ALL: [Self; 36] = [
         Self::Home,
         Self::HomeFilled,
         Self::Heart,
@@ -79,6 +81,8 @@ impl CadenceIcon {
         Self::Star,
         Self::StarFilled,
         Self::Lock,
+        Self::Folder,
+        Self::FolderFilled,
     ];
 
     fn file_name(self) -> &'static str {
@@ -117,6 +121,8 @@ impl CadenceIcon {
             Self::Star => "star",
             Self::StarFilled => "star-filled",
             Self::Lock => "lock",
+            Self::Folder => "folder",
+            Self::FolderFilled => "folder-filled",
         }
     }
 }
