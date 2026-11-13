@@ -195,8 +195,8 @@ impl Settings {
                     .items_center()
                     .gap_3()
                     .when(index > 0, |row| {
-                        row.mt_3()
-                            .pt_3()
+                        row.mt_5()
+                            .pt_5()
                             .border_t_1()
                             .border_color(rgb(palette.border))
                     })
