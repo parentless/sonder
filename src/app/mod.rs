@@ -367,6 +367,7 @@ mod media_controls;
 mod onboarding;
 mod page;
 mod playback_clock;
+mod playback_help;
 mod player;
 mod player_bar;
 mod release_watch;

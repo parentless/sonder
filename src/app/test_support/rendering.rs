@@ -43,6 +43,9 @@ enum Scene {
     SearchEntered,
     CachedSearch,
     PlaybackPending,
+    StreamingRefused,
+    PlaybackNotConnected,
+    PlaybackApproval,
     SearchArtists,
     SearchGalleryScrolled,
     ShuffleOn,
@@ -93,6 +96,9 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("search-entered", Scene::SearchEntered),
         ("search-cached", Scene::CachedSearch),
         ("playback-pending", Scene::PlaybackPending),
+        ("streaming-refused", Scene::StreamingRefused),
+        ("playback-not-connected", Scene::PlaybackNotConnected),
+        ("playback-approval", Scene::PlaybackApproval),
         ("search-artists", Scene::SearchArtists),
         ("search-gallery-scrolled", Scene::SearchGalleryScrolled),
         ("shuffle-on", Scene::ShuffleOn),
@@ -366,6 +372,22 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     }
                 }
                 Scene::PlaybackPending => { services::AppServices::player(cx).update(cx, |player, cx| player.set_loading(true, cx)); }
+                Scene::StreamingRefused | Scene::PlaybackNotConnected | Scene::PlaybackApproval => {
+                    let event = match scene {
+                        Scene::StreamingRefused => BackendEvent::StreamingRefused,
+                        Scene::PlaybackNotConnected => BackendEvent::PlaybackConnectFailed(
+                            "could not refresh librespot playback credentials: invalid_grant: Refresh token revoked".into(),
+                        ),
+                        _ => BackendEvent::PlaybackApprovalRequested {
+                            url: "https://accounts.spotify.com/authorize".into(),
+                        },
+                    };
+                    services::AppServices::player(cx).update(cx, |player, cx| {
+                        player.handle_backend_event(event, cx);
+                    });
+                    // The refused account also pauses the song it was opening.
+                    while backend.commands.try_recv().is_ok() {}
+                }
                 Scene::ShuffleOn => { services::AppServices::player(cx).update(cx, |player, cx| player.toggle_shuffle(cx)); }
                 Scene::UpdateAvailable => { workspace.toolbar.update(cx, |toolbar, cx| toolbar.seed_update_available(cx)); }
                 Scene::Settings | Scene::SettingsAutoplayOff | Scene::SettingsCache => {

@@ -414,6 +414,36 @@ impl Workspace {
         )
     }
 
+    /// A playback problem only the listener can act on, while signed in.
+    fn playback_help(
+        &self,
+        palette: CadencePalette,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        if !self.session.read(cx).is_ready() {
+            return None;
+        }
+        let problem = self.player.read(cx).problem()?.clone();
+        let account_name = self
+            .session
+            .read(cx)
+            .profile()
+            .map(|profile| profile.display_name.clone());
+        let workspace = cx.entity().downgrade();
+        Some(playback_help::playback_problem_dialog(
+            palette,
+            &problem,
+            account_name,
+            window,
+            move |action, cx| {
+                let _ = workspace.update(cx, |workspace, cx| {
+                    workspace.act_on_playback_help(action, cx)
+                });
+            },
+        ))
+    }
+
     fn app_change_confirmation(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
         chrome::spotify_app_change_confirmation(
             palette,
@@ -437,6 +467,7 @@ impl Render for Workspace {
         let action_notice = self.action_notice_banner(palette, cx);
 
         let scrim = self.signed_out_scrim(palette, cx);
+        let playback_help = self.playback_help(palette, window, cx);
         self.sidebar.update(cx, |sidebar, cx| {
             sidebar.set_compact_layout(compact_layout, cx)
         });
@@ -529,6 +560,7 @@ impl Render for Workspace {
             .child(self.player_bar.clone())
             .when_some(scrim, |root, scrim| root.child(deferred(scrim)))
             .when_some(action_notice, |root, notice| root.child(notice))
+            .when_some(playback_help, |root, dialog| root.child(deferred(dialog)))
             .when(app_change_open, |root| {
                 root.child(deferred(self.app_change_confirmation(palette, cx)))
             })

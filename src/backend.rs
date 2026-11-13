@@ -10,7 +10,10 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, anyhow};
-use librespot::{core::SpotifyUri, playback::player::PlayerEvent};
+use librespot::{
+    core::{SpotifyId, SpotifyUri},
+    playback::player::PlayerEvent,
+};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::{
@@ -403,6 +406,11 @@ pub enum BackendCommand {
     },
     Resume,
     Pause,
+    /// Connects playback again with the saved sign-in.
+    RetryPlayback,
+    /// Forgets the playback sign-in and asks Spotify for a new one in the
+    /// browser, keeping the account's library sign-in and queue.
+    ResetPlayback,
     Next,
     Previous,
     Seek(u32),
@@ -499,8 +507,16 @@ pub enum BackendEvent {
         error: String,
     },
     PlaybackFailed(String),
+    /// Playback could not connect, so nothing can play until it does.
+    PlaybackConnectFailed(String),
+    /// The playback sign-in page is open in the browser, waiting for approval.
+    PlaybackApprovalRequested {
+        url: String,
+    },
     /// The account is on the free plan, which cannot stream through Sonder.
     PremiumRequired,
+    /// Spotify refuses to unlock songs for this account, whatever the song.
+    StreamingRefused,
     TrackFailed {
         spotify_uri: String,
         error: String,
@@ -1467,6 +1483,14 @@ impl Worker {
             }
             BackendCommand::Resume => self.resume().await,
             BackendCommand::Pause => self.pause().await,
+            BackendCommand::RetryPlayback => {
+                self.retry_playback();
+                Ok(())
+            }
+            BackendCommand::ResetPlayback => {
+                self.reset_playback().await;
+                Ok(())
+            }
             BackendCommand::MarkPlayed(track) => self.mark_played(track).await,
             BackendCommand::SetShuffle(enabled) => {
                 self.shuffle = enabled;
@@ -1990,6 +2014,56 @@ impl Worker {
         self.connection.disconnect();
     }
 
+    /// Connects playback again with what is saved, as on launch.
+    fn retry_playback(&mut self) {
+        self.connection.pending_play = None;
+        self.connection.begin_connect(PlaybackConnectionRequest {
+            load_saved_token: !self.playback_credentials_invalidated,
+            authorization: None,
+        });
+    }
+
+    /// Drops the playback sign-in and starts a fresh one. The library sign-in,
+    /// queue and settings stay; only the player's own approval is redone.
+    async fn reset_playback(&mut self) {
+        self.connection.abort_attempts();
+        self.connection.disconnect();
+        self.connection.pending_play = None;
+        self.playback_credentials_invalidated = true;
+        if let Err(error) = self.store.set_playback_credentials_invalidated(true).await {
+            send_error(&self.events, error).await;
+        }
+        if let Err(error) = delete_playback_refresh_token().await {
+            send_error(&self.events, error).await;
+        }
+        let authorization = match Playback::prepare_authorization().await {
+            Ok(authorization) => authorization,
+            Err(error) => {
+                let _ = self
+                    .events
+                    .send(BackendEvent::PlaybackConnectFailed(format!("{error:#}")))
+                    .await;
+                return;
+            }
+        };
+        let url = authorization.url().to_owned();
+        log::info!("playback: asking for a new playback sign-in");
+        let _ = self
+            .events
+            .send(BackendEvent::PlaybackApprovalRequested { url: url.clone() })
+            .await;
+        // The window offers to open the page again if this one doesn't show.
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = open::that(url) {
+                log::warn!("playback: could not open the sign-in page: {error}");
+            }
+        });
+        self.connection.begin_connect(PlaybackConnectionRequest {
+            load_saved_token: false,
+            authorization: Some(authorization),
+        });
+    }
+
     async fn finish_connect(&mut self, connected: Finished<Result<Playback>>) {
         self.connection.connect = None;
         match connected {
@@ -2030,9 +2104,10 @@ impl Worker {
                 {
                     let _ = self.events.send(BackendEvent::PremiumRequired).await;
                 } else {
+                    log::warn!("playback: could not connect: {error:#}");
                     let _ = self
                         .events
-                        .send(BackendEvent::PlaybackFailed(error.to_string()))
+                        .send(BackendEvent::PlaybackConnectFailed(format!("{error:#}")))
                         .await;
                 }
             }
@@ -3280,15 +3355,78 @@ async fn logout_account(store: BlockingStore, spotify: Spotify) -> Result<()> {
     }
 }
 
+/// Shown when Spotify wouldn't hand over a song's decryption key.
+const SONG_REFUSED: &str = "Spotify wouldn’t unlock this song";
+
 fn observe_playback(player: &Playback, events: &EventSender) -> tokio::task::JoinHandle<()> {
     let mut player_events = player.events();
+    let mut key_outcomes = Some(player.key_outcomes());
     let event_sender = events.clone();
     tokio::spawn(async move {
-        while let Some(event) = player_events.recv().await {
+        let mut keys = crate::playback::KeyRefusals::default();
+        // The song being opened, and those already reported as failed, so the
+        // player's own late "unavailable" for them is not reported twice.
+        let mut loading: Option<SpotifyUri> = None;
+        let mut reported: Vec<SpotifyId> = Vec::new();
+        loop {
+            let event = tokio::select! {
+                event = player_events.recv() => match event {
+                    Some(event) => event,
+                    None => break,
+                },
+                outcome = async {
+                    match key_outcomes.as_mut() {
+                        Some(outcomes) => outcomes.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    let outcome = match outcome {
+                        Ok(outcome) => outcome,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            key_outcomes = None;
+                            continue;
+                        }
+                    };
+                    let verdict = keys.record(outcome);
+                    if let Some(code) = outcome.refused {
+                        log::warn!("playback: Spotify refused a song key ({code:#06x}): {verdict:?}");
+                    }
+                    let current = loading
+                        .as_ref()
+                        .filter(|uri| SpotifyId::try_from(*uri).ok() == Some(outcome.track));
+                    let event = match (verdict, current) {
+                        (crate::playback::KeyVerdict::Unlocked, _) => None,
+                        (crate::playback::KeyVerdict::AccountRefused, _) => {
+                            Some(BackendEvent::StreamingRefused)
+                        }
+                        // Without its key the player would spend seconds
+                        // decoding noise before giving up; say so now.
+                        (crate::playback::KeyVerdict::SongRefused, Some(uri)) => {
+                            Some(BackendEvent::TrackFailed {
+                                spotify_uri: uri.to_string(),
+                                error: SONG_REFUSED.to_owned(),
+                            })
+                        }
+                        // A song fetched ahead of time; it is reported when it
+                        // is reached.
+                        (crate::playback::KeyVerdict::SongRefused, None) => None,
+                    };
+                    if let Some(event) = event {
+                        if outcome.refused.is_some() && current.is_some() {
+                            remember_reported(&mut reported, outcome.track);
+                        }
+                        let _ = event_sender.send(event).await;
+                    }
+                    continue;
+                }
+            };
             let event = match event {
-                PlayerEvent::Loading { track_id, .. } => Some(BackendEvent::Loading {
-                    spotify_uri: track_id.to_string(),
-                }),
+                PlayerEvent::Loading { track_id, .. } => {
+                    let spotify_uri = track_id.to_string();
+                    loading = Some(track_id);
+                    Some(BackendEvent::Loading { spotify_uri })
+                }
                 PlayerEvent::Playing {
                     track_id,
                     position_ms,
@@ -3322,10 +3460,23 @@ fn observe_playback(player: &Playback, events: &EventSender) -> tokio::task::Joi
                 PlayerEvent::EndOfTrack { track_id, .. } => Some(BackendEvent::EndOfTrack {
                     spotify_uri: track_id.to_string(),
                 }),
-                PlayerEvent::Unavailable { track_id, .. } => Some(BackendEvent::TrackFailed {
-                    spotify_uri: track_id.to_string(),
-                    error: "Spotify cannot play this track".to_owned(),
-                }),
+                PlayerEvent::Unavailable { track_id, .. } => {
+                    let id = SpotifyId::try_from(&track_id).ok();
+                    if id.is_some_and(|id| reported.contains(&id)) {
+                        None
+                    } else {
+                        let refused = id.is_some_and(|id| keys.refused(&id));
+                        Some(BackendEvent::TrackFailed {
+                            spotify_uri: track_id.to_string(),
+                            error: if refused {
+                                SONG_REFUSED
+                            } else {
+                                "Spotify cannot play this track"
+                            }
+                            .to_owned(),
+                        })
+                    }
+                }
                 PlayerEvent::PositionChanged {
                     track_id,
                     position_ms,
@@ -3351,6 +3502,17 @@ fn observe_playback(player: &Playback, events: &EventSender) -> tokio::task::Joi
             }
         }
     })
+}
+
+/// Keeps the last few songs already reported as failed.
+fn remember_reported(reported: &mut Vec<SpotifyId>, track: SpotifyId) {
+    if reported.contains(&track) {
+        return;
+    }
+    if reported.len() == 8 {
+        reported.remove(0);
+    }
+    reported.push(track);
 }
 
 async fn load_context_track(

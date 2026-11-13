@@ -10,7 +10,10 @@ use std::{
 use anyhow::{Context as _, Result, anyhow};
 use keyring::Entry;
 use librespot::{
-    core::{SpotifyUri, authentication::Credentials, config::SessionConfig, session::Session},
+    core::{
+        SpotifyId, SpotifyUri, audio_key::AudioKeyOutcome, authentication::Credentials,
+        config::SessionConfig, session::Session,
+    },
     oauth::OAuthClientBuilder,
     playback::{
         config::{AudioFormat, Bitrate, PlayerConfig, VolumeCtrl},
@@ -287,6 +290,11 @@ impl Playback {
         self.player.get_player_event_channel()
     }
 
+    /// Spotify's answer to every later request for a song's decryption key.
+    pub fn key_outcomes(&self) -> tokio::sync::broadcast::Receiver<AudioKeyOutcome> {
+        self.session.audio_key().outcomes()
+    }
+
     pub fn is_connected(&self) -> bool {
         !self.session.is_invalid()
     }
@@ -433,6 +441,108 @@ pub async fn delete_playback_refresh_token() -> Result<()> {
             .with_context(|| format!("could not invalidate credential after {delete_error}")),
     })
     .await
+}
+
+/// What a key answer says about the account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyVerdict {
+    Unlocked,
+    /// This song could not be unlocked; others may still play.
+    SongRefused,
+    /// Spotify refuses to unlock any song for this account. Many accounts made
+    /// since 2024 get this from every player that streams like Sonder does.
+    AccountRefused,
+}
+
+/// Tells an account Spotify won't stream to apart from a song that failed.
+/// Two different songs refused, and none ever unlocked in this session, is the
+/// account; a refusal after any song played is only that song.
+#[derive(Default)]
+pub(crate) struct KeyRefusals {
+    unlocked: bool,
+    refused: Vec<SpotifyId>,
+}
+
+/// Enough to see two different songs; the list never grows past this.
+const REMEMBERED_REFUSALS: usize = 8;
+
+impl KeyRefusals {
+    pub(crate) fn record(&mut self, outcome: AudioKeyOutcome) -> KeyVerdict {
+        if outcome.refused.is_none() {
+            self.unlocked = true;
+            return KeyVerdict::Unlocked;
+        }
+        if !self.refused.contains(&outcome.track) {
+            if self.refused.len() == REMEMBERED_REFUSALS {
+                self.refused.remove(0);
+            }
+            self.refused.push(outcome.track);
+        }
+        if !self.unlocked && self.refused.len() >= 2 {
+            KeyVerdict::AccountRefused
+        } else {
+            KeyVerdict::SongRefused
+        }
+    }
+
+    pub(crate) fn refused(&self, track: &SpotifyId) -> bool {
+        self.refused.contains(track)
+    }
+}
+
+#[cfg(test)]
+mod key_refusal_tests {
+    use super::*;
+
+    fn song(n: u128) -> SpotifyId {
+        SpotifyId { id: n }
+    }
+
+    fn refused(n: u128) -> AudioKeyOutcome {
+        AudioKeyOutcome {
+            track: song(n),
+            refused: Some(1),
+        }
+    }
+
+    fn unlocked(n: u128) -> AudioKeyOutcome {
+        AudioKeyOutcome {
+            track: song(n),
+            refused: None,
+        }
+    }
+
+    #[test]
+    fn two_different_songs_refused_before_any_plays_is_the_account() {
+        let mut keys = KeyRefusals::default();
+        assert_eq!(keys.record(refused(1)), KeyVerdict::SongRefused);
+        // The same song again is not more evidence.
+        assert_eq!(keys.record(refused(1)), KeyVerdict::SongRefused);
+        assert_eq!(keys.record(refused(2)), KeyVerdict::AccountRefused);
+        assert_eq!(keys.record(refused(3)), KeyVerdict::AccountRefused);
+        assert!(keys.refused(&song(2)));
+        assert!(!keys.refused(&song(9)));
+    }
+
+    #[test]
+    fn once_a_song_unlocked_refusals_are_only_those_songs() {
+        let mut keys = KeyRefusals::default();
+        assert_eq!(keys.record(unlocked(1)), KeyVerdict::Unlocked);
+        assert_eq!(keys.record(refused(2)), KeyVerdict::SongRefused);
+        assert_eq!(keys.record(refused(3)), KeyVerdict::SongRefused);
+        assert_eq!(keys.record(refused(4)), KeyVerdict::SongRefused);
+    }
+
+    #[test]
+    fn remembered_refusals_stay_bounded() {
+        let mut keys = KeyRefusals::default();
+        for n in 0..100 {
+            keys.record(refused(n));
+        }
+        assert_eq!(keys.refused.len(), REMEMBERED_REFUSALS);
+        assert!(keys.refused(&song(99)));
+        assert!(!keys.refused(&song(0)));
+    }
 }
 
 #[cfg(test)]

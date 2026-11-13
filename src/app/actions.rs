@@ -56,6 +56,36 @@ impl Workspace {
         }
         if self.session.read(cx).app_change_confirmation_open() {
             self.cancel_spotify_app_change(cx);
+            return;
+        }
+        self.player
+            .update(cx, |player, cx| player.dismiss_problem(cx));
+    }
+
+    pub(super) fn act_on_playback_help(
+        &mut self,
+        action: playback_help::PlaybackHelpAction,
+        cx: &mut Context<Self>,
+    ) {
+        use playback_help::PlaybackHelpAction;
+        match action {
+            PlaybackHelpAction::Dismiss => {
+                self.player
+                    .update(cx, |player, cx| player.dismiss_problem(cx));
+            }
+            PlaybackHelpAction::Retry => {
+                self.player
+                    .update(cx, |player, cx| player.retry_playback(cx));
+            }
+            PlaybackHelpAction::Reset => {
+                self.player
+                    .update(cx, |player, cx| player.reset_playback(cx));
+            }
+            PlaybackHelpAction::UseAnotherAccount => {
+                self.player
+                    .update(cx, |player, cx| player.dismiss_problem(cx));
+                self.session.update(cx, |session, cx| session.logout(cx));
+            }
         }
     }
 
