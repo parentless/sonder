@@ -393,21 +393,11 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             Arc::new(gpui_kit::RenderImage::new([image::Frame::new(cover)])),
                         )
                     });
+                    // The requests go out from a task; they are answered once
+                    // the window has settled.
                     workspace.library.update(cx, |library, cx| {
                         library.open_local_files(super::local_folders(), cx)
                     });
-                    let BackendCommand::LoadLocalFiles { respond, .. } =
-                        backend.commands.try_recv().expect("saved Local Files")
-                    else {
-                        panic!("expected a Local Files request")
-                    };
-                    respond
-                        .send(Ok(crate::local_files::LocalLibrary {
-                            tracks: tracks.clone(),
-                            unreadable: 0,
-                            truncated: false,
-                        }))
-                        .unwrap();
                     if matches!(scene, Scene::LocalFiles) {
                         services::AppServices::player(cx).update(cx, |player, cx| {
                             player.handle_backend_event(
@@ -441,6 +431,8 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
     cx.update_window(handle.into(), |_, window, _| window.activate_window())
         .expect("activate fixture window");
     settle(&mut cx, handle.into());
+    // Requests a scene leaves unanswered, kept so their replies stay pending.
+    let mut held_commands = Vec::new();
     match scene {
         Scene::AlbumReview => {
             // Two tracks locked in, the third open with a rating chosen.
@@ -767,19 +759,28 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             }
         }
         Scene::LocalFiles | Scene::SettingsLocalFiles => {
-            // The rescan after the saved index finds the same files.
-            while let Ok(command) = backend.commands.try_recv() {
-                if let BackendCommand::LoadLocalFiles { respond, .. } = command {
-                    respond
-                        .send(Ok(crate::local_files::LocalLibrary {
-                            tracks: super::local_library(),
-                            unreadable: 0,
-                            truncated: false,
-                        }))
-                        .unwrap();
+            // The saved index, then a rescan that finds the same files.
+            let mut answered = 0;
+            for _ in 0..4 {
+                while let Ok(command) = backend.commands.try_recv() {
+                    match command {
+                        BackendCommand::LoadLocalFiles { respond, .. } => {
+                            respond
+                                .send(Ok(crate::local_files::LocalLibrary {
+                                    tracks: super::local_library(),
+                                    unreadable: 0,
+                                    truncated: false,
+                                }))
+                                .unwrap();
+                            answered += 1;
+                        }
+                        // Anything else stays pending, as in other scenes.
+                        other => held_commands.push(other),
+                    }
                 }
+                settle(&mut cx, handle.into());
             }
-            settle(&mut cx, handle.into());
+            assert_eq!(answered, 2, "the saved index and one rescan");
         }
         _ => {}
     }
