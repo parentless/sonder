@@ -45,6 +45,7 @@ enum Scene {
     HomePermission,
     SearchEntered,
     SearchLive,
+    SearchEmpty,
     CachedSearch,
     PlaybackPending,
     StreamingRefused,
@@ -102,6 +103,7 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("home-permission", Scene::HomePermission),
         ("search-entered", Scene::SearchEntered),
         ("search-live", Scene::SearchLive),
+        ("search-empty", Scene::SearchEmpty),
         ("search-cached", Scene::CachedSearch),
         ("playback-pending", Scene::PlaybackPending),
         ("streaming-refused", Scene::StreamingRefused),
@@ -769,7 +771,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             })
             .expect("artist menu is visible over backdrop");
         }
-        Scene::SearchEntered | Scene::CachedSearch | Scene::SearchLive => {
+        Scene::SearchEntered | Scene::CachedSearch | Scene::SearchLive | Scene::SearchEmpty => {
             press_key(
                 &mut cx,
                 handle.into(),
@@ -803,6 +805,23 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     }
                 }
                 assert!(answered, "a pause in typing asks Spotify");
+                settle(&mut cx, handle.into());
+            }
+            if matches!(scene, Scene::SearchEmpty) {
+                // Return submits the search and Spotify finds nothing.
+                press_key(&mut cx, handle.into(), "enter");
+                settle(&mut cx, handle.into());
+                let mut answered = false;
+                while let Ok(command) = backend.commands.try_recv() {
+                    match command {
+                        BackendCommand::SearchCatalog { respond, .. } => {
+                            respond.send(Ok(Default::default())).unwrap();
+                            answered = true;
+                        }
+                        other => held_commands.push(other),
+                    }
+                }
+                assert!(answered, "Return asks Spotify");
                 settle(&mut cx, handle.into());
             }
             if matches!(scene, Scene::CachedSearch) {

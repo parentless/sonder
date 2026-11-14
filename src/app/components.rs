@@ -421,14 +421,52 @@ pub(super) fn section_label(palette: CadencePalette, text: impl Into<SharedStrin
         .child(text.into())
 }
 
-pub(super) fn empty_state(palette: CadencePalette, text: impl Into<SharedString>) -> Div {
+/// A page with nothing to show, or that could not load: an icon tile, a plain
+/// title and one line of help, centred. Callers add an action as a child.
+pub(super) fn empty_state(
+    palette: CadencePalette,
+    glyph: CadenceIcon,
+    title: impl Into<SharedString>,
+    detail: Option<SharedString>,
+) -> Div {
     div()
-        .p_6()
-        .rounded(tokens::PANEL_RADIUS)
-        .border_1()
-        .border_color(rgb(palette.border))
-        .text_color(rgb(palette.text_muted))
-        .child(text.into())
+        .w_full()
+        .pt_8()
+        .pb_6()
+        .px_6()
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap_3()
+        .text_center()
+        .child(
+            div()
+                .size(Rems(3.5))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(Rems(1.))
+                .bg(rgb(palette.control))
+                .child(icon(glyph, Rems(1.625), palette.text_muted)),
+        )
+        .child(
+            div()
+                .mt_1()
+                .text_xl()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(rgb(palette.text_primary))
+                .child(title.into()),
+        )
+        .when_some(detail, |state, detail| {
+            state.child(
+                div()
+                    .max_w(Rems(29.))
+                    .text_sm()
+                    .line_height(relative(1.5))
+                    .text_color(rgb(palette.text_muted))
+                    .child(detail),
+            )
+        })
 }
 
 pub(super) fn artwork(

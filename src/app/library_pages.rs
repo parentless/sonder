@@ -39,13 +39,24 @@ impl LibrarySection {
         }
     }
 
-    fn empty_message(self) -> &'static str {
+    /// Icon, title and help for a section with nothing in it.
+    fn empty_message(self) -> (CadenceIcon, &'static str, &'static str) {
         match self {
-            Self::LikedSongs => "No liked songs",
-            Self::Recent => "No listening history yet",
-            Self::LocalFiles => {
-                "No music found in these folders. Sonder plays MP3, FLAC, Ogg, M4A and WAV files."
-            }
+            Self::LikedSongs => (
+                CadenceIcon::Heart,
+                "No liked songs",
+                "Tap the heart on a song to add it here.",
+            ),
+            Self::Recent => (
+                CadenceIcon::Clock,
+                "No listening history yet",
+                "Songs you play will show up here.",
+            ),
+            Self::LocalFiles => (
+                CadenceIcon::Folder,
+                "No music found",
+                "Sonder plays MP3, FLAC, Ogg, M4A and WAV files from your folders.",
+            ),
         }
     }
 
@@ -330,16 +341,29 @@ impl Render for LibraryTracksPage {
                 .search
                 .as_ref()
                 .map_or("", |search| search.query.as_str());
-            components::empty_state(palette, format!("No songs match “{query}”")).into_any_element()
+            components::empty_state(
+                palette,
+                CadenceIcon::Search,
+                format!("No songs match “{query}”"),
+                Some("Try a different word.".into()),
+            )
+            .into_any_element()
         } else if tracks.is_empty() {
-            let message = if no_folders {
-                "Add a folder to list the music in it here."
+            if no_folders {
+                components::empty_state(
+                    palette,
+                    CadenceIcon::Folder,
+                    "No folders yet",
+                    Some("Add a folder to list the music in it here.".into()),
+                )
+                .into_any_element()
             } else if loaded {
-                section.empty_message()
+                let (glyph, title, detail) = section.empty_message();
+                components::empty_state(palette, glyph, title, Some(detail.into()))
+                    .into_any_element()
             } else {
-                section.loading_message()
-            };
-            components::empty_state(palette, message).into_any_element()
+                components::page_detail(palette, section.loading_message()).into_any_element()
+            }
         } else {
             self.tracks
                 .update(cx, |list, cx| list.show(section.list_id(), listed, cx));
@@ -416,7 +440,13 @@ impl Render for PlaylistsPage {
         };
         let content = if playlists.is_empty() {
             if loaded {
-                components::empty_state(palette, "No Spotify playlists").into_any_element()
+                components::empty_state(
+                    palette,
+                    CadenceIcon::Playlist,
+                    "No Spotify playlists",
+                    Some("Playlists you create or follow in Spotify show up here.".into()),
+                )
+                .into_any_element()
             } else {
                 components::list_skeleton(palette).into_any_element()
             }

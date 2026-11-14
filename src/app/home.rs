@@ -517,14 +517,21 @@ impl Render for HomePage {
         } else if self.error.is_some() && !loaded {
             div().child(components::empty_state(
                 palette,
-                "Unable to load your top artists and tracks",
+                CadenceIcon::MusicNote,
+                "Couldn’t load your top artists and tracks",
+                Some("Spotify didn’t answer. Try again in a moment.".into()),
             ))
         } else if !loaded {
             div().child(components::list_skeleton_rows(palette, 4))
         } else if artists.is_empty() && tracks.is_empty() {
             div().child(components::empty_state(
                 palette,
-                "Listen to more music and your top artists and tracks will show up here",
+                CadenceIcon::MusicNote,
+                "Nothing here yet",
+                Some(
+                    "Listen to more music and your top artists and tracks will show up here."
+                        .into(),
+                ),
             ))
         } else {
             let mut cards = div().flex().flex_wrap().gap_4();

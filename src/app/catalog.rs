@@ -1017,7 +1017,9 @@ impl ArtistPage {
         if let Some(error) = &self.error {
             return components::empty_state(
                 appearance::Appearance::palette(cx),
-                format!("Unable to load artist: {error}"),
+                CadenceIcon::Person,
+                "Couldn’t open this artist",
+                Some(error.to_string().into()),
             )
             .into_any_element();
         }
@@ -1713,11 +1715,30 @@ impl Render for SearchPage {
         if self.searching {
             content = content.child(components::list_skeleton(palette));
         } else if self.error.is_some() {
-            content = content.child(components::empty_state(palette, "Unable to search Spotify"));
+            content = content.child(components::empty_state(
+                palette,
+                CadenceIcon::Search,
+                "Couldn’t search Spotify",
+                Some("Check your connection and try again.".into()),
+            ));
         } else if !self.loaded {
-            content = content.child(components::empty_state(palette, "Press Return to search"));
+            content = content.child(components::empty_state(
+                palette,
+                CadenceIcon::Search,
+                "Search Spotify",
+                Some("Press Return to search.".into()),
+            ));
         } else if self.artists.is_empty() && self.albums.is_empty() && self.tracks.is_empty() {
-            content = content.child(components::empty_state(palette, "No results found"));
+            let asked = self
+                .requested
+                .as_ref()
+                .map_or(self.query.as_str(), |(asked, _)| asked.as_str());
+            content = content.child(components::empty_state(
+                palette,
+                CadenceIcon::Search,
+                format!("No results for “{asked}”"),
+                Some("Check the spelling, or try fewer words.".into()),
+            ));
         } else {
             let mut artists = div().flex().flex_wrap().gap_4();
             for index in 0..self.artists.len() {
@@ -1901,8 +1922,18 @@ impl Render for PlaylistPage {
             .and_then(|playlist| playlist.artwork_url.clone());
         let palette = appearance::Appearance::palette(cx);
         let list = if let Some(error) = self.error.as_deref().filter(|_| !has_tracks) {
-            components::empty_state(palette, format!("Unable to load playlist: {error}"))
-                .into_any_element()
+            let denied = error.contains("denied");
+            components::empty_state(
+                palette,
+                if denied {
+                    CadenceIcon::Lock
+                } else {
+                    CadenceIcon::Playlist
+                },
+                "Couldn’t open this playlist",
+                Some(error.to_owned().into()),
+            )
+            .into_any_element()
         } else if let Some(playlist) = self.selected.as_ref().filter(|_| !empty) {
             let list_id = (
                 ElementId::from("playlist-tracks"),
@@ -1918,9 +1949,16 @@ impl Render for PlaylistPage {
             });
             self.track_list.clone().into_any_element()
         } else if self.selected.is_none() {
-            components::empty_state(palette, "No playlist selected").into_any_element()
+            components::empty_state(palette, CadenceIcon::Playlist, "No playlist selected", None)
+                .into_any_element()
         } else if loaded && self.next_offset.is_none() {
-            components::empty_state(palette, "This playlist is empty").into_any_element()
+            components::empty_state(
+                palette,
+                CadenceIcon::Playlist,
+                "This playlist is empty",
+                Some("Add songs in Spotify and they will show up here.".into()),
+            )
+            .into_any_element()
         } else {
             components::list_skeleton(palette).into_any_element()
         };
@@ -1931,7 +1969,11 @@ impl Render for PlaylistPage {
                     components::button(palette, "playlist-retry-page")
                         .test_support()
                         .h_10()
-                        .child("Retry loading tracks")
+                        .child(if has_tracks {
+                            "Retry loading tracks"
+                        } else {
+                            "Try again"
+                        })
                         .tooltip({
                             let error = self.error.clone().unwrap_or_default();
                             move |window, cx| {
@@ -2329,8 +2371,13 @@ impl Render for AlbumPage {
         let tracks = self.tracks.clone();
         let loaded = self.loaded;
         let list = if let Some(error) = self.error.as_ref() {
-            components::empty_state(palette, format!("Unable to load album: {error}"))
-                .into_any_element()
+            components::empty_state(
+                palette,
+                CadenceIcon::MusicNote,
+                "Couldn’t open this album",
+                Some(error.to_string().into()),
+            )
+            .into_any_element()
         } else if let Some(review) = self.review.as_ref().filter(|_| !tracks.is_empty()) {
             review.clone().into_any_element()
         } else if !tracks.is_empty() {
@@ -2344,7 +2391,13 @@ impl Render for AlbumPage {
                 .update(cx, |list, cx| list.show(list_id, tracks.clone(), cx));
             self.track_list.clone().into_any_element()
         } else if loaded {
-            components::empty_state(palette, "This album has no playable tracks").into_any_element()
+            components::empty_state(
+                palette,
+                CadenceIcon::MusicNote,
+                "No playable songs",
+                Some("Spotify returned no songs for this album.".into()),
+            )
+            .into_any_element()
         } else {
             // Shaped like the track list that is about to arrive.
             components::list_skeleton(palette).into_any_element()
