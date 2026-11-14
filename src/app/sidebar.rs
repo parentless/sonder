@@ -209,7 +209,12 @@ impl Sidebar {
 
     /// The update prompt at the foot of the rail: what is waiting and one
     /// button. It is static, with no timer or animation.
-    fn update_card(&self, palette: CadencePalette, collapsed: bool) -> Option<AnyElement> {
+    fn update_card(
+        &self,
+        palette: CadencePalette,
+        collapsed: bool,
+        animate: bool,
+    ) -> Option<AnyElement> {
         let offer = self.update.as_ref()?;
         let (title, detail, action) = match offer {
             UpdateOffer::Available(version) => (
@@ -247,48 +252,60 @@ impl Sidebar {
                     .into_any_element()
             });
         }
-        Some(
-            div()
-                .flex_none()
-                .p_3p5()
-                .rounded_2xl()
-                .border_1()
-                .border_color(rgb(palette.border))
-                .bg(rgb(palette.surface_raised))
-                .child(
-                    div()
+        let key = title.len();
+        let card = div()
+            .flex_none()
+            .p_3p5()
+            .rounded_2xl()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .bg(rgb(palette.surface_raised))
+            .child(
+                div()
+                    .text_size(tokens::BODY_TEXT)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .text_color(rgb(palette.text_primary))
+                    .child(title),
+            )
+            .child(
+                div()
+                    .mt_0p5()
+                    .text_size(tokens::BODY_TEXT)
+                    .line_height(relative(1.4))
+                    .text_color(rgb(palette.text_muted))
+                    .child(detail),
+            )
+            .when_some(action, |card, label| {
+                card.child(
+                    components::filled_button(palette, "sidebar-update")
+                        .test_support()
+                        .mt_2p5()
+                        .w_full()
+                        .h_9()
+                        .rounded_full()
+                        .bg(rgb(palette.text_primary))
+                        .text_color(rgb(palette.canvas))
+                        .hover(|style| style.opacity(0.9))
                         .text_size(tokens::BODY_TEXT)
                         .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .text_color(rgb(palette.text_primary))
-                        .child(title),
+                        .child(label)
+                        .on_click(move |_, _, cx| install(cx)),
                 )
-                .child(
-                    div()
-                        .mt_0p5()
-                        .text_size(tokens::BODY_TEXT)
-                        .line_height(relative(1.4))
-                        .text_color(rgb(palette.text_muted))
-                        .child(detail),
+            });
+        // It shows up once, a moment after startup settles, so it eases in. Test
+        // renders skip the fade so screenshots never catch it half-drawn.
+        if animate && !cfg!(test) {
+            Some(
+                card.with_animation(
+                    ("update-card", key),
+                    Animation::new(Duration::from_millis(220)).with_easing(ease_out_quint()),
+                    |card, progress| card.opacity(progress),
                 )
-                .when_some(action, |card, label| {
-                    card.child(
-                        components::filled_button(palette, "sidebar-update")
-                            .test_support()
-                            .mt_2p5()
-                            .w_full()
-                            .h_9()
-                            .rounded_full()
-                            .bg(rgb(palette.text_primary))
-                            .text_color(rgb(palette.canvas))
-                            .hover(|style| style.opacity(0.9))
-                            .text_size(tokens::BODY_TEXT)
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .child(label)
-                            .on_click(move |_, _, cx| install(cx)),
-                    )
-                })
                 .into_any_element(),
-        )
+            )
+        } else {
+            Some(card.into_any_element())
+        }
     }
 
     pub(super) fn show_route(
@@ -889,7 +906,7 @@ impl Sidebar {
                         )
                     })
                     .when(!show_pinned, |panel| panel.child(div().flex_1()))
-                    .children(self.update_card(palette, collapsed)),
+                    .children(self.update_card(palette, collapsed, !cx.reduce_motion())),
             )
     }
 }

@@ -74,6 +74,8 @@ impl Workspace {
         let library = services::AppServices::library(cx);
         subscriptions.push(
             cx.subscribe(&library, |this, _, _: &library::LibraryLoaded, cx| {
+                // Startup has finished its main work; the update check may begin.
+                updater::startup_settled(cx);
                 this.last_error = None;
                 cx.notify();
             }),

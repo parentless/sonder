@@ -88,9 +88,6 @@ pub(super) struct Toolbar {
     /// The workspace's standing failure, shown under the account name.
     error: Option<SharedString>,
     _search_subscription: Subscription,
-    _update_subscription: Option<Subscription>,
-    update_version: Option<String>,
-    update_generation: usize,
     /// This version's notes have not been opened, so the avatar and the
     /// account menu point at them.
     whats_new_unseen: bool,
@@ -122,27 +119,7 @@ impl Toolbar {
                 _ => {}
             },
         );
-        let update_subscription = updater::status(cx).map(|status| {
-            cx.observe(&status, |this, status, cx| {
-                let version = match &status.read(cx).check {
-                    updater::UpdateCheck::Available(version) => Some(version.clone()),
-                    _ => None,
-                };
-                if this.update_version != version {
-                    this.update_version = version;
-                    this.update_generation = this.update_generation.wrapping_add(1);
-                    cx.notify();
-                }
-            })
-        });
-        let update_version = updater::status(cx).and_then(|status| match &status.read(cx).check {
-            updater::UpdateCheck::Available(version) => Some(version.clone()),
-            _ => None,
-        });
         Self {
-            _update_subscription: update_subscription,
-            update_version,
-            update_generation: 0,
             whats_new_unseen: whats_new::unseen(),
             search_input,
             suggestions: Vec::new(),
@@ -171,13 +148,6 @@ impl Toolbar {
             self.whats_new_unseen = false;
             cx.notify();
         }
-    }
-
-    #[cfg(test)]
-    pub(super) fn seed_update_available(&mut self, cx: &mut Context<Self>) {
-        self.update_version = Some("9.9.9".into());
-        self.update_generation += 1;
-        cx.notify();
     }
 
     #[cfg(test)]
@@ -938,34 +908,31 @@ impl Render for Toolbar {
                                 cx.notify();
                             })),
                     )
-                    .when(
-                        self.update_version.is_some() || self.whats_new_unseen,
-                        |anchor| {
-                            anchor.child(
-                                // Not a control: a press lands on the avatar beneath,
-                                // which opens the account menu.
-                                div()
-                                    .absolute()
-                                    .right_0()
-                                    .top_0()
-                                    .size_3()
-                                    .rounded_full()
-                                    .bg(rgb(0xF04452))
-                                    .with_animation(
-                                        ("update-arrived", self.update_generation),
-                                        Animation::new(Duration::from_millis(650)),
-                                        |badge, progress| {
-                                            // One short jump on arrival, then a static dot. No repeating timer.
-                                            let jump =
-                                                (progress * std::f32::consts::PI * 2.).sin().abs()
-                                                    * (1. - progress)
-                                                    * 6.;
-                                            badge.top(px(-jump))
-                                        },
-                                    ),
-                            )
-                        },
-                    )
+                    .when(self.whats_new_unseen, |anchor| {
+                        anchor.child(
+                            // Not a control: a press lands on the avatar beneath,
+                            // which opens the account menu.
+                            div()
+                                .absolute()
+                                .right_0()
+                                .top_0()
+                                .size_3()
+                                .rounded_full()
+                                .bg(rgb(0xF04452))
+                                .with_animation(
+                                    "whats-new-dot",
+                                    Animation::new(Duration::from_millis(650)),
+                                    |badge, progress| {
+                                        // One short jump on arrival, then a static dot. No repeating timer.
+                                        let jump =
+                                            (progress * std::f32::consts::PI * 2.).sin().abs()
+                                                * (1. - progress)
+                                                * 6.;
+                                        badge.top(px(-jump))
+                                    },
+                                ),
+                        )
+                    })
                     .when(self.menu_open, |anchor| {
                         anchor.child(deferred(self.account_menu(palette, cx)))
                     }),

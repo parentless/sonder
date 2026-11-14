@@ -153,6 +153,9 @@ pub(super) fn set_automatic_checks(enabled: bool, cx: &mut App) {
         unsafe { msg_send![sparkle_updater(updater), setAutomaticallyChecksForUpdates: flag] };
 }
 
+/// Sparkle schedules its own checks.
+pub(super) fn startup_settled(_: &mut App) {}
+
 /// Sparkle manages its own downloads, so there is no separate switch here.
 pub(super) fn automatic_install(_: &App) -> Option<bool> {
     None

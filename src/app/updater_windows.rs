@@ -34,6 +34,8 @@ struct Updater {
     /// A verified download waiting for a restart.
     staged: Option<PathBuf>,
     busy: bool,
+    /// The library has loaded, so a check no longer competes with startup.
+    settled: bool,
     _timer: gpui_kit::Task<()>,
     _quit_hook: Entity<QuitHook>,
 }
@@ -91,8 +93,16 @@ pub(super) fn start(cx: &mut App) -> bool {
         QuitHook
     });
     let timer = cx.spawn(async move |cx| {
-        // Stay out of the way of startup: first paint, library load and artwork.
-        let mut delay = Duration::from_secs(60);
+        // Stay out of the way of startup: wait for the library to load (or give
+        // up waiting after 45 s), then let the first screen settle for a moment.
+        for _ in 0..45 {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            if cx.update(|cx| cx.try_global::<Updater>().is_some_and(|u| u.settled)) {
+                break;
+            }
+        }
+        cx.background_executor().timer(Duration::from_secs(3)).await;
+        let mut delay = Duration::ZERO;
         loop {
             cx.background_executor().timer(delay).await;
             cx.update(|cx| {
@@ -113,10 +123,18 @@ pub(super) fn start(cx: &mut App) -> bool {
         auto_install,
         staged: None,
         busy: false,
+        settled: false,
         _timer: timer,
         _quit_hook: quit_hook,
     });
     true
+}
+
+/// Called once the library has loaded; the first update check follows shortly.
+pub(super) fn startup_settled(cx: &mut App) {
+    if let Some(updater) = updater_mut(cx) {
+        updater.settled = true;
+    }
 }
 
 pub(super) fn status(cx: &App) -> Option<Entity<UpdateStatus>> {

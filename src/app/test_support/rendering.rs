@@ -405,7 +405,6 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 }
                 Scene::ShuffleOn => { services::AppServices::player(cx).update(cx, |player, cx| player.toggle_shuffle(cx)); }
                 Scene::UpdateAvailable => {
-                    workspace.toolbar.update(cx, |toolbar, cx| toolbar.seed_update_available(cx));
                     workspace.sidebar.update(cx, |sidebar, cx| {
                         sidebar.set_update(Some(crate::app::sidebar::UpdateOffer::Available("9.9.9".into())), cx)
                     });
