@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.31",
+    "cadence": "0.8.32",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "95072d68ecda7b7456fd71b52e13b3d54dc47262",
-    "lockfile_sha256": "3388261e580ebdc4733445d6b17bc32481b4fa323509232151d99bfb97316615"
+    "revision": "59cc556d8149edb58aba9360a5fc75504e121af7",
+    "lockfile_sha256": "8c0892a3b16ebc4b1f3d74c20c5a2555c53e24fc727b1bd1396798039c2b9275"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43545205939",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/43550945383",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.31",
+      "cadence": "0.8.32",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "95072d68ecda7b7456fd71b52e13b3d54dc47262",
-      "lockfile_sha256": "3388261e580ebdc4733445d6b17bc32481b4fa323509232151d99bfb97316615"
+      "revision": "59cc556d8149edb58aba9360a5fc75504e121af7",
+      "lockfile_sha256": "8c0892a3b16ebc4b1f3d74c20c5a2555c53e24fc727b1bd1396798039c2b9275"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43545205939"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/43550945383"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -82,6 +82,7 @@
     "Album pages gain a Review album pill (album-tint changes); four new album-review references show the inline rating row, progress bar and locked rows; search results lead with filter chips, a Top result card and Songs, then Artists and Albums (search-artists, search-gallery-scrolled); the search dropdown gains a Search Spotify row (search-cached); Settings shows version 0.8.29",
     "Local Files adds eight references: the Local Files page with two folders' worth of tagged tracks, embedded album art and a local song paused in the player, and the Settings Local Files section with two folders; the sidebar shows a Local Files row only once a folder is added, so the other 184 references are pixel-identical to 0.8.29",
     "Local Files gains a search box beside Folders, and Settings shows version 0.8.30; the other 184 references are pixel-identical to 0.8.29",
-    "The sidebar and sign-in logo is a flat tile with no rim (sharper at small sizes on Windows), so every full-window and sign-in reference changes; the search dropdown gains an On Spotify section with live artist and album results; Settings shows version 0.8.31"
+    "The sidebar and sign-in logo is a flat tile with no rim (sharper at small sizes on Windows), so every full-window and sign-in reference changes; the search dropdown gains an On Spotify section with live artist and album results; Settings shows version 0.8.31",
+    "Lyrics: Settings gains a Lyrics section (Show lyrics, off by default) below Local Files, and four new references show the side panel with the current line large and nearby lines fading; album pages use a 232px cover beside the title; Settings shows version 0.8.32; the other 176 references are pixel-identical to 0.8.31"
   ]
 }
