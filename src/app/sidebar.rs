@@ -21,7 +21,7 @@ struct NavItem {
     route: Route,
 }
 
-const NAV_ITEMS: [NavItem; 6] = [
+const NAV_ITEMS: [NavItem; 5] = [
     NavItem {
         id: "nav-home",
         fill_id: "nav-home-fill",
@@ -62,14 +62,6 @@ const NAV_ITEMS: [NavItem; 6] = [
         icon: CadenceIcon::Folder,
         selected_icon: CadenceIcon::FolderFilled,
         route: Route::LocalFiles,
-    },
-    NavItem {
-        id: "nav-whats-new",
-        fill_id: "nav-whats-new-fill",
-        label: "What’s new",
-        icon: CadenceIcon::Sparkle,
-        selected_icon: CadenceIcon::SparkleFilled,
-        route: Route::WhatsNew,
     },
 ];
 
@@ -148,7 +140,6 @@ pub(super) struct Sidebar {
     toggle_focus: FocusHandle,
     /// One per entry of [`NAV_ITEMS`], in the same order.
     nav_focus: [FocusHandle; NAV_ITEMS.len()],
-    whats_new_unseen: bool,
     update: Option<UpdateOffer>,
 }
 
@@ -200,15 +191,7 @@ impl Sidebar {
             transition_duration: Duration::from_millis(1),
             toggle_focus: cx.focus_handle().tab_stop(true),
             nav_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
-            whats_new_unseen: whats_new::unseen(),
             update: None,
-        }
-    }
-
-    pub(super) fn clear_whats_new_dot(&mut self, cx: &mut Context<Self>) {
-        if self.whats_new_unseen {
-            self.whats_new_unseen = false;
-            cx.notify();
         }
     }
 
@@ -453,21 +436,7 @@ impl Sidebar {
                         glyph,
                         tokens::CONTROL_ICON,
                         palette.text_primary,
-                    ))
-                    .when(
-                        item.route == Route::WhatsNew && self.whats_new_unseen,
-                        |icon| {
-                            icon.child(
-                                div()
-                                    .absolute()
-                                    .top_0()
-                                    .right(Rems(-0.125))
-                                    .size_2()
-                                    .rounded_full()
-                                    .bg(rgb(0xF04452)),
-                            )
-                        },
-                    ),
+                    )),
             )
             .child(div().whitespace_nowrap().child(item.label).with_animation(
                 (item.id, transition.generation),

@@ -805,7 +805,7 @@ fn pressing_inside_the_account_menu_keeps_it_open_and_its_items_still_act() {
     let mut fixture = Fixture::new(false);
     fixture.update(|window, cx| window.click("account", cx));
     let menu_padding =
-        fixture.update(|window, _| menu_padding_above(&window.find("account-settings")));
+        fixture.update(|window, _| menu_padding_above(&window.find("account-whats-new")));
 
     fixture.mouse_down(menu_padding);
     fixture.mouse_up(menu_padding);
@@ -2790,21 +2790,11 @@ fn clearing_artwork_cache_releases_entries_without_changing_account_or_queue() {
 }
 
 #[test]
-fn update_badge_opens_settings_without_opening_account_menu() {
+fn the_account_menu_lists_whats_new_while_it_is_unseen() {
     let mut fixture = Fixture::new(false);
-    let workspace = fixture.workspace.clone().unwrap();
-    fixture.update(|_, cx| {
-        workspace
-            .upgrade()
-            .unwrap()
-            .read(cx)
-            .toolbar
-            .clone()
-            .update(cx, |toolbar, cx| toolbar.seed_update_available(cx))
-    });
-    fixture.update(|window, cx| window.click("update-available", cx));
-    assert_eq!(fixture.route(), Route::Settings);
-    fixture.update(|window, _| assert!(window.try_find("account-menu").is_none()));
+    fixture.update(|window, _| assert!(window.try_find("account-whats-new").is_none()));
+    fixture.update(|window, cx| window.click("account", cx));
+    fixture.update(|window, _| assert!(window.try_find("account-whats-new").is_some()));
     fixture.no_commands();
 }
 
@@ -4734,12 +4724,15 @@ fn playback_stops_after_three_songs_in_a_row_fail() {
 }
 
 #[test]
-fn whats_new_opens_from_the_sidebar_and_back_returns() {
+fn whats_new_opens_from_the_account_menu_and_back_returns() {
     let mut fixture = Fixture::new(false);
     let before = fixture.route();
-    fixture.update(|window, cx| window.click("nav-whats-new", cx));
+    fixture.update(|window, cx| window.click("account", cx));
+    fixture.update(|window, cx| window.click("account-whats-new", cx));
     assert_eq!(fixture.route(), Route::WhatsNew);
-    // The toolbar's back button returns to where the listener was.
+    fixture.update(|window, _| assert!(window.try_find("account-menu").is_none()));
+    // Older months are folded until opened.
+    fixture.update(|window, _| assert!(window.try_find(("whats-new-month", 1usize)).is_some()));
     fixture.update(|window, cx| window.click("detail-back", cx));
     assert_eq!(fixture.route(), before);
     fixture.no_commands();

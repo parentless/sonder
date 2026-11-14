@@ -261,8 +261,8 @@ impl Workspace {
         self.router.open_whats_new();
         whats_new::mark_seen();
         self.whats_new.update(cx, |page, cx| page.reopened(cx));
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.clear_whats_new_dot(cx));
+        self.toolbar
+            .update(cx, |toolbar, cx| toolbar.clear_whats_new_dot(cx));
         self.settle_navigation(cx);
     }
 

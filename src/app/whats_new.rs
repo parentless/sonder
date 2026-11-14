@@ -1,10 +1,11 @@
 //! The "What's new" page: a dated list of what each release added.
 //!
 //! The list is plain static data, so the page costs nothing until opened and
-//! holds no timers or requests. Add the newest release at the top of [`DAYS`]
+//! holds no timers or requests. Add the newest release at the top of [`MONTHS`]
 //! when bumping the version.
 use super::*;
 use directories::ProjectDirs;
+use gpui_kit::TestSupportExt as _;
 use std::{fs, path::PathBuf};
 
 #[derive(Clone, Copy)]
@@ -26,141 +27,427 @@ struct Day {
     releases: &'static [Release],
 }
 
+struct Month {
+    name: &'static str,
+    range: &'static str,
+    days: &'static [Day],
+}
+
 use Tag::{Better, Fixed, New};
 
-/// Newest first. Dates are the day each release was published.
-const DAYS: &[Day] = &[
-    Day {
-        date: "Nov 14, 2026",
-        releases: &[
-            Release {
-                version: "0.8.39",
-                notes: &[
-                    Note(New, "This What’s new page, in the sidebar and in Settings."),
-                    Note(
-                        New,
-                        "An update card in the sidebar: update, or restart to finish, in one click.",
-                    ),
-                    Note(
-                        New,
-                        "Install updates automatically (off by default): downloads quietly while you listen and installs when you close Sonder.",
-                    ),
+/// Newest first. Dates are the day each release was published. Add the next
+/// release at the top of the first month when bumping the version.
+const MONTHS: &[Month] = &[
+    Month {
+        name: "November 2026",
+        range: "0.8.0 – 0.8.39",
+        days: &[
+            Day {
+                date: "Nov 14, 2026",
+                releases: &[
+                    Release {
+                        version: "0.8.40",
+                        notes: &[
+                            Note(
+                                New,
+                                "What’s new now lives in the account menu, with a red dot on your avatar until you open it.",
+                            ),
+                            Note(
+                                New,
+                                "The full history back to the first release, folded by month.",
+                            ),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.39",
+                        notes: &[
+                            Note(New, "This What’s new page, in the sidebar and in Settings."),
+                            Note(
+                                New,
+                                "An update card in the sidebar: update, or restart to finish, in one click.",
+                            ),
+                            Note(
+                                New,
+                                "Install updates automatically (off by default): downloads quietly while you listen and installs when you close Sonder.",
+                            ),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.38",
+                        notes: &[Note(
+                            Better,
+                            "Empty and error pages share one clear look: an icon, a title and what to do next.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.37",
+                        notes: &[Note(
+                            Better,
+                            "When Spotify refuses a song, Sonder now explains why instead of skipping through your queue.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.36",
+                        notes: &[
+                            Note(
+                                New,
+                                "Album review: the next song unlocks once you have fully heard the current one.",
+                            ),
+                            Note(
+                                Fixed,
+                                "Copy image now pastes into Paint, Discord and Office.",
+                            ),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.35",
+                        notes: &[
+                            Note(
+                                Better,
+                                "Artist name and cover glide out of the toolbar as you scroll.",
+                            ),
+                            Note(Better, "Lyrics use less memory while streaming."),
+                        ],
+                    },
                 ],
             },
-            Release {
-                version: "0.8.38",
-                notes: &[Note(
-                    Better,
-                    "Empty and error pages share one clear look: an icon, a title and what to do next.",
-                )],
+            Day {
+                date: "Nov 13, 2026",
+                releases: &[
+                    Release {
+                        version: "0.8.32 – 0.8.34",
+                        notes: &[
+                            Note(
+                                New,
+                                "Lyrics in a side panel, a full page or a subtitle strip (off by default).",
+                            ),
+                            Note(
+                                Better,
+                                "Larger album cover, a loading skeleton and smoother lyric glide.",
+                            ),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.31",
+                        notes: &[
+                            Note(New, "Live Spotify results in the search dropdown."),
+                            Note(Better, "A flat logo with no rim."),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.30",
+                        notes: &[Note(
+                            New,
+                            "Local Files: play music from folders on this computer.",
+                        )],
+                    },
+                ],
             },
-            Release {
-                version: "0.8.37",
-                notes: &[Note(
-                    Better,
-                    "When Spotify refuses a song, Sonder now explains why instead of skipping through your queue.",
-                )],
+            Day {
+                date: "Nov 12, 2026",
+                releases: &[
+                    Release {
+                        version: "0.8.29",
+                        notes: &[Note(
+                            New,
+                            "Album review mode with a shareable image, search filters and a top result.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.28",
+                        notes: &[Note(
+                            Better,
+                            "Remembers Spotify cooldowns across restarts so Home stops over-asking.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.27",
+                        notes: &[Note(
+                            Fixed,
+                            "Coming soon asks MusicBrainz once per artist and keeps partial results.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.26",
+                        notes: &[Note(
+                            New,
+                            "New-release watch: a NEW badge, a tray alert and a Coming soon row.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.25",
+                        notes: &[Note(
+                            New,
+                            "New from artists on Home, a streaming quality setting and Copy Spotify link.",
+                        )],
+                    },
+                ],
             },
-            Release {
-                version: "0.8.36",
-                notes: &[
-                    Note(
-                        New,
-                        "Album review: the next song unlocks once you have fully heard the current one.",
-                    ),
-                    Note(
+            Day {
+                date: "Nov 11, 2026",
+                releases: &[
+                    Release {
+                        version: "0.8.24",
+                        notes: &[
+                            Note(
+                                New,
+                                "Home switches between the last 4 weeks, 6 months and all time.",
+                            ),
+                            Note(New, "Open on startup, and a 70–130% zoom scale."),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.23",
+                        notes: &[Note(
+                            Better,
+                            "The mascot is gone and the app has a new icon.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.22",
+                        notes: &[Note(Better, "Renamed to Sonder, with a new ripple mark.")],
+                    },
+                    Release {
+                        version: "0.8.21",
+                        notes: &[Note(
+                            New,
+                            "Home: your top artists and tracks. The Favorites page is removed.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.20",
+                        notes: &[Note(
+                            New,
+                            "A Premium-required screen, volume normalization and a tray icon.",
+                        )],
+                    },
+                ],
+            },
+            Day {
+                date: "Nov 10, 2026",
+                releases: &[
+                    Release {
+                        version: "0.8.19",
+                        notes: &[Note(
+                            New,
+                            "Settings tabs, an artwork cache on disk and opt-in Last.fm scrobbling.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.17 – 0.8.18",
+                        notes: &[Note(
+                            Better,
+                            "Discographies load on demand, newest first, and visible artwork loads first.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.16",
+                        notes: &[
+                            Note(New, "Gallery search and album-artist links."),
+                            Note(Better, "Sonder exits when its window closes on Windows."),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.14 – 0.8.15",
+                        notes: &[Note(
+                            Better,
+                            "Less memory for audio and artwork, and a seamless artist backdrop.",
+                        )],
+                    },
+                ],
+            },
+            Day {
+                date: "Nov 9, 2026",
+                releases: &[
+                    Release {
+                        version: "0.8.12 – 0.8.13",
+                        notes: &[
+                            Note(New, "Cached search suggestions."),
+                            Note(Fixed, "Rail tooltips and playlist recovery."),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.10 – 0.8.11",
+                        notes: &[Note(
+                            Better,
+                            "Smoother scrolling and steadier track navigation.",
+                        )],
+                    },
+                    Release {
+                        version: "0.8.8 – 0.8.9",
+                        notes: &[
+                            Note(New, "Spotify Likes and built-in Inter fonts."),
+                            Note(Better, "Artists scroll as one page with a docking header."),
+                        ],
+                    },
+                ],
+            },
+            Day {
+                date: "Nov 8, 2026",
+                releases: &[
+                    Release {
+                        version: "0.8.1 – 0.8.7",
+                        notes: &[
+                            Note(
+                                New,
+                                "Sidebar covers, row play controls and a saved UI zoom.",
+                            ),
+                            Note(New, "Lightweight shuffle and artist search."),
+                            Note(Better, "Playlists load in pages as you scroll."),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.0",
+                        notes: &[Note(
+                            New,
+                            "The Windows version: native integration, a glass look and built-in updates.",
+                        )],
+                    },
+                ],
+            },
+        ],
+    },
+    Month {
+        name: "September 2026",
+        range: "0.4.2 – 0.7.2",
+        days: &[
+            Day {
+                date: "Sep 28, 2026",
+                releases: &[Release {
+                    version: "0.7.2",
+                    notes: &[Note(
+                        Better,
+                        "Every control reachable by keyboard, and reduced motion is honoured.",
+                    )],
+                }],
+            },
+            Day {
+                date: "Sep 22, 2026",
+                releases: &[
+                    Release {
+                        version: "0.7.1",
+                        notes: &[Note(
+                            Fixed,
+                            "Audio recovers by itself after a Bluetooth route change.",
+                        )],
+                    },
+                    Release {
+                        version: "0.7.0",
+                        notes: &[Note(
+                            New,
+                            "A draggable progress bar, and seeks land where you drop.",
+                        )],
+                    },
+                ],
+            },
+            Day {
+                date: "Sep 18, 2026",
+                releases: &[Release {
+                    version: "0.6.2",
+                    notes: &[Note(
                         Fixed,
-                        "Copy image now pastes into Paint, Discord and Office.",
-                    ),
+                        "History records a song once it plays, and unplayable songs are skipped instead of dropping the queue.",
+                    )],
+                }],
+            },
+            Day {
+                date: "Sep 10, 2026",
+                releases: &[
+                    Release {
+                        version: "0.6.1",
+                        notes: &[Note(Better, "Updates stay manual.")],
+                    },
+                    Release {
+                        version: "0.6.0",
+                        notes: &[
+                            Note(New, "Built-in updates."),
+                            Note(
+                                New,
+                                "Artwork, title and artists in the player link to their pages.",
+                            ),
+                        ],
+                    },
                 ],
             },
-            Release {
-                version: "0.8.35",
-                notes: &[
-                    Note(
+            Day {
+                date: "Sep 8, 2026",
+                releases: &[Release {
+                    version: "0.5.0 – 0.5.1",
+                    notes: &[Note(
                         Better,
-                        "Artist name and cover glide out of the toolbar as you scroll.",
-                    ),
-                    Note(Better, "Lyrics use less memory while streaming."),
-                ],
+                        "A bundled icon set and signed macOS releases.",
+                    )],
+                }],
             },
-        ],
-    },
-    Day {
-        date: "Nov 13, 2026",
-        releases: &[
-            Release {
-                version: "0.8.32 – 0.8.34",
-                notes: &[
-                    Note(
-                        New,
-                        "Lyrics in a side panel, a full page or a subtitle strip (off by default).",
-                    ),
-                    Note(New, "Live Spotify results in the search dropdown."),
-                    Note(
+            Day {
+                date: "Sep 4, 2026",
+                releases: &[Release {
+                    version: "0.4.3",
+                    notes: &[Note(
                         Better,
-                        "Larger album cover, a loading skeleton and smoother lyric glide.",
-                    ),
-                ],
+                        "Your cached library shows at launch, and Play waits until playback connects.",
+                    )],
+                }],
             },
-            Release {
-                version: "0.8.30",
-                notes: &[Note(
-                    New,
-                    "Local Files: play music from folders on this computer.",
-                )],
-            },
-        ],
-    },
-    Day {
-        date: "Nov 12, 2026",
-        releases: &[
-            Release {
-                version: "0.8.29",
-                notes: &[Note(
-                    New,
-                    "Album review mode with a shareable image, search filters and a top result.",
-                )],
-            },
-            Release {
-                version: "0.8.28",
-                notes: &[Note(
-                    Better,
-                    "Remembers Spotify cooldowns across restarts so Home stops over-asking.",
-                )],
-            },
-            Release {
-                version: "0.8.26",
-                notes: &[Note(
-                    New,
-                    "New-release watch: a NEW badge, a tray alert and a Coming soon row.",
-                )],
-            },
-            Release {
-                version: "0.8.25",
-                notes: &[Note(
-                    New,
-                    "New from artists on Home, a streaming quality setting and Copy Spotify link.",
-                )],
+            Day {
+                date: "Sep 1, 2026",
+                releases: &[Release {
+                    version: "0.4.2",
+                    notes: &[Note(New, "Player mascots (since removed).")],
+                }],
             },
         ],
     },
-    Day {
-        date: "Nov 11, 2026",
-        releases: &[
-            Release {
-                version: "0.8.24",
-                notes: &[
-                    Note(
-                        New,
-                        "Home switches between the last 4 weeks, 6 months and all time.",
-                    ),
-                    Note(New, "Open on startup, and a 70–130% zoom scale."),
-                ],
+    Month {
+        name: "August 2026",
+        range: "0.1.0 – 0.4.1",
+        days: &[
+            Day {
+                date: "Aug 24, 2026",
+                releases: &[Release {
+                    version: "0.4.1",
+                    notes: &[Note(Better, "Audio output switched from SDL to CPAL.")],
+                }],
             },
-            Release {
-                version: "0.8.23",
-                notes: &[Note(New, "A new app icon.")],
+            Day {
+                date: "Aug 21, 2026",
+                releases: &[Release {
+                    version: "0.4.0",
+                    notes: &[
+                        Note(
+                            New,
+                            "Autoplay keeps going with similar songs when the queue ends (a setting).",
+                        ),
+                        Note(Fixed, "Play after the queue ends."),
+                        Note(
+                            Better,
+                            "Calmer Spotify requests, and the library refreshes when you return.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
+                date: "Aug 18, 2026",
+                releases: &[Release {
+                    version: "0.3.0",
+                    notes: &[Note(
+                        Better,
+                        "The library refreshes when Cadence comes to the front, and the search box clears with its results.",
+                    )],
+                }],
+            },
+            Day {
+                date: "Aug 16, 2026",
+                releases: &[
+                    Release {
+                        version: "0.2.0",
+                        notes: &[Note(Better, "Safer sign-in, storage and background tasks.")],
+                    },
+                    Release {
+                        version: "0.1.0",
+                        notes: &[Note(New, "The first release of Cadence.")],
+                    },
+                ],
             },
         ],
     },
@@ -200,17 +487,24 @@ pub(super) fn mark_seen() {
 
 pub(super) struct WhatsNewPage {
     scroll: gpui_kit::ScrollHandle,
+    /// Which months are unfolded. Folded months build no rows at all.
+    open: Vec<bool>,
 }
 
 impl WhatsNewPage {
     pub(super) fn new() -> Self {
         Self {
             scroll: gpui_kit::ScrollHandle::new(),
+            open: MONTHS.iter().enumerate().map(|(i, _)| i == 0).collect(),
         }
     }
 
-    /// Back to the newest entry whenever the page is opened again.
+    /// Back to the newest entry, with only the newest month open, whenever
+    /// the page is opened again.
     pub(super) fn reopened(&mut self, cx: &mut Context<Self>) {
+        for (index, open) in self.open.iter_mut().enumerate() {
+            *open = index == 0;
+        }
         self.scroll
             .set_offset(gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)));
         cx.notify();
@@ -264,62 +558,141 @@ fn notes_list(palette: CadencePalette, notes: &'static [Note]) -> Div {
         }))
 }
 
+/// How many releases a label such as "0.8.1 – 0.8.7" stands for.
+fn release_count(version: &str) -> usize {
+    let patch = |part: &str| {
+        part.trim()
+            .rsplit('.')
+            .next()
+            .and_then(|p| p.parse::<usize>().ok())
+    };
+    match version.split_once('–') {
+        Some((first, last)) => match (patch(first), patch(last)) {
+            (Some(first), Some(last)) if last >= first => last - first + 1,
+            _ => 1,
+        },
+        None => 1,
+    }
+}
+
+fn day_block(palette: CadencePalette, day: &'static Day, skip: usize) -> Option<Div> {
+    let releases = &day.releases[skip..];
+    if releases.is_empty() {
+        return None;
+    }
+    Some(
+        div()
+            .relative()
+            .pl_6()
+            .pb_5()
+            .child(
+                div()
+                    .absolute()
+                    .left(Rems(0.28))
+                    .top(Rems(0.9))
+                    .bottom_0()
+                    .w(px(1.))
+                    .bg(rgb(palette.border)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top(Rems(0.3125))
+                    .size_2p5()
+                    .rounded_full()
+                    .bg(rgb(palette.text_primary)),
+            )
+            .child(
+                div()
+                    .mb_2()
+                    .text_color(rgb(palette.text_primary))
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .child(day.date),
+            )
+            .children(releases.iter().map(|release| {
+                div()
+                    .mb_3()
+                    .child(
+                        div()
+                            .mb_1()
+                            .text_size(tokens::CAPTION_TEXT)
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .text_color(rgb(palette.text_muted))
+                            .child(format!("Version {}", release.version)),
+                    )
+                    .child(notes_list(palette, release.notes))
+            })),
+    )
+}
+
 impl Render for WhatsNewPage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
-        let latest = &DAYS[0];
-        let hero = &latest.releases[0];
-        // The latest release is the card above, so the timeline starts after it.
-        let days = DAYS.iter().enumerate().filter_map(|(index, day)| {
-            let releases = if index == 0 {
-                &day.releases[1..]
-            } else {
-                day.releases
-            };
-            (!releases.is_empty()).then(|| {
-                div()
-                    .relative()
-                    .pl_6()
-                    .pb_6()
-                    .child(
+        let newest = &MONTHS[0].days[0];
+        let hero = &newest.releases[0];
+        let months = MONTHS.iter().enumerate().map(|(index, month)| {
+            let open = self.open[index];
+            let count: usize = month
+                .days
+                .iter()
+                .flat_map(|day| day.releases)
+                .map(|release| release_count(release.version))
+                .sum();
+            div()
+                .mb_3()
+                .rounded_2xl()
+                .border_1()
+                .border_color(rgb(palette.border))
+                .child(
+                    components::bare_button(("whats-new-month", index))
+                        .test_support()
+                        .w_full()
+                        .justify_start()
+                        .gap_3()
+                        .px_4()
+                        .py_3p5()
+                        .child(
+                            div()
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .text_color(rgb(palette.text_primary))
+                                .child(month.name),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_size(tokens::BODY_TEXT)
+                                .text_color(rgb(palette.text_muted))
+                                .child(format!("{count} updates · {}", month.range)),
+                        )
+                        .child(components::icon(
+                            if open {
+                                CadenceIcon::ChevronUp
+                            } else {
+                                CadenceIcon::ChevronDown
+                            },
+                            tokens::INLINE_ICON,
+                            palette.text_muted,
+                        ))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open[index] = !this.open[index];
+                            cx.notify();
+                        })),
+                )
+                .when(open, |card| {
+                    card.child(
                         div()
-                            .absolute()
-                            .left(Rems(0.28))
-                            .top(Rems(0.9))
-                            .bottom_0()
-                            .w(px(1.))
-                            .bg(rgb(palette.border)),
+                            .px_4()
+                            .pt_1()
+                            .children(month.days.iter().enumerate().filter_map(
+                                |(day_index, day)| {
+                                    // The newest release is the card above.
+                                    let skip = usize::from(index == 0 && day_index == 0);
+                                    day_block(palette, day, skip)
+                                },
+                            )),
                     )
-                    .child(
-                        div()
-                            .absolute()
-                            .left_0()
-                            .top(Rems(0.3125))
-                            .size_2p5()
-                            .rounded_full()
-                            .bg(rgb(palette.text_primary)),
-                    )
-                    .child(
-                        div()
-                            .mb_2()
-                            .text_color(rgb(palette.text_primary))
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .child(day.date),
-                    )
-                    .children(releases.iter().map(|release| {
-                        div()
-                            .mb_3()
-                            .child(
-                                div()
-                                    .mb_1()
-                                    .text_size(tokens::CAPTION_TEXT)
-                                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(palette.text_muted))
-                                    .child(format!("Version {}", release.version)),
-                            )
-                            .child(notes_list(palette, release.notes))
-                    }))
-            })
+                })
         });
         div().size_full().flex().justify_center().child(
             div()
@@ -344,7 +717,7 @@ impl Render for WhatsNewPage {
                         )
                         .child(
                             div()
-                                .mb_8()
+                                .mb_6()
                                 .p_5()
                                 .rounded_2xl()
                                 .border_1()
@@ -378,12 +751,12 @@ impl Render for WhatsNewPage {
                                             div()
                                                 .text_size(tokens::BODY_TEXT)
                                                 .text_color(rgb(palette.text_muted))
-                                                .child(latest.date),
+                                                .child(newest.date),
                                         ),
                                 )
                                 .child(notes_list(palette, hero.notes)),
                         )
-                        .child(div().children(days)),
+                        .child(div().children(months)),
                 ),
         )
     }
