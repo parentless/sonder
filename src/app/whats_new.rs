@@ -45,10 +45,16 @@ const MONTHS: &[Month] = &[
                 releases: &[
                     Release {
                         version: "0.8.41",
-                        notes: &[Note(
-                            Better,
-                            "A cleaner What’s new page: no borders around the months.",
-                        )],
+                        notes: &[
+                            Note(
+                                Better,
+                                "Artist pages show 5 popular songs, with Show more for the rest.",
+                            ),
+                            Note(
+                                Better,
+                                "A cleaner What’s new page: no borders around the months.",
+                            ),
+                        ],
                     },
                     Release {
                         version: "0.8.40",
