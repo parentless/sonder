@@ -31,6 +31,7 @@ enum Scene {
     PlaylistZoomLarge,
     ArtistMenu,
     ArtistPortrait,
+    ArtistManyPopular,
     ArtistLandscape,
     ArtistZoomLarge,
     Settings,
@@ -69,6 +70,7 @@ enum Scene {
 fn scenes() -> Vec<(&'static str, Scene)> {
     vec![
         ("artist", Scene::Artist),
+        ("artist-popular-more", Scene::ArtistManyPopular),
         ("artist-docked", Scene::ArtistDiscography),
         ("artist-releases-loading", Scene::ArtistPageLoading),
         ("artist-releases-failure", Scene::ArtistPageFailure),
@@ -219,6 +221,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 Scene::Artist | Scene::ArtistDiscography | Scene::ArtistPageLoading | Scene::ArtistPageFailure
                 | Scene::ArtistMenu
                 | Scene::ArtistPortrait
+                | Scene::ArtistManyPopular
                 | Scene::ArtistLandscape | Scene::ArtistZoomLarge => {
                     if matches!(scene, Scene::ArtistZoomLarge) { appearance::Appearance::set_ui_zoom(crate::storage::UiZoom::from_percent(130).unwrap(), cx).unwrap(); }
                     let (image_width, image_height) = match scene {
@@ -261,7 +264,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                                         name: "The Midnight".into(),
                                         artwork_url: Some(url.into()),
                                     },
-                                    vec![track(0), track(1), track(2)],
+                                    if matches!(scene, Scene::ArtistManyPopular) { (0..10).map(track).collect() } else { vec![track(0), track(1), track(2)] },
                                     model::ArtistAlbumPage { albums: (0..if matches!(scene, Scene::ArtistPageLoading | Scene::ArtistPageFailure) { 10 } else { 20 })
                                         .map(|index| model::Album {
                                             provider: model::Provider::Spotify,
@@ -949,6 +952,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
     if matches!(
         scene,
         Scene::Artist
+            | Scene::ArtistManyPopular
             | Scene::ArtistMenu
             | Scene::ArtistPortrait
             | Scene::ArtistLandscape
@@ -997,6 +1001,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
     if matches!(
         scene,
         Scene::Artist
+            | Scene::ArtistManyPopular
             | Scene::ArtistPortrait
             | Scene::ArtistLandscape
             | Scene::ArtistZoomLarge

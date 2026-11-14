@@ -585,11 +585,17 @@ fn album_release_key(album: &model::Album) -> Option<(u16, u8, u8)> {
     (day > 0 && day <= days).then_some((year, month, day))
 }
 
+/// Popular songs shown before "Show more".
+const POPULAR_COLLAPSED: usize = 5;
+
 pub(super) struct ArtistPage {
     backend: BackendHandle,
     reference: Option<model::ArtistRef>,
     artist: Option<model::Artist>,
     tracks: Arc<[model::Track]>,
+    /// The popular rows on screen: the first few until "Show more" is pressed.
+    popular_view: Arc<[model::Track]>,
+    popular_expanded: bool,
     albums: Vec<model::Album>,
     album_ids: HashSet<String>,
     next_album_offset: Option<u32>,
@@ -640,6 +646,8 @@ impl ArtistPage {
             reference: None,
             artist: None,
             tracks: Arc::default(),
+            popular_view: Arc::default(),
+            popular_expanded: false,
             albums: Vec::new(),
             album_ids: HashSet::new(),
             next_album_offset: None,
@@ -689,6 +697,8 @@ impl ArtistPage {
                 .update(cx, |cache, _| cache.forget_view(view));
             self.artist = None;
             self.tracks = Arc::default();
+            self.popular_view = Arc::default();
+            self.popular_expanded = false;
             self.albums = Vec::new();
             self.album_ids = HashSet::new();
             self.next_album_offset = None;
@@ -734,6 +744,7 @@ impl ArtistPage {
                             });
                             page.artist = Some(artist);
                             page.tracks = tracks.into();
+                            page.refresh_popular_view();
                             page.albums = Vec::new();
                             page.album_ids = HashSet::new();
                             page.append_album_page(albums);
@@ -770,6 +781,8 @@ impl ArtistPage {
         self.reference = None;
         self.artist = None;
         self.tracks = Arc::default();
+        self.popular_view = Arc::default();
+        self.popular_expanded = false;
         self.albums = Vec::new();
         self.album_ids = HashSet::new();
         self.next_album_offset = None;
@@ -1071,7 +1084,17 @@ impl ArtistPage {
         cards.into_any_element()
     }
 
-    fn popular(&self, cx: &App) -> AnyElement {
+    /// Rebuilds the rows on screen. Runs when tracks arrive or the toggle is
+    /// pressed, never per frame, so the list sees one stable `Arc`.
+    fn refresh_popular_view(&mut self) {
+        self.popular_view = if self.popular_expanded || self.tracks.len() <= POPULAR_COLLAPSED {
+            self.tracks.clone()
+        } else {
+            self.tracks[..POPULAR_COLLAPSED].into()
+        };
+    }
+
+    fn popular(&self, cx: &mut Context<Self>) -> AnyElement {
         let heading = |id, title| {
             div()
                 .id(id)
@@ -1096,6 +1119,46 @@ impl ArtistPage {
             })
             .when(!self.tracks.is_empty(), |section| {
                 section.child(self.track_list.clone())
+            })
+            .when(self.tracks.len() > POPULAR_COLLAPSED, |section| {
+                let palette = appearance::Appearance::palette(cx);
+                let expanded = self.popular_expanded;
+                let hidden = self.tracks.len() - POPULAR_COLLAPSED;
+                section.child(
+                    components::bare_button("artist-popular-toggle")
+                        .test_support()
+                        .self_start()
+                        .ml_3()
+                        .px_2()
+                        .py_1p5()
+                        .gap_1p5()
+                        .rounded_lg()
+                        .text_size(tokens::BODY_TEXT)
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(rgb(palette.text_primary))
+                        .hover(|style| style.bg(rgb(palette.surface_hover)))
+                        .child(if expanded {
+                            "Show fewer".to_owned()
+                        } else {
+                            format!("Show {hidden} more")
+                        })
+                        .child(components::icon(
+                            if expanded {
+                                CadenceIcon::ChevronUp
+                            } else {
+                                CadenceIcon::ChevronDown
+                            },
+                            tokens::INLINE_ICON,
+                            palette.text_primary,
+                        ))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.popular_expanded = !this.popular_expanded;
+                            this.refresh_popular_view();
+                            // Item 0 holds the popular rows, so re-measure only it.
+                            this.content_state.splice(0..1, 1);
+                            cx.notify();
+                        })),
+                )
             })
             .into_any_element()
     }
@@ -2215,7 +2278,7 @@ impl Render for ArtistPage {
         self.track_list.update(cx, |list, cx| {
             list.show(
                 (ElementId::from("artist-popular"), source_id),
-                self.tracks.clone(),
+                self.popular_view.clone(),
                 cx,
             )
         });

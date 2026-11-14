@@ -4760,3 +4760,78 @@ fn the_sidebar_offers_an_available_update_with_one_button() {
     fixture.update(|window, _| assert!(window.try_find("sidebar-update").is_some()));
     fixture.no_commands();
 }
+
+#[test]
+fn popular_songs_stop_at_five_until_show_more_is_pressed() {
+    let mut fixture = Fixture::new(false);
+    let workspace = fixture.workspace.clone().unwrap();
+    fixture.update(|_, cx| {
+        cx.set_reduce_motion(true);
+        workspace.upgrade().unwrap().update(cx, |workspace, cx| {
+            workspace.open_artist(
+                artist_ref("Artist", "artist-popular"),
+                Route::LikedSongs,
+                cx,
+            );
+        });
+    });
+    let BackendCommand::LoadArtist { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected artist request");
+    };
+    respond
+        .send(Ok((
+            model::Artist {
+                provider: model::Provider::Spotify,
+                source_id: "artist-popular".into(),
+                spotify_uri: None,
+                name: "Artist".into(),
+                artwork_url: None,
+            },
+            (0..10).map(track).collect(),
+            Vec::new().into(),
+        )))
+        .unwrap();
+    fixture.update(|_, _| {});
+    // Bring the lower rows and the toggle on screen.
+    fixture.update(|window, cx| {
+        let position = window.find("artist-portrait").bounds().center();
+        window.dispatch_event(
+            gpui_kit::ScrollWheelEvent {
+                position,
+                delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-300.))),
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+    });
+    fixture.update(|_, _| {});
+    fixture.update(|window, _| {
+        assert!(window.try_find(("spotify-track", 4usize)).is_some());
+        assert!(window.try_find(("spotify-track", 5usize)).is_none());
+        assert!(window.try_find("artist-popular-toggle").is_some());
+    });
+    fixture.update(|window, cx| window.click("artist-popular-toggle", cx));
+    fixture.update(|window, _| {
+        assert!(window.try_find(("spotify-track", 6usize)).is_some());
+    });
+    // "Show fewer" now sits below the fold.
+    fixture.update(|window, cx| {
+        window.dispatch_event(
+            gpui_kit::ScrollWheelEvent {
+                position: point(px(700.), px(400.)),
+                delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-300.))),
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+    });
+    fixture.update(|_, _| {});
+    fixture.update(|window, cx| window.click("artist-popular-toggle", cx));
+    fixture.update(|window, _| {
+        assert!(window.try_find(("spotify-track", 5usize)).is_none());
+    });
+    fixture.no_commands();
+}
