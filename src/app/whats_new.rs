@@ -269,43 +269,57 @@ impl Render for WhatsNewPage {
         let palette = appearance::Appearance::palette(cx);
         let latest = &DAYS[0];
         let hero = &latest.releases[0];
-        let days = DAYS.iter().map(|day| {
-            div()
-                .relative()
-                .pl_6()
-                .pb_6()
-                .border_l_1()
-                .border_color(rgb(palette.border))
-                .ml_1()
-                .child(
-                    div()
-                        .absolute()
-                        .left(Rems(-0.3125))
-                        .top(Rems(0.3125))
-                        .size_2p5()
-                        .rounded_full()
-                        .bg(rgb(palette.text_primary)),
-                )
-                .child(
-                    div()
-                        .mb_2()
-                        .text_color(rgb(palette.text_primary))
-                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .child(day.date),
-                )
-                .children(day.releases.iter().map(|release| {
-                    div()
-                        .mb_3()
-                        .child(
-                            div()
-                                .mb_1()
-                                .text_size(tokens::CAPTION_TEXT)
-                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                .text_color(rgb(palette.text_muted))
-                                .child(format!("Version {}", release.version)),
-                        )
-                        .child(notes_list(palette, release.notes))
-                }))
+        // The latest release is the card above, so the timeline starts after it.
+        let days = DAYS.iter().enumerate().filter_map(|(index, day)| {
+            let releases = if index == 0 {
+                &day.releases[1..]
+            } else {
+                day.releases
+            };
+            (!releases.is_empty()).then(|| {
+                div()
+                    .relative()
+                    .pl_6()
+                    .pb_6()
+                    .child(
+                        div()
+                            .absolute()
+                            .left(Rems(0.28))
+                            .top(Rems(0.9))
+                            .bottom_0()
+                            .w(px(1.))
+                            .bg(rgb(palette.border)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(Rems(0.3125))
+                            .size_2p5()
+                            .rounded_full()
+                            .bg(rgb(palette.text_primary)),
+                    )
+                    .child(
+                        div()
+                            .mb_2()
+                            .text_color(rgb(palette.text_primary))
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child(day.date),
+                    )
+                    .children(releases.iter().map(|release| {
+                        div()
+                            .mb_3()
+                            .child(
+                                div()
+                                    .mb_1()
+                                    .text_size(tokens::CAPTION_TEXT)
+                                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(palette.text_muted))
+                                    .child(format!("Version {}", release.version)),
+                            )
+                            .child(notes_list(palette, release.notes))
+                    }))
+            })
         });
         div().size_full().flex().justify_center().child(
             div()
