@@ -1297,6 +1297,13 @@ impl AlbumPage {
         cx.notify();
     }
 
+    #[cfg(test)]
+    pub(super) fn hear_review_track(&mut self, cx: &mut Context<Self>) {
+        if let Some(review) = &self.review {
+            review.update(cx, |review, cx| review.hear_open_track(cx));
+        }
+    }
+
     /// Starts the page's contents from the top, if there is anything to play.
     pub(super) fn play(&mut self, tracks: &Arc<[model::Track]>, cx: &mut Context<Self>) {
         if tracks.is_empty() {

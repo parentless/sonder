@@ -466,6 +466,16 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             let _ = backend.commands.try_recv();
             settle(&mut cx, handle.into());
             for stars in [4usize, 5] {
+                // The song has been heard, so it can be rated.
+                let workspace = main_workspace.clone().unwrap();
+                cx.update(|cx| {
+                    workspace.update(cx, |workspace, cx| {
+                        workspace
+                            .album
+                            .update(cx, |album, cx| album.hear_review_track(cx))
+                    })
+                });
+                settle(&mut cx, handle.into());
                 cx.update_window(handle.into(), |_, window, cx| {
                     window.click(("review-star", stars), cx);
                     window.click("review-lock-in", cx);
@@ -473,6 +483,15 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 .unwrap();
                 settle(&mut cx, handle.into());
             }
+            let workspace = main_workspace.clone().unwrap();
+            cx.update(|cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace
+                        .album
+                        .update(cx, |album, cx| album.hear_review_track(cx))
+                })
+            });
+            settle(&mut cx, handle.into());
             cx.update_window(handle.into(), |_, window, cx| {
                 window.click(("review-star", 3usize), cx)
             })

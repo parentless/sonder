@@ -26,6 +26,47 @@ fn mean_score(ratings: &[u8]) -> f32 {
     total as f32 / ratings.len().max(1) as f32 * 2.
 }
 
+/// How often playback is sampled while a review is open.
+const LISTEN_POLL: Duration = Duration::from_millis(500);
+/// A song counts as heard once all but its last couple of seconds has played,
+/// so a fade-out or the gap before the next track cannot hold the review up.
+const LISTEN_SLACK_MS: u32 = 2000;
+/// A jump bigger than this between two samples is a seek, not listening.
+const LISTEN_MAX_STEP_MS: u32 = 2 * LISTEN_POLL.as_millis() as u32 + 500;
+
+/// How much of one song has really been played. Time only counts while the
+/// song plays forward, so skipping ahead in the scrubber does not unlock it.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct Listened {
+    heard_ms: u32,
+    last_position: Option<u32>,
+}
+
+impl Listened {
+    /// Takes one sample. `position` is `None` when the song is not playing.
+    fn sample(&mut self, position: Option<u32>) {
+        let Some(position) = position else {
+            self.last_position = None;
+            return;
+        };
+        if let Some(last) = self.last_position
+            && let Some(step) = position.checked_sub(last)
+            && step <= LISTEN_MAX_STEP_MS
+        {
+            self.heard_ms = self.heard_ms.saturating_add(step);
+        }
+        self.last_position = Some(position);
+    }
+
+    fn done(&self, duration_ms: u32) -> bool {
+        self.heard_ms.saturating_add(LISTEN_SLACK_MS) >= duration_ms
+    }
+
+    fn remaining_ms(&self, duration_ms: u32) -> u32 {
+        duration_ms.saturating_sub(self.heard_ms.saturating_add(LISTEN_SLACK_MS))
+    }
+}
+
 /// What the review needs to know about the album it is for.
 pub(super) struct ReviewAlbum {
     pub id: String,
@@ -78,6 +119,9 @@ pub(super) struct ReviewList {
     /// filled. Both only drive a short animation.
     leaving: Option<usize>,
     just_locked: Option<usize>,
+    /// How much of each track has been played, by track index.
+    listened: Vec<Listened>,
+    listen_task: Option<gpui_kit::Task<()>>,
     comment: Entity<InputState>,
     focus: FocusHandle,
     scroll: gpui_kit::ScrollHandle,
@@ -131,7 +175,7 @@ impl ReviewList {
                 }
             },
         );
-        Self {
+        let mut this = Self {
             album_id,
             title,
             artist,
@@ -146,11 +190,87 @@ impl ReviewList {
             hover_star: None,
             leaving: None,
             just_locked: None,
+            listened: vec![Listened::default(); count],
+            listen_task: None,
             comment,
             focus: cx.focus_handle(),
             scroll: gpui_kit::ScrollHandle::new(),
             _subscription: subscription,
+        };
+        this.start_listening(cx);
+        this
+    }
+
+    /// Counts the open track as fully played, for tests that are not about
+    /// listening.
+    #[cfg(test)]
+    pub(super) fn hear_open_track(&mut self, cx: &mut Context<Self>) {
+        if let Some(track) = self.tracks.get(self.cursor) {
+            self.listened[self.cursor].heard_ms = track.duration_ms;
+            cx.notify();
         }
+    }
+
+    /// True once the open track has been played through.
+    fn heard(&self) -> bool {
+        self.tracks
+            .get(self.cursor)
+            .is_some_and(|track| self.listened[self.cursor].done(track.duration_ms))
+    }
+
+    /// Samples playback twice a second while a track still has to be heard.
+    /// It stops itself when the review is complete or closed.
+    fn start_listening(&mut self, cx: &mut Context<Self>) {
+        let player = services::AppServices::player(cx).downgrade();
+        self.listen_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(LISTEN_POLL).await;
+                let now = cx.background_executor().now();
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        if this.complete() {
+                            return false;
+                        }
+                        let was_heard = this.heard();
+                        let remaining = this.remaining_seconds();
+                        let Some(player) = player.upgrade() else {
+                            return false;
+                        };
+                        let player = player.read(cx);
+                        let playing = player.playing();
+                        let position = player.position_ms(now);
+                        let current = player.now_playing().and_then(|playing| {
+                            this.tracks.iter().position(|track| {
+                                track.provider == playing.provider
+                                    && track.source_id == playing.source_id
+                            })
+                        });
+                        for (index, listened) in this.listened.iter_mut().enumerate() {
+                            if Some(index) == current && playing {
+                                listened.sample(Some(position));
+                            } else {
+                                listened.sample(None);
+                            }
+                        }
+                        if was_heard != this.heard() || remaining != this.remaining_seconds() {
+                            cx.notify();
+                        }
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
+        }));
+    }
+
+    fn remaining_seconds(&self) -> u32 {
+        self.tracks.get(self.cursor).map_or(0, |track| {
+            self.listened[self.cursor]
+                .remaining_ms(track.duration_ms)
+                .div_ceil(1000)
+        })
     }
 
     pub(super) fn cursor(&self) -> usize {
@@ -184,7 +304,11 @@ impl ReviewList {
     }
 
     fn set_draft(&mut self, stars: u8, cx: &mut Context<Self>) {
-        if self.complete() || !(1..=MAX_STARS).contains(&stars) || self.draft == stars {
+        if self.complete()
+            || !self.heard()
+            || !(1..=MAX_STARS).contains(&stars)
+            || self.draft == stars
+        {
             return;
         }
         self.draft = stars;
@@ -192,7 +316,7 @@ impl ReviewList {
     }
 
     fn lock_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.complete() || self.draft == 0 {
+        if self.complete() || self.draft == 0 || !self.heard() {
             return;
         }
         let index = self.cursor;
@@ -428,8 +552,23 @@ impl ReviewList {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let shown = self.hover_star.unwrap_or(self.draft);
-        let ready = self.draft > 0;
+        let heard = self.heard();
+        let shown = if heard {
+            self.hover_star.unwrap_or(self.draft)
+        } else {
+            0
+        };
+        let ready = heard && self.draft > 0;
+        let hint = if heard {
+            "Press 1–5, then Enter to lock in".to_string()
+        } else {
+            let left = self.remaining_seconds();
+            format!(
+                "Listen to the whole song to rate it · {}:{:02} left",
+                left / 60,
+                left % 60
+            )
+        };
         let stars = (1..=MAX_STARS).map(|n| {
             components::button(palette, ("review-star", usize::from(n)))
                 .test_support()
@@ -473,12 +612,18 @@ impl ReviewList {
                     .flex()
                     .items_center()
                     .gap_3()
-                    .child(div().flex().items_center().children(stars))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .when(!heard, |row| row.opacity(0.4))
+                            .children(stars),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .text_color(rgb(palette.text_muted))
-                            .child("Press 1–5, then Enter to lock in"),
+                            .child(hint),
                     ),
             )
             .child(
@@ -842,7 +987,40 @@ fn save_png(file_name: &str, png: &[u8]) -> anyhow::Result<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{mean_score, share_file_name};
+    use super::{Listened, mean_score, share_file_name};
+
+    #[test]
+    fn only_time_played_forward_counts_as_heard() {
+        let mut listened = Listened::default();
+        for position in [0, 500, 1000, 1500] {
+            listened.sample(Some(position));
+        }
+        assert_eq!(listened.heard_ms, 1500);
+        // A jump forward is a seek and adds nothing.
+        listened.sample(Some(120_000));
+        assert_eq!(listened.heard_ms, 1500);
+        // Pausing and resuming picks up where it left off.
+        listened.sample(None);
+        listened.sample(Some(120_000));
+        listened.sample(Some(120_500));
+        assert_eq!(listened.heard_ms, 2000);
+        // Going back adds nothing either.
+        listened.sample(Some(10_000));
+        assert_eq!(listened.heard_ms, 2000);
+    }
+
+    #[test]
+    fn a_song_is_heard_when_all_but_its_last_seconds_played() {
+        let mut listened = Listened::default();
+        assert!(!listened.done(10_000));
+        listened.heard_ms = 8_000;
+        assert!(listened.done(10_000));
+        assert_eq!(listened.remaining_ms(10_000), 0);
+        listened.heard_ms = 5_000;
+        assert_eq!(listened.remaining_ms(10_000), 3_000);
+        // A track shorter than the slack is heard at once.
+        assert!(Listened::default().done(1_500));
+    }
 
     #[test]
     fn share_file_names_drop_what_files_cannot_hold() {

@@ -380,3 +380,11 @@ name and cover in the toolbar are only built once the page has mostly scrolled,
 and are revealed by clipping rather than resizing, so nothing re-wraps on the
 way. The header redraws only while the first 16 rem of the page scroll, and
 asks for frames only while its short smoothing settles.
+
+# Album review listening lock
+
+A review samples playback twice a second, only while it is open and a track
+still has to be heard. It keeps one small counter per track and counts time
+only when the song plays forward, so seeking ahead does not unlock the next
+row. The task holds the player weakly and ends when the review completes or
+closes. The panel redraws only when the seconds left change.

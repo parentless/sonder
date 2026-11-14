@@ -985,6 +985,18 @@ fn track_and_header_artist_links_work_inside_an_album_without_playing() {
     }
 }
 
+/// Counts the open review track as fully played.
+fn hear_review_track(fixture: &mut Fixture) {
+    let workspace = fixture.workspace.clone().unwrap();
+    fixture.update(|_, cx| {
+        workspace.upgrade().unwrap().update(cx, |workspace, cx| {
+            workspace
+                .album
+                .update(cx, |album, cx| album.hear_review_track(cx));
+        })
+    });
+}
+
 /// Opens the credited album with `count` plain tracks on the album page.
 fn open_review_album(count: usize) -> Fixture {
     let mut fixture = Fixture::new(false);
@@ -1055,6 +1067,21 @@ fn album_review_unlocks_one_track_at_a_time_and_copies_the_result() {
                 .is_some()
         );
     });
+    // Until the song has been heard, stars and Enter do nothing.
+    fixture.update(|window, cx| {
+        window.click(("review-star", 4usize), cx);
+        window.press("5", cx);
+        window.press("enter", cx);
+    });
+    fixture.update(|window, _| {
+        assert!(
+            window
+                .within(("review-item", 0usize))
+                .try_find("review-panel")
+                .is_some()
+        );
+    });
+    hear_review_track(&mut fixture);
     // Mouse: rate, then lock in.
     fixture.update(|window, cx| {
         window.click(("review-star", 4usize), cx);
@@ -1074,6 +1101,20 @@ fn album_review_unlocks_one_track_at_a_time_and_copies_the_result() {
                 .is_some()
         );
     });
+    // The next song is locked until it has been heard as well.
+    fixture.update(|window, cx| {
+        window.press("5", cx);
+        window.press("enter", cx);
+    });
+    fixture.update(|window, _| {
+        assert!(
+            window
+                .within(("review-item", 1usize))
+                .try_find("review-panel")
+                .is_some()
+        );
+    });
+    hear_review_track(&mut fixture);
     // Keyboard: digits rate, Enter locks in.
     fixture.update(|window, cx| {
         window.press("5", cx);
@@ -1088,6 +1129,7 @@ fn album_review_unlocks_one_track_at_a_time_and_copies_the_result() {
         );
         assert!(window.try_find("review-finish").is_none());
     });
+    hear_review_track(&mut fixture);
     fixture.update(|window, cx| {
         window.press("3", cx);
         window.press("enter", cx);
@@ -1111,6 +1153,7 @@ fn a_finished_review_copies_a_png_to_the_clipboard() {
     let mut fixture = open_review_album(2);
     fixture.update(|window, cx| window.click("album-review", cx));
     for stars in ["4", "5"] {
+        hear_review_track(&mut fixture);
         fixture.update(|window, cx| {
             window.press(stars, cx);
             window.press("enter", cx);

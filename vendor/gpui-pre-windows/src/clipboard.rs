@@ -210,7 +210,48 @@ fn write_image(item: &Image) -> Result<()> {
             set_clipboard_bytes(&png_bytes, *CLIPBOARD_PNG_FORMAT)?;
         }
     }
+
+    // Many apps (Paint, Photos, Office, browsers, chat apps) only paste the
+    // classic bitmap format, so offer that too.
+    if item.format != ImageFormat::Svg {
+        if let Some(dib) = convert_to_dib(item.bytes(), item.format) {
+            set_clipboard_bytes(&dib, CF_DIB.0 as u32)?;
+        }
+    }
     Ok(())
+}
+
+/// A 24-bit bottom-up DIB (a BMP without its file header), composited over white.
+fn convert_to_dib(bytes: &[u8], format: ImageFormat) -> Option<Vec<u8>> {
+    let image = image::load_from_memory_with_format(bytes, gpui_to_image_format(format)?)
+        .map_err(|e| log::warn!("Failed to decode image for DIB conversion: {e}"))
+        .ok()?
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    let stride = (width as usize * 3).div_ceil(4) * 4;
+    let size = stride * height as usize;
+    let mut dib = Vec::with_capacity(40 + size);
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&24u16.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&(size as u32).to_le_bytes());
+    dib.extend_from_slice(&[0u8; 16]);
+    let mut row = vec![0u8; stride];
+    for y in (0..height).rev() {
+        for x in 0..width {
+            let [r, g, b, a] = image.get_pixel(x, y).0;
+            let blend = |c: u8| ((c as u32 * a as u32 + 255 * (255 - a as u32)) / 255) as u8;
+            let at = x as usize * 3;
+            row[at] = blend(b);
+            row[at + 1] = blend(g);
+            row[at + 2] = blend(r);
+        }
+        dib.extend_from_slice(&row);
+    }
+    Some(dib)
 }
 
 fn convert_to_png(bytes: &[u8], format: ImageFormat) -> Option<Vec<u8>> {
