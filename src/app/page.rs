@@ -14,6 +14,8 @@ pub(super) enum PageEvent {
     OpenArtist(model::ArtistRef),
     OpenAlbum(model::AlbumRef),
     StartRadio(model::Track),
+    /// Settings, at the folders Local Files reads.
+    OpenLocalFilesSettings,
 }
 
 /// Re-emits every event a nested page part raises, unchanged.

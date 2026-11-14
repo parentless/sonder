@@ -46,6 +46,100 @@ pub(super) fn track(index: usize) -> model::Track {
     }
 }
 
+/// The folders the Local Files scenes read.
+pub(super) fn local_folders() -> Vec<std::path::PathBuf> {
+    vec![
+        "/Users/listener/Music".into(),
+        "/Volumes/Archive/Lossless".into(),
+    ]
+}
+
+/// A small invented library as the scanner would list it: tagged albums,
+/// one with embedded artwork, and a file named only "Artist - Title".
+pub(super) fn local_library() -> Vec<model::Track> {
+    let album = |artist: &str, album: &str, art: bool, tracks: &[(&str, u32)]| {
+        tracks
+            .iter()
+            .enumerate()
+            .map(|(index, &(title, seconds))| {
+                let path = format!(
+                    "/Users/listener/Music/{artist}/{album}/{:02} {title}.flac",
+                    index + 1
+                );
+                local_track(artist, album, title, seconds, path, art)
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut tracks = album(
+        "Ana Lind",
+        "Tidewater",
+        true,
+        &[
+            ("Low Light", 214),
+            ("Harbour Lines", 187),
+            ("Paper Boats", 242),
+            ("Salt and Glass", 199),
+            ("Slow Return", 305),
+        ],
+    );
+    // The album shares its first song's cover, as the scanner lists it.
+    let cover = tracks[0].artwork_url.clone();
+    for track in &mut tracks {
+        track.artwork_url.clone_from(&cover);
+    }
+    tracks.extend(album(
+        "Ostrava Tapes",
+        "Night Bus Demos",
+        false,
+        &[
+            ("Night Bus", 176),
+            ("Ninth Floor", 231),
+            ("Kitchen Demo", 128),
+        ],
+    ));
+    tracks.push(local_track(
+        "Teo Marsh",
+        "",
+        "Untitled Sketch",
+        94,
+        "/Volumes/Archive/Lossless/Teo Marsh - Untitled Sketch.wav".into(),
+        false,
+    ));
+    tracks
+}
+
+fn local_track(
+    artist: &str,
+    album: &str,
+    title: &str,
+    seconds: u32,
+    path: String,
+    art: bool,
+) -> model::Track {
+    model::Track {
+        provider: model::Provider::Local,
+        spotify_uri: Some(crate::local_files::local_uri(
+            artist,
+            album,
+            title,
+            seconds * 1000,
+        )),
+        isrc: None,
+        title: title.to_owned().into(),
+        artist: artist.to_owned().into(),
+        artists: vec![model::ArtistRef {
+            name: artist.to_owned().into(),
+            source_id: None,
+            spotify_uri: None,
+        }],
+        album: album.to_owned().into(),
+        album_ref: None,
+        duration_ms: seconds * 1000,
+        artwork_url: art.then(|| format!("{}{path}", crate::local_files::ARTWORK_SCHEME)),
+        source_id: path,
+    }
+}
+
 pub(super) fn gallery_results() -> model::CatalogSearchResults {
     model::CatalogSearchResults {
         artists: ["glaive", "Glass Animals", "Glasser"]

@@ -3,8 +3,8 @@
     "cadence": "0.8.29",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "7c2a32400ab3679e5be0461120e29bb1efc13cc0",
-    "lockfile_sha256": "a36799d4401a40149fd4db032d7625cf1a394d5c9ca76cfde1e615ff03cb139d"
+    "revision": "842c03e12edcc4a41eb15b43b6b49ea2c47899f5",
+    "lockfile_sha256": "9962de99e60e14a2b294e370eb6afbf03b2c080ea31e8d101fcef4d1f5924ee6"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43302945295",
+  "capture_run": "https://github.com/typescriptlover/sonder/actions/runs/43432768099",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -79,6 +79,7 @@
     "The track right-click menu gains a Copy Spotify link row above Open track in Spotify; Settings shows version 0.8.26; Home also gains a Coming soon row and a NEW badge on fresh releases, which only appear with live data, so no reference shows them",
     "Settings shows version 0.8.27; Home now opens first and shows placeholder cards while its release rows load, which no reference captures because the scenes answer every request",
     "Settings shows version 0.8.28; no other reference changes",
-    "Album pages gain a Review album pill (album-tint changes); four new album-review references show the inline rating row, progress bar and locked rows; search results lead with filter chips, a Top result card and Songs, then Artists and Albums (search-artists, search-gallery-scrolled); the search dropdown gains a Search Spotify row (search-cached); Settings shows version 0.8.29"
+    "Album pages gain a Review album pill (album-tint changes); four new album-review references show the inline rating row, progress bar and locked rows; search results lead with filter chips, a Top result card and Songs, then Artists and Albums (search-artists, search-gallery-scrolled); the search dropdown gains a Search Spotify row (search-cached); Settings shows version 0.8.29",
+    "Local Files adds eight references: the Local Files page with two folders' worth of tagged tracks, embedded album art and a local song paused in the player, and the Settings Local Files section with two folders; the sidebar shows a Local Files row only once a folder is added, so the other 184 references are pixel-identical to 0.8.29"
   ]
 }

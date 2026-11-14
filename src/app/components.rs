@@ -323,6 +323,7 @@ fn text_menu_row(row: Stateful<Div>, label: &'static str, color: u32) -> Statefu
         "Go to album" => CadenceIcon::MusicNote,
         "Open track in Spotify" => CadenceIcon::ArrowUpRight,
         "Copy Spotify link" => CadenceIcon::Copy,
+        "Show in folder" | "Show in Finder" => CadenceIcon::Folder,
         "Add to Liked Songs" | "Remove from Liked Songs" | "Updating Spotify library…" => {
             CadenceIcon::Heart
         }

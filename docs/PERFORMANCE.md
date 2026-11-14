@@ -310,3 +310,47 @@ The picture cache no longer keeps each compressed original in memory when the
 artwork disk cache is active: a larger size is read back from disk instead. The
 retained-image budget therefore holds decoded pictures only. Without a disk
 cache the originals are still kept, as before.
+
+# Local Files
+
+Local Files costs nothing until a folder is added: no scan runs, no index is
+read, the sidebar row stays hidden and the player holds no extra state. The
+installed player is the same librespot player; there is no second audio engine.
+
+Folders are walked off the UI thread on a blocking task. A rescan only reads
+file sizes and modification times for files it already knows, and files that
+could not be read are remembered, so they are not probed again. Leaving the
+page or removing a folder drops the reply, which cancels the scan between
+files. Rescans happen when Local Files is opened, at most once a minute, and
+when the folders change.
+
+Changes are noticed with one operating-system watch per folder (FSEvents on
+macOS, `ReadDirectoryChangesW` on Windows, through `notify`, which the UI kit
+already builds). The watch costs no polling and no thread per folder. Only
+music files, and paths that were removed, ask for a rescan; covers, lyrics and
+anything in a hidden folder do not. A change waits until the folders have been
+quiet for 1.5 seconds, so copying an album or retagging it is one rescan, and a
+change during a scan queues one more scan after it rather than starting a
+second one.
+
+Searching the page filters the list already in memory, without a query to the
+backend or SQLite. The result is kept until the list or the query changes, so
+repaints don't search again.
+
+The list is one shared `Arc<[Track]>` capped at 20,000 tracks, with a note on
+the page when a library is larger. A track takes about the same memory as a
+Liked Songs track: measured at roughly 870 bytes each with typical paths,
+about 0.9 MB per 1,000 songs and 17 MB at the cap. The index is saved in SQLite
+so the page paints from it before the rescan answers.
+
+Embedded covers are read from the file when a row first shows them and go
+through the shared 16 MiB artwork budget; there is no new cache. Songs from one
+album in one folder share their first song's cover, so an album decodes one
+picture rather than one per song.
+
+Spotify streams take the same decoder path as before, with the same one copy
+per packet. Only local files that are not 44.1 kHz stereo are resampled, in
+1,024-frame chunks. Unit tests play WAV files at three rates and channel counts
+through the real player and check the exact output length; MP3, FLAC, Ogg,
+AAC and ALAC M4A, and 96 kHz 5.1 WAV files were also played to the end. These
+are code bounds and tests, not a Windows working-set measurement of the app.

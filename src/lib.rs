@@ -7,6 +7,7 @@ mod diagnostics;
 pub(crate) mod discord;
 pub(crate) mod lastfm;
 pub mod lifecycle;
+pub mod local_files;
 mod memory;
 pub mod model;
 mod musicbrainz;

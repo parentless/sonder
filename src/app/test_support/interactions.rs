@@ -3993,3 +3993,221 @@ fn track_menu_copies_the_spotify_link() {
     });
     fixture.no_commands();
 }
+
+fn local_track(title: &str) -> model::Track {
+    model::Track {
+        provider: model::Provider::Local,
+        source_id: format!("C:/Music/{title}.flac"),
+        spotify_uri: Some(crate::local_files::local_uri(
+            "Ana Lind", "Rooms", title, 200_000,
+        )),
+        isrc: None,
+        title: title.to_owned().into(),
+        artist: "Ana Lind".into(),
+        artists: vec![model::ArtistRef {
+            name: "Ana Lind".into(),
+            source_id: None,
+            spotify_uri: None,
+        }],
+        album: "Rooms".into(),
+        album_ref: None,
+        duration_ms: 200_000,
+        artwork_url: None,
+    }
+}
+
+/// Answers the next Local Files request, returning whether it was a rescan.
+fn answer_local_files(fixture: &mut Fixture, tracks: Vec<model::Track>) -> bool {
+    let BackendCommand::LoadLocalFiles {
+        rescan, respond, ..
+    } = fixture
+        .backend
+        .commands
+        .try_recv()
+        .expect("local files request")
+    else {
+        panic!("expected a Local Files request")
+    };
+    respond
+        .send(Ok(crate::local_files::LocalLibrary {
+            tracks,
+            unreadable: 0,
+            truncated: false,
+        }))
+        .unwrap();
+    fixture.update(|_, _| {});
+    rescan
+}
+
+#[test]
+fn local_files_join_the_sidebar_once_a_folder_is_added_and_play_from_disk() {
+    let mut fixture = Fixture::new(false);
+    // Nothing changes, and nothing is scanned, for a listener without folders.
+    fixture.update(|window, _| assert!(window.try_find("nav-local-files").is_none()));
+    fixture.no_commands();
+
+    fixture.update(|_, cx| {
+        services::AppServices::library(cx).update(cx, |library, cx| {
+            library.open_local_files(vec!["C:/Music".into()], cx)
+        });
+    });
+    // The saved index paints first, then the rescan replaces it.
+    assert!(!answer_local_files(
+        &mut fixture,
+        vec![local_track("Harbour")]
+    ));
+    assert!(answer_local_files(
+        &mut fixture,
+        vec![local_track("Harbour"), local_track("Tides")]
+    ));
+
+    fixture.update(|window, cx| window.click("nav-local-files", cx));
+    assert_eq!(fixture.route(), Route::LocalFiles);
+    // The scan that just finished is fresh enough; opening asks for nothing.
+    fixture.no_commands();
+
+    fixture.right_click_track(1);
+    fixture.update(|window, _| {
+        assert!(window.try_find(("track-menu-reveal", 1usize)).is_some());
+        for spotify_only in [
+            "track-menu-radio",
+            "track-menu-copy-link",
+            "track-menu-spotify",
+            "track-menu-spotify-like",
+        ] {
+            assert!(
+                window.try_find((spotify_only, 1usize)).is_none(),
+                "{spotify_only} is shown for a local file"
+            );
+        }
+    });
+    fixture.update(|window, cx| window.click(("track-menu-play", 1usize), cx));
+    let BackendCommand::PlayContext { tracks, index } =
+        fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected local playback")
+    };
+    assert_eq!(index, 1);
+    assert_eq!(tracks.len(), 2);
+    assert!(tracks.iter().all(model::Track::is_local));
+    assert_eq!(tracks[1].source_id, "C:/Music/Tides.flac");
+}
+
+#[test]
+fn removing_the_last_local_folder_hides_local_files() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|_, cx| {
+        services::AppServices::library(cx).update(cx, |library, cx| {
+            library.open_local_files(vec!["C:/Music".into()], cx)
+        });
+    });
+    answer_local_files(&mut fixture, vec![local_track("Harbour")]);
+    answer_local_files(&mut fixture, vec![local_track("Harbour")]);
+    fixture.update(|window, _| assert!(window.try_find("nav-local-files").is_some()));
+
+    let error = fixture.update(|_, cx| {
+        services::AppServices::library(cx).update(cx, |library, cx| {
+            library.remove_local_folder(std::path::Path::new("C:/Music"), cx)
+        })
+    });
+    assert!(error.is_none());
+    fixture.update(|window, cx| {
+        assert!(window.try_find("nav-local-files").is_none());
+        let library = services::AppServices::library(cx).read(cx);
+        assert!(library.local_tracks().is_empty());
+    });
+    // The rescan with no folders empties the saved index too.
+    assert!(answer_local_files(&mut fixture, Vec::new()));
+}
+
+#[test]
+fn local_files_search_narrows_the_list_and_escape_clears_it() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|_, cx| {
+        services::AppServices::library(cx).update(cx, |library, cx| {
+            library.open_local_files(vec!["C:/Music".into()], cx)
+        });
+    });
+    let mut night_bus = local_track("Night Bus");
+    night_bus.artist = "Ostrava Tapes".into();
+    let tracks = vec![local_track("Harbour"), local_track("Tides"), night_bus];
+    answer_local_files(&mut fixture, tracks.clone());
+    answer_local_files(&mut fixture, tracks);
+    fixture.update(|window, cx| window.click("nav-local-files", cx));
+    fixture.no_commands();
+
+    // Every word must match, in any of title, artist or album, in any case.
+    fixture.update(|window, cx| {
+        window.click("page-search-input", cx);
+        window.input("ostrava BUS", cx);
+    });
+    fixture.update(|window, _| {
+        assert!(window.try_find(("spotify-track", 0usize)).is_some());
+        assert!(window.try_find(("spotify-track", 1usize)).is_none());
+    });
+    // Playing from the results plays the results.
+    fixture.right_click_track(0);
+    fixture.update(|window, cx| window.click(("track-menu-play", 0usize), cx));
+    let BackendCommand::PlayContext { tracks, index } =
+        fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected local playback")
+    };
+    assert_eq!(index, 0);
+    assert_eq!(tracks.len(), 1);
+    assert_eq!(tracks[0].title.as_ref(), "Night Bus");
+
+    // A search that finds nothing keeps its field, so it can be cleared.
+    fixture.update(|window, cx| {
+        window.click("page-search-input", cx);
+        window.input(" zz", cx);
+    });
+    fixture.update(|window, _| {
+        assert!(window.try_find(("spotify-track", 0usize)).is_none());
+        assert!(window.try_find("page-search-field").is_some());
+    });
+    fixture.update(|window, cx| window.press("escape", cx));
+    fixture.update(|window, _| {
+        assert_eq!(window.find("page-search-input").value(), Some(""));
+        assert!(window.try_find(("spotify-track", 2usize)).is_some());
+    });
+    // Search never asks the backend for anything.
+    fixture.no_commands();
+}
+
+#[test]
+fn a_folder_change_during_a_scan_rescans_once_it_finishes() {
+    let mut fixture = Fixture::new(false);
+    let library = fixture.update(|_, cx| services::AppServices::library(cx));
+    fixture.update(|_, cx| {
+        library.update(cx, |library, cx| {
+            library.open_local_files(vec!["C:/Music".into()], cx)
+        })
+    });
+    // The saved index arrives; the rescan it starts is still running when
+    // the folder changes, so the change waits instead of starting another.
+    assert!(!answer_local_files(
+        &mut fixture,
+        vec![local_track("Harbour")]
+    ));
+    fixture.update(|_, cx| library.update(cx, |library, cx| library.rescan_after_change(cx)));
+    fixture.update(|_, cx| library.update(cx, |library, cx| library.rescan_after_change(cx)));
+    assert!(answer_local_files(
+        &mut fixture,
+        vec![local_track("Harbour")]
+    ));
+    // Both changes are covered by one more rescan.
+    assert!(answer_local_files(
+        &mut fixture,
+        vec![local_track("Harbour"), local_track("Tides")]
+    ));
+    fixture.no_commands();
+
+    // With nothing running, a change rescans straight away.
+    fixture.update(|_, cx| library.update(cx, |library, cx| library.rescan_after_change(cx)));
+    assert!(answer_local_files(
+        &mut fixture,
+        vec![local_track("Harbour")]
+    ));
+    fixture.no_commands();
+}

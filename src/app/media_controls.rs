@@ -108,7 +108,12 @@ impl SystemMediaControls {
                 title: Some(&track.title),
                 album: Some(&track.album),
                 artist: Some(&track.artist),
-                cover_url: track.artwork_url.as_deref(),
+                // Embedded covers of local files are read by Sonder's own
+                // image cache; the system panel only takes web addresses.
+                cover_url: track
+                    .artwork_url
+                    .as_deref()
+                    .filter(|url| !url.starts_with(crate::local_files::ARTWORK_SCHEME)),
                 duration: Some(Duration::from_millis(u64::from(track.duration_ms))),
             });
         }
