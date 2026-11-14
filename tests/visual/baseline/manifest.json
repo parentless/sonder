@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.36",
+    "cadence": "0.8.37",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "0d430a0c8933375b17204ef1de399fcec8577479",
-    "lockfile_sha256": "8ae2440a8d3552c0c3179dba2afd4529adc29766bde2c22c1aa63ead7fb2f0d6"
+    "revision": "781703754a06b564a567bbeebfc907cf59fe5502",
+    "lockfile_sha256": "12241d46ccddd99927c758d9dc60945a430b25e91b8577e613c8fcfcf0be18c1"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43571578043",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/43574353261",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.36",
+      "cadence": "0.8.37",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "0d430a0c8933375b17204ef1de399fcec8577479",
-      "lockfile_sha256": "8ae2440a8d3552c0c3179dba2afd4529adc29766bde2c22c1aa63ead7fb2f0d6"
+      "revision": "781703754a06b564a567bbeebfc907cf59fe5502",
+      "lockfile_sha256": "12241d46ccddd99927c758d9dc60945a430b25e91b8577e613c8fcfcf0be18c1"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43571578043"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/43574353261"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -88,6 +88,7 @@
     "Settings shows version 0.8.34; lyric lines keep their wrapping as they grow into focus (each line is as wide as its type is big), so the four lyrics references change",
     "Settings shows version 0.8.36; album review now locks each song until it has been heard, and the review screenshots are pixel-identical because their scene plays each song first",
     "Settings shows version 0.8.35; the artist header now scrolls away with the page while the toolbar name and cover grow out of the search bar, and the resting and fully docked artist references are pixel-identical",
-    "Playback problems add twelve references: the dialog for an account Spotify won't stream to (streaming-refused), the dialog for playback that could not connect with Try again and Set up again (playback-not-connected), and the wait for approval in the browser (playback-approval); they only appear on those failures, so the other 184 references are pixel-identical to 0.8.29"
+    "Playback problems add twelve references: the dialog for an account Spotify won't stream to (streaming-refused), the dialog for playback that could not connect with Try again and Set up again (playback-not-connected), and the wait for approval in the browser (playback-approval); they only appear on those failures, so the other 184 references are pixel-identical to 0.8.29",
+    "Settings shows version 0.8.37; the twelve playback-problem references merged from PR #11 were re-captured on the current build (flat Sonder logo); the other references are pixel-identical"
   ]
 }
