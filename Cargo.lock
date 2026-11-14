@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "cadence"
-version = "0.8.40"
+version = "0.8.41"
 dependencies = [
  "ab_glyph",
  "anyhow",

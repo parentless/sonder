@@ -44,6 +44,13 @@ const MONTHS: &[Month] = &[
                 date: "Nov 14, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.41",
+                        notes: &[Note(
+                            Better,
+                            "A cleaner What’s new page: no borders around the months.",
+                        )],
+                    },
+                    Release {
                         version: "0.8.40",
                         notes: &[
                             Note(
@@ -649,16 +656,13 @@ impl Render for WhatsNewPage {
                 .sum();
             div()
                 .mb_3()
-                .rounded_2xl()
-                .border_1()
-                .border_color(rgb(palette.border))
                 .child(
                     components::bare_button(("whats-new-month", index))
                         .test_support()
                         .w_full()
                         .justify_start()
                         .gap_3()
-                        .px_4()
+                        .px_1()
                         .py_3p5()
                         .child(
                             div()
