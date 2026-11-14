@@ -29,7 +29,6 @@ struct Day {
 
 struct Month {
     name: &'static str,
-    range: &'static str,
     days: &'static [Day],
 }
 
@@ -40,7 +39,6 @@ use Tag::{Better, Fixed, New};
 const MONTHS: &[Month] = &[
     Month {
         name: "November 2026",
-        range: "0.8.0 – 0.8.39",
         days: &[
             Day {
                 date: "Nov 14, 2026",
@@ -309,7 +307,6 @@ const MONTHS: &[Month] = &[
     },
     Month {
         name: "September 2026",
-        range: "0.4.2 – 0.7.2",
         days: &[
             Day {
                 date: "Sep 28, 2026",
@@ -400,7 +397,6 @@ const MONTHS: &[Month] = &[
     },
     Month {
         name: "August 2026",
-        range: "0.1.0 – 0.4.1",
         days: &[
             Day {
                 date: "Aug 24, 2026",
@@ -558,6 +554,18 @@ fn notes_list(palette: CadencePalette, notes: &'static [Note]) -> Div {
         }))
 }
 
+/// The versions a month spans, such as "0.8.0 – 0.8.40", read from its notes.
+fn month_range(month: &Month) -> String {
+    let newest = month.days[0].releases[0].version;
+    let oldest = month.days[month.days.len() - 1]
+        .releases
+        .last()
+        .map_or("", |release| release.version);
+    let high = newest.rsplit('–').next().unwrap_or(newest).trim();
+    let low = oldest.split('–').next().unwrap_or(oldest).trim();
+    format!("{low} – {high}")
+}
+
 /// How many releases a label such as "0.8.1 – 0.8.7" stands for.
 fn release_count(version: &str) -> usize {
     let patch = |part: &str| {
@@ -663,7 +671,7 @@ impl Render for WhatsNewPage {
                                 .flex_1()
                                 .text_size(tokens::BODY_TEXT)
                                 .text_color(rgb(palette.text_muted))
-                                .child(format!("{count} updates · {}", month.range)),
+                                .child(format!("{count} updates · {}", month_range(month))),
                         )
                         .child(components::icon(
                             if open {
@@ -759,5 +767,34 @@ impl Render for WhatsNewPage {
                         .child(div().children(months)),
                 ),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_range_label_counts_every_release_it_covers() {
+        assert_eq!(release_count("0.8.39"), 1);
+        assert_eq!(release_count("0.8.32 – 0.8.34"), 3);
+        assert_eq!(release_count("0.5.0 – 0.5.1"), 2);
+    }
+
+    #[test]
+    fn the_newest_release_matches_the_package_version() {
+        assert_eq!(
+            MONTHS[0].days[0].releases[0].version,
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+
+    #[test]
+    fn each_month_names_the_versions_it_spans() {
+        assert_eq!(
+            month_range(&MONTHS[0]),
+            format!("0.8.0 – {}", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(month_range(&MONTHS[MONTHS.len() - 1]), "0.1.0 – 0.4.1");
     }
 }
