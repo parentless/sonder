@@ -360,6 +360,53 @@ fn cached_search_debounces_without_network_and_supports_keyboard_playback() {
 }
 
 #[test]
+fn the_dropdown_asks_spotify_after_a_pause_and_opens_a_result() {
+    let mut fixture = cached_search_fixture();
+    fixture.update(|window, cx| window.input("Song", cx));
+    fixture.cx.advance_clock(Duration::from_millis(130));
+    fixture.wait_for(|window, _| window.try_find("cached-search-suggestions").is_some());
+    fixture.no_commands();
+    fixture.cx.advance_clock(Duration::from_millis(500));
+    fixture.cx.run_until_parked();
+    let BackendCommand::SearchCatalog { query, respond } =
+        fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected one live search")
+    };
+    assert_eq!(query, "Song");
+    respond
+        .send(Ok(model::CatalogSearchResults {
+            artists: vec![model::Artist {
+                provider: model::Provider::Spotify,
+                source_id: "song-exploder".into(),
+                spotify_uri: None,
+                name: "Song Exploder".into(),
+                artwork_url: None,
+            }],
+            tracks: vec![],
+            albums: vec![],
+        }))
+        .unwrap();
+    fixture.cx.run_until_parked();
+    fixture.update(|window, cx| {
+        assert!(window.try_find(("live-search", 0usize)).is_some());
+        window.click(("live-search", 0usize), cx);
+    });
+    assert_eq!(fixture.requested_artist(), "song-exploder");
+    fixture.update(|window, _| assert!(window.try_find("cached-search-suggestions").is_none()));
+    fixture.no_commands();
+}
+
+#[test]
+fn the_dropdown_does_not_ask_spotify_for_a_short_query() {
+    let mut fixture = cached_search_fixture();
+    fixture.update(|window, cx| window.input("So", cx));
+    fixture.cx.advance_clock(Duration::from_millis(1500));
+    fixture.cx.run_until_parked();
+    fixture.no_commands();
+}
+
+#[test]
 fn cached_suggestions_click_and_escape_dismissal_work() {
     let mut fixture = cached_search_fixture();
     fixture.update(|window, cx| window.input("Song", cx));

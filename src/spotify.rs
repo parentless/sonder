@@ -429,8 +429,19 @@ pub struct Spotify {
     /// The listener's top artists, shared by the releases sweep and the
     /// upcoming lookup so they never ask for the same list twice.
     top_artists: Arc<tokio::sync::Mutex<TopArtistsCache>>,
+    search_cache: Arc<std::sync::Mutex<SearchCache>>,
     top_tracks_unavailable: Arc<AtomicBool>,
 }
+
+/// Recent search answers, so typing in the dropdown and then pressing Enter
+/// ask Spotify once for the same words.
+type SearchCache = Vec<(
+    String,
+    std::time::Instant,
+    crate::model::CatalogSearchResults,
+)>;
+const SEARCH_CACHE_ENTRIES: usize = 8;
+const SEARCH_CACHE_REUSE: Duration = Duration::from_secs(300);
 
 type TopArtistsCache = Option<(std::time::Instant, Arc<[TopArtist]>)>;
 
@@ -483,6 +494,7 @@ impl Spotify {
             gate: Arc::new(RateLimitGate::remembering(client_id)),
             pacer: Arc::new(Pacer::new()),
             top_artists: Arc::default(),
+            search_cache: Arc::default(),
             top_tracks_unavailable: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -554,6 +566,28 @@ impl Spotify {
     }
 
     pub async fn search_catalog(&self, query: &str) -> Result<crate::model::CatalogSearchResults> {
+        let key = query.trim().to_lowercase();
+        let saved = self.search_cache.lock().ok().and_then(|cache| {
+            cache
+                .iter()
+                .find(|(asked, at, _)| *asked == key && at.elapsed() < SEARCH_CACHE_REUSE)
+                .map(|(_, _, results)| results.clone())
+        });
+        if let Some(results) = saved {
+            return Ok(results);
+        }
+        let results = self.fetch_search(query).await?;
+        if let Ok(mut cache) = self.search_cache.lock() {
+            cache.retain(|(asked, _, _)| *asked != key);
+            cache.push((key, std::time::Instant::now(), results.clone()));
+            if cache.len() > SEARCH_CACHE_ENTRIES {
+                cache.remove(0);
+            }
+        }
+        Ok(results)
+    }
+
+    async fn fetch_search(&self, query: &str) -> Result<crate::model::CatalogSearchResults> {
         self.gated(async {
             let results = self
                 .client
@@ -1541,6 +1575,7 @@ mod tests {
             gate: Arc::new(RateLimitGate::default()),
             pacer: Arc::new(Pacer::new()),
             top_artists: Arc::default(),
+            search_cache: Arc::default(),
             top_tracks_unavailable: Arc::new(AtomicBool::new(false)),
         };
         let id = "7a3LWj5xSFhFRYmztS8wgK";
@@ -1607,6 +1642,7 @@ mod tests {
             gate: Arc::default(),
             pacer: Arc::new(Pacer::new()),
             top_artists: Arc::default(),
+            search_cache: Arc::default(),
             top_tracks_unavailable: Arc::default(),
         }
     }
@@ -1767,6 +1803,13 @@ mod tests {
             Some("artist")
         );
         server.await.unwrap();
+        // The server answered one request and is gone: the same words, however
+        // they are cased or padded, come from the saved answer.
+        let again = timeout(Duration::from_secs(3), spotify.search_catalog(" GLA "))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(again.tracks.len(), results.tracks.len());
     }
 
     #[tokio::test]

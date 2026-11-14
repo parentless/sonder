@@ -13,12 +13,12 @@ INK = (0xF7, 0xF5, 0xEF)
 RADIUS = 232
 # A brushed-chrome rim: bright at the top left, a dark band through the middle
 # and a second highlight at the bottom right (position 0..1 along the diagonal).
-CHROME_WIDTH = 10
+CHROME_WIDTH = 0  # no rim: a flat tile stays crisp where Windows rasterizes small icons
 # At small sizes the rim is widened to at least this many output pixels.
-MIN_RIM_PX = 1.5
+MIN_RIM_PX = 0
 # The sidebar mark is drawn near its display size with a firmer rim.
 MARK_SIZE = 96
-MARK_RIM_PX = 3
+MARK_RIM_PX = 0
 CHROME = [(0.0, (252, 253, 255)), (0.22, (160, 166, 175)), (0.45, (74, 78, 86)),
           (0.62, (150, 156, 165)), (0.82, (236, 239, 243)), (1.0, (112, 117, 126))]
 RINGS = [(138, 0.85), (235, 0.55), (331, 0.30)]  # (radius, opacity)

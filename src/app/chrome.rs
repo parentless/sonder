@@ -5,12 +5,61 @@ use gpui_kit::TestSupportExt as _;
 pub(super) enum ToolbarEvent {
     QueryChanged(String),
     SubmitSearch,
+    OpenArtist(model::ArtistRef),
+    OpenAlbum(model::AlbumRef),
     Navigate(Route),
     OpenSettings,
     Connect,
     Logout,
     /// The account menu opened, so anything else overlaying the page should go.
     MenuOpened,
+}
+
+/// How long typing must pause, and how many letters it needs, before the
+/// dropdown asks Spotify. Answers are saved per query, so Enter reuses them.
+const LIVE_SEARCH_PAUSE: Duration = Duration::from_millis(500);
+const LIVE_SEARCH_MIN_CHARS: usize = 3;
+
+/// One Spotify answer offered under "On Spotify".
+#[derive(Clone)]
+enum LiveResult {
+    Artist(model::Artist),
+    Album(model::Album),
+    Track(model::Track),
+}
+
+impl LiveResult {
+    /// The few best matches: one artist, two albums, two songs.
+    fn pick(results: model::CatalogSearchResults) -> Vec<Self> {
+        let mut live = Vec::new();
+        live.extend(results.artists.into_iter().take(1).map(Self::Artist));
+        live.extend(results.albums.into_iter().take(2).map(Self::Album));
+        live.extend(results.tracks.into_iter().take(2).map(Self::Track));
+        live
+    }
+
+    fn parts(&self) -> (SharedString, String, CadenceIcon) {
+        match self {
+            Self::Artist(artist) => (artist.name.clone(), "Artist".into(), CadenceIcon::Person),
+            Self::Album(album) => {
+                let by = album
+                    .artists
+                    .first()
+                    .map(|artist| format!(" · {}", artist.name))
+                    .unwrap_or_default();
+                (
+                    album.name.clone(),
+                    format!("Album{by}"),
+                    CadenceIcon::MusicNote,
+                )
+            }
+            Self::Track(track) => (
+                track.title.clone(),
+                format!("Song · {}", track.artist),
+                CadenceIcon::MusicNote,
+            ),
+        }
+    }
 }
 
 /// The bar above the page: search on the left, account on the right.
@@ -21,6 +70,10 @@ pub(super) struct Toolbar {
     suggestion_selection: Option<usize>,
     /// Whether the "Search Spotify for ..." row is offered under the field.
     search_row: bool,
+    /// Spotify's answer for the words typed, shown under the library matches.
+    live: Vec<LiveResult>,
+    live_task: Option<gpui_kit::Task<()>>,
+    backend: BackendHandle,
     suggestion_task: Option<gpui_kit::Task<()>>,
     search_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     library: Entity<library::Library>,
@@ -42,7 +95,7 @@ pub(super) struct Toolbar {
 impl EventEmitter<ToolbarEvent> for Toolbar {}
 
 impl Toolbar {
-    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(super) fn new(backend: BackendHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search Spotify"));
         let search_subscription = cx.subscribe_in(
             &search_input,
@@ -56,6 +109,9 @@ impl Toolbar {
                 InputEvent::PressEnter { .. } => match this.suggestion_selection {
                     Some(index) if index < this.suggestions.len() => {
                         this.play_suggestion(index, cx)
+                    }
+                    Some(index) if index < this.suggestions.len() + this.live.len() => {
+                        this.open_live(index - this.suggestions.len(), cx)
                     }
                     _ => this.submit_search_from_field(cx),
                 },
@@ -88,6 +144,9 @@ impl Toolbar {
             suggestion_query: String::new(),
             suggestion_selection: None,
             search_row: false,
+            live: Vec::new(),
+            live_task: None,
+            backend,
             suggestion_task: None,
             search_bounds: Rc::default(),
             library: services::AppServices::library(cx),
@@ -122,6 +181,30 @@ impl Toolbar {
             ],
         );
         self.suggestion_query = "Song".into();
+        self.live = LiveResult::pick(model::CatalogSearchResults {
+            artists: vec![model::Artist {
+                provider: model::Provider::Spotify,
+                source_id: "artist".into(),
+                spotify_uri: None,
+                name: "Song Exploder".into(),
+                artwork_url: None,
+            }],
+            albums: vec![model::Album {
+                provider: model::Provider::Spotify,
+                source_id: "album".into(),
+                spotify_uri: None,
+                name: "Songs for the Deaf".into(),
+                artists: vec![model::ArtistRef {
+                    name: "Sonder Ensemble".into(),
+                    source_id: None,
+                    spotify_uri: None,
+                }],
+                release_date: None,
+                artwork_url: None,
+                track_count: None,
+            }],
+            tracks: Vec::new(),
+        });
         self.search_row = true;
         self.suggestion_selection = Some(1);
         cx.notify();
@@ -171,7 +254,7 @@ impl Toolbar {
 
     /// The suggestion list: what the library matched plus the Spotify row.
     fn suggestions_open(&self) -> bool {
-        !self.suggestions.is_empty() || self.search_row
+        !self.suggestions.is_empty() || !self.live.is_empty() || self.search_row
     }
 
     pub(super) fn close_suggestions(&mut self, cx: &mut Context<Self>) -> bool {
@@ -182,9 +265,11 @@ impl Toolbar {
 
     fn dismiss_suggestions(&mut self, cx: &mut Context<Self>) {
         self.suggestion_task = None;
+        self.live_task = None;
         self.suggestion_selection = None;
-        if !self.suggestions.is_empty() || self.search_row {
+        if self.suggestions_open() {
             self.suggestions.clear();
+            self.live.clear();
             self.search_row = false;
             cx.notify();
         }
@@ -197,6 +282,9 @@ impl Toolbar {
             return;
         }
         let query = self.suggestion_query.clone();
+        if query.chars().count() >= LIVE_SEARCH_MIN_CHARS {
+            self.queue_live(query.clone(), cx);
+        }
         self.suggestion_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(120))
@@ -222,6 +310,53 @@ impl Toolbar {
                 cx.notify();
             });
         }));
+    }
+
+    /// Asks Spotify once typing has paused. A failure (a rate limit included)
+    /// just leaves the section out; the library matches still work.
+    fn queue_live(&mut self, query: String, cx: &mut Context<Self>) {
+        self.live_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(LIVE_SEARCH_PAUSE).await;
+            let Ok(reply) = this.update(cx, |toolbar, _| {
+                catalog::request(&toolbar.backend, |respond| BackendCommand::SearchCatalog {
+                    query,
+                    respond,
+                })
+            }) else {
+                return;
+            };
+            let Ok(results) = reply.await else {
+                return;
+            };
+            let _ = this.update(cx, |toolbar, cx| {
+                toolbar.live_task = None;
+                toolbar.live = LiveResult::pick(results);
+                cx.notify();
+            });
+        }));
+    }
+
+    fn open_live(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(found) = self.live.get(index).cloned() else {
+            return;
+        };
+        self.dismiss_suggestions(cx);
+        match found {
+            LiveResult::Artist(artist) => cx.emit(ToolbarEvent::OpenArtist(model::ArtistRef {
+                name: artist.name,
+                source_id: Some(artist.source_id),
+                spotify_uri: artist.spotify_uri,
+            })),
+            LiveResult::Album(album) => cx.emit(ToolbarEvent::OpenAlbum(model::AlbumRef {
+                name: album.name,
+                source_id: Some(album.source_id),
+                spotify_uri: album.spotify_uri,
+                artwork_url: album.artwork_url,
+            })),
+            LiveResult::Track(track) => self.player.update(cx, |player, cx| {
+                player.play_context(vec![track], 0, cx);
+            }),
+        }
     }
 
     fn play_suggestion(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -314,12 +449,66 @@ impl Toolbar {
                     ),
             );
         }
+        if !self.live.is_empty() {
+            menu = menu.child(
+                div()
+                    .px_3()
+                    .py_1()
+                    .text_xs()
+                    .text_color(rgb(palette.text_muted))
+                    .child("On Spotify"),
+            );
+        }
+        for (index, found) in self.live.iter().enumerate() {
+            let (title, detail, icon) = found.parts();
+            let selected = self.suggestion_selection == Some(self.suggestions.len() + index);
+            menu = menu.child(
+                components::button(palette, ("live-search", index))
+                    .test_support()
+                    .w_full()
+                    .h_12()
+                    .px_3()
+                    .gap_2()
+                    .rounded_lg()
+                    .justify_start()
+                    .when(selected, |row| row.bg(rgb(palette.selection)))
+                    .hover(|style| style.bg(rgb(palette.surface_hover)))
+                    .child(components::icon(
+                        icon,
+                        tokens::CONTROL_ICON,
+                        palette.text_muted,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_sm()
+                                    .text_color(rgb(palette.text_primary))
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(rgb(palette.text_muted))
+                                    .child(detail),
+                            ),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_live(index, cx))),
+            );
+        }
         let query = self.suggestion_query.clone();
-        let selected = self.suggestion_selection == Some(self.suggestions.len());
+        let selected = self.suggestion_selection == Some(self.suggestions.len() + self.live.len());
         menu = menu
-            .when(!self.suggestions.is_empty(), |menu| {
-                menu.child(div().h(px(1.)).mx_2().my_1().bg(rgb(palette.border)))
-            })
+            .when(
+                !self.suggestions.is_empty() || !self.live.is_empty(),
+                |menu| menu.child(div().h(px(1.)).mx_2().my_1().bg(rgb(palette.border))),
+            )
             .child(
                 components::button(palette, "cached-search-submit")
                     .test_support()
@@ -391,7 +580,8 @@ impl Toolbar {
             .relative()
             .capture_key_down(cx.listener(|this, event: &gpui_kit::KeyDownEvent, _, cx| {
                 // The Spotify row is one more entry after the library matches.
-                let entries = this.suggestions.len() + usize::from(this.search_row);
+                let entries =
+                    this.suggestions.len() + this.live.len() + usize::from(this.search_row);
                 if entries == 0 {
                     return;
                 }

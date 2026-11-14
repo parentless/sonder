@@ -205,7 +205,7 @@ impl Workspace {
                 },
             ),
         );
-        let toolbar = cx.new(|cx| chrome::Toolbar::new(window, cx));
+        let toolbar = cx.new(|cx| chrome::Toolbar::new(backend.clone(), window, cx));
         let artist_header = artist.read(cx).header_motion.clone();
         toolbar.update(cx, |toolbar, _| toolbar.artist_header = Some(artist_header));
         subscriptions.push(cx.subscribe(
@@ -217,6 +217,14 @@ impl Workspace {
                         .update(cx, |search, cx| search.set_query(query, cx));
                 }
                 ToolbarEvent::SubmitSearch => this.submit_search(cx),
+                ToolbarEvent::OpenArtist(artist) => {
+                    let origin = this.router.route();
+                    this.open_artist(artist.clone(), origin, cx);
+                }
+                ToolbarEvent::OpenAlbum(album) => {
+                    let origin = this.router.route();
+                    this.open_album(album.clone(), origin, cx);
+                }
                 ToolbarEvent::Navigate(route) => this.navigate(*route, cx),
                 ToolbarEvent::OpenSettings => this.open_settings(cx),
                 ToolbarEvent::Connect => {

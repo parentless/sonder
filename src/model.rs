@@ -270,7 +270,7 @@ impl std::fmt::Display for HomePermissionMissing {
 impl std::error::Error for HomePermissionMissing {}
 
 /// Bounded catalog results from one combined Spotify search request.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CatalogSearchResults {
     pub artists: Vec<Artist>,
     pub albums: Vec<Album>,
