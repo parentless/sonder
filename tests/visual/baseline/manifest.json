@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.40",
+    "cadence": "0.8.41",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "8584b0711f6c9c822ce82cacbc9a4af9d569bcce",
-    "lockfile_sha256": "bb6ff2c3b3ed9e07128a749ab68bd15074d83d9e6e082d1892d34d58723d8901"
+    "revision": "5dd2120dc73bf85f91aa407e7686eecec87a04ae",
+    "lockfile_sha256": "43fde462c131651e00a71f730b202a90552881d8b0656388f9ecf1ee62114aac"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43641007326",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/43645191344",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.40",
+      "cadence": "0.8.41",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "8584b0711f6c9c822ce82cacbc9a4af9d569bcce",
-      "lockfile_sha256": "bb6ff2c3b3ed9e07128a749ab68bd15074d83d9e6e082d1892d34d58723d8901"
+      "revision": "5dd2120dc73bf85f91aa407e7686eecec87a04ae",
+      "lockfile_sha256": "43fde462c131651e00a71f730b202a90552881d8b0656388f9ecf1ee62114aac"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43641007326"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/43645191344"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -92,6 +92,7 @@
     "Settings shows version 0.8.37; the twelve playback-problem references merged from PR #11 were re-captured on the current build (flat Sonder logo); the other references are pixel-identical",
     "Settings shows version 0.8.38; empty and error pages use one centred icon, title and help layout, so the playlist-denied and search-entered, -cached and -live references changed, and four new search-empty references show No results",
     "In 0.8.39 the sidebar gains a What's new row after the last library item (with a red dot until it is opened) and an update card at its foot when an update is offered, so nearly every full-window capture changed; four whats-new references are new, the update-available references show the card, and Settings shows version 0.8.39 plus the Install updates automatically and What's new rows",
-    "In 0.8.40 What's new moves into the account menu (a New pill on the row and a red dot on the avatar until it is opened) and the sidebar loses its What's new row, so every full-window capture changes back to five library rows; the account-menu references gain the row, and the four whats-new references show the latest release card with the months folded below; Settings shows version 0.8.40"
+    "In 0.8.40 What's new moves into the account menu (a New pill on the row and a red dot on the avatar until it is opened) and the sidebar loses its What's new row, so every full-window capture changes back to five library rows; the account-menu references gain the row, and the four whats-new references show the latest release card with the months folded below; Settings shows version 0.8.40",
+    "In 0.8.41 the What's new months lose their outer border and artist pages show five popular songs with a Show more button when an artist has more; four artist-popular-more references are new, the four whats-new references change, and Settings shows version 0.8.41"
   ]
 }
