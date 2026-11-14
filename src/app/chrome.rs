@@ -782,7 +782,11 @@ impl Render for Toolbar {
         let profile_artwork = profile
             .as_ref()
             .and_then(|profile| profile.artwork_url.as_deref());
-        let showing_settings = self.route == Route::Settings;
+        let page_title = match self.route {
+            Route::Settings => Some("Settings"),
+            Route::WhatsNew => Some("What’s new"),
+            _ => None,
+        };
         let artist_dock_width = Rems(if compact { 7.5 } else { 10.5 });
 
         div()
@@ -816,7 +820,7 @@ impl Render for Toolbar {
                             )),
                         )
                     })
-                    .when(showing_settings, |group| {
+                    .when_some(page_title, |group, title| {
                         group.child(
                             div()
                                 .h_10()
@@ -825,10 +829,10 @@ impl Render for Toolbar {
                                 .text_lg()
                                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                 .text_color(rgb(palette.text_primary))
-                                .child("Settings"),
+                                .child(title),
                         )
                     })
-                    .when(!showing_settings, |group| {
+                    .when(page_title.is_none(), |group| {
                         group.child(self.search_field(palette, compact, window, cx))
                     }),
             )

@@ -296,6 +296,7 @@ enum Route {
     Artist,
     Album,
     Settings,
+    WhatsNew,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -394,6 +395,7 @@ mod updater;
 #[cfg(target_os = "windows")]
 #[path = "updater_windows.rs"]
 mod updater;
+mod whats_new;
 mod windows;
 mod workspace;
 

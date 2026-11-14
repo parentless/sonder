@@ -4732,3 +4732,38 @@ fn playback_stops_after_three_songs_in_a_row_fail() {
         Ok(BackendCommand::Next)
     ));
 }
+
+#[test]
+fn whats_new_opens_from_the_sidebar_and_back_returns() {
+    let mut fixture = Fixture::new(false);
+    let before = fixture.route();
+    fixture.update(|window, cx| window.click("nav-whats-new", cx));
+    assert_eq!(fixture.route(), Route::WhatsNew);
+    // The toolbar's back button returns to where the listener was.
+    fixture.update(|window, cx| window.click("detail-back", cx));
+    assert_eq!(fixture.route(), before);
+    fixture.no_commands();
+}
+
+#[test]
+fn the_sidebar_offers_an_available_update_with_one_button() {
+    let mut fixture = Fixture::new(false);
+    let workspace = fixture.workspace.clone().unwrap();
+    fixture.update(|window, _| assert!(window.try_find("sidebar-update").is_none()));
+    fixture.update(|_, cx| {
+        workspace
+            .upgrade()
+            .unwrap()
+            .read(cx)
+            .sidebar
+            .clone()
+            .update(cx, |sidebar, cx| {
+                sidebar.set_update(
+                    Some(crate::app::sidebar::UpdateOffer::Available("9.9.9".into())),
+                    cx,
+                )
+            })
+    });
+    fixture.update(|window, _| assert!(window.try_find("sidebar-update").is_some()));
+    fixture.no_commands();
+}

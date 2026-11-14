@@ -245,12 +245,24 @@ impl Workspace {
     }
 
     pub(super) fn navigate(&mut self, route: Route, cx: &mut Context<Self>) {
+        if route == Route::WhatsNew {
+            return self.open_whats_new(cx);
+        }
         self.router.navigate(route);
         if route == Route::LocalFiles {
             // Picks up files added or changed since the last look.
             self.library
                 .update(cx, |library, cx| library.refresh_local_files(cx));
         }
+        self.settle_navigation(cx);
+    }
+
+    pub(super) fn open_whats_new(&mut self, cx: &mut Context<Self>) {
+        self.router.open_whats_new();
+        whats_new::mark_seen();
+        self.whats_new.update(cx, |page, cx| page.reopened(cx));
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.clear_whats_new_dot(cx));
         self.settle_navigation(cx);
     }
 

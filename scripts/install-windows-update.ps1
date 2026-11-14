@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory)][int]$ProcessId,
     [Parameter(Mandatory)][string]$Executable,
-    [Parameter(Mandatory)][string]$Staged
+    [Parameter(Mandatory)][string]$Staged,
+    [switch]$NoRelaunch
 )
 $ErrorActionPreference = 'Stop'
 $backup = "$Executable.previous"
@@ -23,12 +24,12 @@ try {
         Move-Item -LiteralPath $backup -Destination $Executable -Force
         throw
     }
-    Start-Process -FilePath $Executable
+    if (-not $NoRelaunch) { Start-Process -FilePath $Executable }
     Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
 } catch {
     Add-Type -AssemblyName PresentationFramework
     [System.Windows.MessageBox]::Show("Sonder could not install the update: $($_.Exception.Message)", 'Sonder update') | Out-Null
-    if (Test-Path -LiteralPath $Executable) { Start-Process -FilePath $Executable }
+    if ((Test-Path -LiteralPath $Executable) -and -not $NoRelaunch) { Start-Process -FilePath $Executable }
 } finally {
     Remove-Item -LiteralPath $Staged -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue

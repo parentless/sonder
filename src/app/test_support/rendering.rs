@@ -26,6 +26,7 @@ enum Scene {
     PlaylistHover,
     PlaylistCollapsed,
     UpdateAvailable,
+    WhatsNew,
     PlaylistZoomSmall,
     PlaylistZoomLarge,
     ArtistMenu,
@@ -88,6 +89,7 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("sidebar-playlist-hover", Scene::PlaylistHover),
         ("sidebar-collapsed", Scene::PlaylistCollapsed),
         ("update-available", Scene::UpdateAvailable),
+        ("whats-new", Scene::WhatsNew),
         ("playlist-zoom-small", Scene::PlaylistZoomSmall),
         ("playlist-zoom-large", Scene::PlaylistZoomLarge),
         ("settings", Scene::Settings),
@@ -399,7 +401,13 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     while backend.commands.try_recv().is_ok() {}
                 }
                 Scene::ShuffleOn => { services::AppServices::player(cx).update(cx, |player, cx| player.toggle_shuffle(cx)); }
-                Scene::UpdateAvailable => { workspace.toolbar.update(cx, |toolbar, cx| toolbar.seed_update_available(cx)); }
+                Scene::UpdateAvailable => {
+                    workspace.toolbar.update(cx, |toolbar, cx| toolbar.seed_update_available(cx));
+                    workspace.sidebar.update(cx, |sidebar, cx| {
+                        sidebar.set_update(Some(crate::app::sidebar::UpdateOffer::Available("9.9.9".into())), cx)
+                    });
+                }
+                Scene::WhatsNew => workspace.open_whats_new(cx),
                 Scene::Settings | Scene::SettingsAutoplayOff | Scene::SettingsCache => {
                     workspace.open_settings(cx);
                     if matches!(scene, Scene::SettingsAutoplayOff) {

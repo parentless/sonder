@@ -388,3 +388,9 @@ still has to be heard. It keeps one small counter per track and counts time
 only when the song plays forward, so seeking ahead does not unlock the next
 row. The task holds the player weakly and ends when the review completes or
 closes. The panel redraws only when the seconds left change.
+
+## Updates and What's new
+
+- **What's new** is static data compiled into the app. It costs nothing until the page is opened and has no timer or request. The "opened" marker is one small file read when the sidebar is built.
+- **Install updates automatically** (off by default) adds no timer: it rides the existing once-a-day check. When a newer release is found it streams the download to disk on its own thread (one chunk in memory, checksum checked) and waits. It installs when Sonder quits, or from the sidebar's Restart button. Nothing interrupts playback.
+- Leftover downloads from a crashed session are removed once they are a day old.

@@ -21,7 +21,7 @@ struct NavItem {
     route: Route,
 }
 
-const NAV_ITEMS: [NavItem; 5] = [
+const NAV_ITEMS: [NavItem; 6] = [
     NavItem {
         id: "nav-home",
         fill_id: "nav-home-fill",
@@ -63,7 +63,48 @@ const NAV_ITEMS: [NavItem; 5] = [
         selected_icon: CadenceIcon::FolderFilled,
         route: Route::LocalFiles,
     },
+    NavItem {
+        id: "nav-whats-new",
+        fill_id: "nav-whats-new-fill",
+        label: "What’s new",
+        icon: CadenceIcon::Sparkle,
+        selected_icon: CadenceIcon::SparkleFilled,
+        route: Route::WhatsNew,
+    },
 ];
+
+/// An update the rail offers, in the order a listener meets it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum UpdateOffer {
+    Available(String),
+    #[cfg(target_os = "windows")]
+    Downloading(String),
+    #[cfg(target_os = "windows")]
+    Ready(String),
+}
+
+impl UpdateOffer {
+    /// `previous` supplies the version while a download is under way, since
+    /// that state does not repeat it.
+    pub(super) fn from_check(
+        check: &updater::UpdateCheck,
+        #[cfg_attr(not(target_os = "windows"), allow(unused_variables))] previous: Option<&Self>,
+    ) -> Option<Self> {
+        use updater::UpdateCheck;
+        match check {
+            UpdateCheck::Available(version) => Some(Self::Available(version.clone())),
+            #[cfg(target_os = "windows")]
+            UpdateCheck::Downloading => previous.map(|offer| match offer {
+                Self::Available(v) | Self::Downloading(v) | Self::Ready(v) => {
+                    Self::Downloading(v.clone())
+                }
+            }),
+            #[cfg(target_os = "windows")]
+            UpdateCheck::Ready(version) => Some(Self::Ready(version.clone())),
+            _ => None,
+        }
+    }
+}
 
 /// Where the rows stand in the rail's collapse or expand animation.
 struct RowTransition {
@@ -107,6 +148,8 @@ pub(super) struct Sidebar {
     toggle_focus: FocusHandle,
     /// One per entry of [`NAV_ITEMS`], in the same order.
     nav_focus: [FocusHandle; NAV_ITEMS.len()],
+    whats_new_unseen: bool,
+    update: Option<UpdateOffer>,
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
@@ -157,7 +200,110 @@ impl Sidebar {
             transition_duration: Duration::from_millis(1),
             toggle_focus: cx.focus_handle().tab_stop(true),
             nav_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
+            whats_new_unseen: whats_new::unseen(),
+            update: None,
         }
+    }
+
+    pub(super) fn clear_whats_new_dot(&mut self, cx: &mut Context<Self>) {
+        if self.whats_new_unseen {
+            self.whats_new_unseen = false;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn observe_update(&mut self, check: &updater::UpdateCheck, cx: &mut Context<Self>) {
+        let next = UpdateOffer::from_check(check, self.update.as_ref());
+        self.set_update(next, cx);
+    }
+
+    pub(super) fn set_update(&mut self, update: Option<UpdateOffer>, cx: &mut Context<Self>) {
+        if self.update != update {
+            self.update = update;
+            cx.notify();
+        }
+    }
+
+    /// The update prompt at the foot of the rail: what is waiting and one
+    /// button. It is static, with no timer or animation.
+    fn update_card(&self, palette: CadencePalette, collapsed: bool) -> Option<AnyElement> {
+        let offer = self.update.as_ref()?;
+        let (title, detail, action) = match offer {
+            UpdateOffer::Available(version) => (
+                "Update available",
+                format!("Sonder {version}"),
+                Some("Update now"),
+            ),
+            #[cfg(target_os = "windows")]
+            UpdateOffer::Downloading(version) => (
+                "Downloading update",
+                format!("Sonder {version}. You can keep listening."),
+                None,
+            ),
+            #[cfg(target_os = "windows")]
+            UpdateOffer::Ready(version) => (
+                "Update ready",
+                format!("Sonder {version}"),
+                Some("Restart to update"),
+            ),
+        };
+        let install: fn(&mut App) = match offer {
+            #[cfg(target_os = "windows")]
+            UpdateOffer::Ready(_) => updater::restart_to_update,
+            _ => updater::check_for_updates,
+        };
+        if collapsed {
+            return action.map(|label| {
+                components::icon_button(palette, "sidebar-update", CadenceIcon::Download)
+                    .test_support()
+                    .aria_label(label)
+                    .tooltip(move |window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(title).build(window, cx)
+                    })
+                    .on_click(move |_, _, cx| install(cx))
+                    .into_any_element()
+            });
+        }
+        Some(
+            div()
+                .flex_none()
+                .p_3p5()
+                .rounded_2xl()
+                .border_1()
+                .border_color(rgb(palette.border))
+                .bg(rgb(palette.surface_raised))
+                .child(
+                    div()
+                        .text_size(tokens::BODY_TEXT)
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(rgb(palette.text_primary))
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .mt_0p5()
+                        .text_size(tokens::BODY_TEXT)
+                        .line_height(relative(1.4))
+                        .text_color(rgb(palette.text_muted))
+                        .child(detail),
+                )
+                .when_some(action, |card, label| {
+                    card.child(
+                        components::filled_button(palette, "sidebar-update")
+                            .test_support()
+                            .mt_2p5()
+                            .w_full()
+                            .h_9()
+                            .rounded_full()
+                            .text_color(rgb(palette.on_accent))
+                            .text_size(tokens::BODY_TEXT)
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child(label)
+                            .on_click(move |_, _, cx| install(cx)),
+                    )
+                })
+                .into_any_element(),
+        )
     }
 
     pub(super) fn show_route(
@@ -296,6 +442,7 @@ impl Sidebar {
             })
             .child(
                 div()
+                    .relative()
                     .w_5()
                     .flex_none()
                     .flex()
@@ -304,7 +451,21 @@ impl Sidebar {
                         glyph,
                         tokens::CONTROL_ICON,
                         palette.text_primary,
-                    )),
+                    ))
+                    .when(
+                        item.route == Route::WhatsNew && self.whats_new_unseen,
+                        |icon| {
+                            icon.child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .right(Rems(-0.125))
+                                    .size_2()
+                                    .rounded_full()
+                                    .bg(rgb(0xF04452)),
+                            )
+                        },
+                    ),
             )
             .child(div().whitespace_nowrap().child(item.label).with_animation(
                 (item.id, transition.generation),
@@ -756,7 +917,8 @@ impl Sidebar {
                                 ),
                         )
                     })
-                    .when(!show_pinned, |panel| panel.child(div().flex_1())),
+                    .when(!show_pinned, |panel| panel.child(div().flex_1()))
+                    .children(self.update_card(palette, collapsed)),
             )
     }
 }

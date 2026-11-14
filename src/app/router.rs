@@ -12,6 +12,7 @@ pub(super) struct Router {
     artist_origin: Route,
     album_origin: Route,
     settings_origin: Route,
+    whats_new_origin: Route,
 }
 
 impl Router {
@@ -22,6 +23,7 @@ impl Router {
             artist_origin: Route::LikedSongs,
             album_origin: Route::LikedSongs,
             settings_origin: Route::LikedSongs,
+            whats_new_origin: Route::LikedSongs,
         }
     }
 
@@ -79,6 +81,7 @@ impl Router {
             Route::Artist => Some(self.artist_origin),
             Route::Album => Some(self.album_origin),
             Route::Settings => Some(self.settings_origin),
+            Route::WhatsNew => Some(self.whats_new_origin),
             _ => None,
         }
     }
@@ -89,6 +92,7 @@ impl Router {
             Route::Artist => &mut self.artist_origin,
             Route::Album => &mut self.album_origin,
             Route::Settings => &mut self.settings_origin,
+            Route::WhatsNew => &mut self.whats_new_origin,
             _ => unreachable!("only detail routes remember where they came from"),
         }
     }
@@ -96,6 +100,14 @@ impl Router {
     pub(super) fn open_settings(&mut self) {
         self.settings_origin = self.back_target().unwrap_or(self.route);
         self.route = Route::Settings;
+    }
+
+    pub(super) fn open_whats_new(&mut self) {
+        // Reopening from the page itself keeps the original way back.
+        if self.route != Route::WhatsNew {
+            self.whats_new_origin = self.back_target().unwrap_or(self.route);
+        }
+        self.route = Route::WhatsNew;
     }
 
     /// Where the back button goes, for the routes that have one.

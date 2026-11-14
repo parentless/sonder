@@ -3,6 +3,7 @@ use gpui_kit::TestSupportExt as _;
 
 /// What the settings page asks the workspace to do.
 pub(super) enum SettingsEvent {
+    OpenWhatsNew,
     RequestAppChange,
     SetTheme(ThemePreference),
     SetZoom(UiZoom),
@@ -52,6 +53,7 @@ pub(super) struct Settings {
     tray_focus: FocusHandle,
     startup_focus: FocusHandle,
     automatic_updates_focus: FocusHandle,
+    automatic_install_focus: FocusHandle,
     discord_focus: FocusHandle,
     discord_application_id: Entity<InputState>,
     discord_error: Option<SharedString>,
@@ -118,6 +120,7 @@ impl Settings {
             tray_focus: cx.focus_handle(),
             startup_focus: cx.focus_handle(),
             automatic_updates_focus: cx.focus_handle(),
+            automatic_install_focus: cx.focus_handle(),
             discord_focus: cx.focus_handle(),
             lastfm_focus: cx.focus_handle(),
             lastfm_api_key,
@@ -1000,6 +1003,49 @@ impl Settings {
                     .bg(rgb(palette.surface_raised))
                     .p_5()
                     .child(Self::version_row(palette, check.as_ref()))
+                    .when_some(updater::automatic_install(cx), |card, enabled| {
+                        card.child(
+                            div()
+                                .mt_5()
+                                .pt_5()
+                                .border_t_1()
+                                .border_color(rgb(palette.border))
+                                .child(Self::playback_setting_row(
+                                    palette,
+                                    "Install updates automatically",
+                                    "Downloads new versions quietly in the background and installs them when you close Sonder. Never interrupts playback.",
+                                    components::focus_ring_around(
+                                        palette,
+                                        &self.automatic_install_focus,
+                                        window,
+                                        cx,
+                                        Switch::new("settings-automatic-install")
+                                            .focus_ring(false)
+                                            .checked(enabled)
+                                            .on_click(cx.listener(|_, checked: &bool, _, cx| {
+                                                updater::set_automatic_install(*checked, cx);
+                                                cx.notify();
+                                            })),
+                                    ),
+                                )),
+                        )
+                    })
+                    .child(
+                        div()
+                            .mt_5()
+                            .pt_5()
+                            .border_t_1()
+                            .border_color(rgb(palette.border))
+                            .child(Self::playback_setting_row(
+                                palette,
+                                "What’s new",
+                                "See what changed in each version.",
+                                components::settings_button(palette, "settings-whats-new", "Open")
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        cx.emit(SettingsEvent::OpenWhatsNew)
+                                    })),
+                            )),
+                    )
                     .when_some(updater::automatic_checks(cx), |card, enabled| {
                         card.child(
                             div()
@@ -1050,6 +1096,13 @@ impl Settings {
                 (format!("Sonder {version} is ready to install."), true)
             }
             #[cfg(target_os = "windows")]
+            Some(UpdateCheck::Ready(version)) => (
+                format!(
+                    "Sonder {version} is downloaded. It installs when you restart or close Sonder."
+                ),
+                true,
+            ),
+            #[cfg(target_os = "windows")]
             Some(UpdateCheck::Failed(error)) => (format!("Update failed: {error}"), false),
             Some(UpdateCheck::Skipped(version)) => (format!("Version {version} skipped."), false),
         };
@@ -1064,6 +1117,8 @@ impl Settings {
             #[cfg(target_os = "windows")]
             Some(UpdateCheck::Checking | UpdateCheck::Downloading) => "Please wait…",
             Some(UpdateCheck::Available(_)) => "Install update",
+            #[cfg(target_os = "windows")]
+            Some(UpdateCheck::Ready(_)) => "Restart to update",
             _ => "Check for updates",
         };
         h_flex()

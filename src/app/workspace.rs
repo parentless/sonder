@@ -25,6 +25,7 @@ pub(super) struct Workspace {
     pub(super) artist: Entity<catalog::ArtistPage>,
     pub(super) album: Entity<catalog::AlbumPage>,
     pub(super) settings: Entity<settings::Settings>,
+    pub(super) whats_new: Entity<whats_new::WhatsNewPage>,
     pub(super) sidebar: Entity<sidebar::Sidebar>,
     pub(super) toolbar: Entity<chrome::Toolbar>,
     pub(super) player_bar: Entity<player_bar::PlayerBar>,
@@ -114,12 +115,21 @@ impl Workspace {
             cx.subscribe(&artist, Workspace::handle_page_event),
             cx.subscribe(&album, Workspace::handle_page_event),
         ]);
+        if let Some(status) = updater::status(cx) {
+            subscriptions.push(cx.observe(&status, |this, status, cx| {
+                let check = status.read(cx).check.clone();
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.observe_update(&check, cx));
+            }));
+        }
+        let whats_new = cx.new(|_| whats_new::WhatsNewPage::new());
         let settings = cx.new(|cx| settings::Settings::new(window, cx));
         subscriptions.push(cx.subscribe_in(
             &settings,
             window,
             |this, _, event: &settings::SettingsEvent, window, cx| match event {
                 settings::SettingsEvent::RequestAppChange => this.request_spotify_app_change(cx),
+                settings::SettingsEvent::OpenWhatsNew => this.open_whats_new(cx),
                 settings::SettingsEvent::SetTheme(preference) => {
                     this.set_theme_preference(*preference, window, cx)
                 }
@@ -328,6 +338,7 @@ impl Workspace {
             artist,
             album,
             settings,
+            whats_new,
             sidebar,
             toolbar,
             player_bar,
@@ -375,6 +386,7 @@ impl Workspace {
             Route::Artist => self.artist.clone().into_any_element(),
             Route::Album => self.album.clone().into_any_element(),
             Route::Settings => self.settings.clone().into_any_element(),
+            Route::WhatsNew => self.whats_new.clone().into_any_element(),
         }
     }
 
