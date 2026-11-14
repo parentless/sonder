@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.35",
+    "cadence": "0.8.36",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "c51649187209f8d3d9f148ccdff98872c0001a78",
-    "lockfile_sha256": "a6c099359337fc87f8647f51b9363c13ad40ff92a3e923ed6df5bc53c8ea4d97"
+    "revision": "0d430a0c8933375b17204ef1de399fcec8577479",
+    "lockfile_sha256": "8ae2440a8d3552c0c3179dba2afd4529adc29766bde2c22c1aa63ead7fb2f0d6"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43562626969",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/43571578043",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.35",
+      "cadence": "0.8.36",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "c51649187209f8d3d9f148ccdff98872c0001a78",
-      "lockfile_sha256": "a6c099359337fc87f8647f51b9363c13ad40ff92a3e923ed6df5bc53c8ea4d97"
+      "revision": "0d430a0c8933375b17204ef1de399fcec8577479",
+      "lockfile_sha256": "8ae2440a8d3552c0c3179dba2afd4529adc29766bde2c22c1aa63ead7fb2f0d6"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43562626969"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/43571578043"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -86,6 +86,7 @@
     "Lyrics: Settings gains a Lyrics section (Show lyrics, off by default) below Local Files, and four new references show the side panel with the current line large and nearby lines fading; album pages use a 232px cover beside the title; Settings shows version 0.8.32; the other 176 references are pixel-identical to 0.8.31",
     "Settings shows version 0.8.33; lyrics lines above the current one are now visible (the column glides instead of windowing), so the four lyrics references change; the search dropdown is now opaque so the page title no longer shows through it (search-cached), and the new search-live references show its On Spotify results",
     "Settings shows version 0.8.34; lyric lines keep their wrapping as they grow into focus (each line is as wide as its type is big), so the four lyrics references change",
+    "Settings shows version 0.8.36; album review now locks each song until it has been heard, and the review screenshots are pixel-identical because their scene plays each song first",
     "Settings shows version 0.8.35; the artist header now scrolls away with the page while the toolbar name and cover grow out of the search bar, and the resting and fully docked artist references are pixel-identical"
   ]
 }
