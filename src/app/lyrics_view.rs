@@ -287,7 +287,14 @@ impl LyricsPane {
             .id(("lyric-line", index))
             .test_support()
             .flex_none()
-            .w_full()
+            // A followed line is as wide as its type is big. Text laid out at
+            // a size and at a width in the same proportion breaks at the same
+            // words, so a line keeps its shape as it grows into focus rather
+            // than hopping from one row to two.
+            .when(synced, |row| {
+                row.w(relative((size.0 / scale.current.0).clamp(0.1, 1.)))
+            })
+            .when(!synced, |row| row.w_full())
             .py(scale.padding)
             .font_weight(gpui_kit::FontWeight::BOLD)
             .line_height(relative(1.2))
