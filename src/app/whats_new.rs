@@ -44,6 +44,19 @@ const MONTHS: &[Month] = &[
                 date: "Nov 14, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.42",
+                        notes: &[
+                            Note(
+                                Better,
+                                "Sonder checks for updates once your library has loaded, so startup stays fast.",
+                            ),
+                            Note(
+                                Better,
+                                "An available update shows in the sidebar only; the avatar dot is just for new notes.",
+                            ),
+                        ],
+                    },
+                    Release {
                         version: "0.8.41",
                         notes: &[
                             Note(
