@@ -4508,3 +4508,227 @@ fn a_reopened_window_comes_back_with_lyrics_open() {
         assert!(!bar.read(cx).lyrics_open());
     });
 }
+
+/// Delivers an event the way the backend does: the player first, then the
+/// window for whatever it leaves.
+fn deliver(fixture: &mut Fixture, event: BackendEvent) {
+    let workspace = fixture.workspace.clone().unwrap();
+    fixture.update(|_, cx| {
+        let left = services::AppServices::player(cx)
+            .update(cx, |player, cx| player.handle_backend_event(event, cx));
+        if let Some(event) = left {
+            workspace.upgrade().unwrap().update(cx, |workspace, cx| {
+                workspace.handle_backend_events(vec![event], cx)
+            });
+        }
+    });
+}
+
+fn refused(index: usize) -> BackendEvent {
+    BackendEvent::TrackFailed {
+        spotify_uri: format!("spotify:track:track-{index}"),
+        error: "Spotify wouldn’t unlock this song".into(),
+    }
+}
+
+#[test]
+fn an_account_spotify_wont_stream_to_stops_and_says_why() {
+    let mut fixture = Fixture::new(false);
+    fixture.player_event(BackendEvent::PlaybackContext {
+        current: track(3),
+        next: vec![track(4)],
+    });
+    // The first refused song only skips; one song proves nothing.
+    deliver(&mut fixture, refused(3));
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::Next)
+    ));
+    fixture.update(|window, _| assert!(window.try_find("streaming-refused").is_none()));
+
+    fixture.player_event(BackendEvent::PlaybackContext {
+        current: track(4),
+        next: Vec::new(),
+    });
+    deliver(&mut fixture, BackendEvent::StreamingRefused);
+    // The song it was opening stops instead of decoding noise.
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::Pause)
+    ));
+    fixture.update(|window, cx| {
+        assert!(window.try_find("streaming-refused").is_some());
+        let player = services::AppServices::player(cx).read(cx);
+        assert!(!player.playing());
+        assert_eq!(
+            player.error().map(|error| error.as_ref()),
+            Some("Spotify won’t stream to this account")
+        );
+    });
+    // A late failure for that song neither skips on nor adds a second error.
+    deliver(&mut fixture, refused(4));
+    fixture.no_commands();
+
+    fixture.update(|window, cx| window.click("streaming-refused-ok", cx));
+    fixture.update(|window, _| assert!(window.try_find("streaming-refused").is_none()));
+    fixture.no_commands();
+
+    // The next try shows it again at once, and Escape closes it.
+    deliver(&mut fixture, BackendEvent::StreamingRefused);
+    fixture.update(|window, _| assert!(window.try_find("streaming-refused").is_some()));
+    fixture.press("escape");
+    fixture.update(|window, _| assert!(window.try_find("streaming-refused").is_none()));
+}
+
+#[test]
+fn a_song_that_plays_clears_the_account_message() {
+    let mut fixture = Fixture::new(false);
+    deliver(&mut fixture, BackendEvent::StreamingRefused);
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::Pause)
+    ));
+    fixture.update(|window, cx| window.click("streaming-refused-ok", cx));
+    fixture.player_event(BackendEvent::PlaybackContext {
+        current: track(3),
+        next: Vec::new(),
+    });
+    fixture.player_event(BackendEvent::Playing {
+        spotify_uri: "spotify:track:track-3".into(),
+    });
+    assert_eq!(fixture.marked_played(), "track-3");
+    fixture.update(|_, cx| assert!(services::AppServices::player(cx).read(cx).error().is_none()));
+}
+
+#[test]
+fn playback_that_wont_connect_offers_to_try_again_or_set_up_again() {
+    let mut fixture = Fixture::new(false);
+    deliver(
+        &mut fixture,
+        BackendEvent::PlaybackConnectFailed(
+            "could not refresh librespot playback credentials".into(),
+        ),
+    );
+    fixture.update(|window, _| {
+        assert!(window.try_find("playback-not-connected").is_some());
+        assert!(window.try_find("playback-not-connected-detail").is_some());
+    });
+    fixture.update(|window, cx| window.click("playback-not-connected-retry", cx));
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::RetryPlayback)
+    ));
+    fixture.update(|window, _| assert!(window.try_find("playback-not-connected").is_none()));
+
+    deliver(
+        &mut fixture,
+        BackendEvent::PlaybackConnectFailed("librespot could not connect to Spotify".into()),
+    );
+    fixture.update(|window, cx| window.click("playback-not-connected-reset", cx));
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::ResetPlayback)
+    ));
+    deliver(
+        &mut fixture,
+        BackendEvent::PlaybackApprovalRequested {
+            url: "https://accounts.spotify.com/authorize".into(),
+        },
+    );
+    fixture.update(|window, _| {
+        assert!(window.try_find("playback-approval").is_some());
+        assert!(window.try_find("playback-approval-reopen").is_some());
+    });
+    // Approving in the browser connects playback, which closes the dialog.
+    deliver(&mut fixture, BackendEvent::PlaybackReady);
+    fixture.update(|window, cx| {
+        assert!(window.try_find("playback-approval").is_none());
+        assert!(services::AppServices::player(cx).read(cx).error().is_none());
+    });
+    fixture.no_commands();
+}
+
+#[test]
+fn a_play_while_playback_is_down_brings_the_dialog_back_instead_of_skipping() {
+    let mut fixture = Fixture::new(false);
+    deliver(
+        &mut fixture,
+        BackendEvent::PlaybackConnectFailed("network unreachable".into()),
+    );
+    fixture.update(|window, cx| window.click("playback-not-connected-later", cx));
+    fixture.update(|window, _| assert!(window.try_find("playback-not-connected").is_none()));
+
+    fixture.player_event(BackendEvent::PlaybackContext {
+        current: track(3),
+        next: vec![track(4)],
+    });
+    deliver(
+        &mut fixture,
+        BackendEvent::TrackFailed {
+            spotify_uri: "spotify:track:track-3".into(),
+            error: "Spotify playback is not connected".into(),
+        },
+    );
+    fixture.update(|window, _| assert!(window.try_find("playback-not-connected").is_some()));
+    fixture.no_commands();
+}
+
+#[test]
+fn playback_stops_after_three_songs_in_a_row_fail() {
+    let mut fixture = Fixture::new(false);
+    for index in 3..5 {
+        fixture.player_event(BackendEvent::PlaybackContext {
+            current: track(index),
+            next: vec![track(index + 1)],
+        });
+        deliver(
+            &mut fixture,
+            BackendEvent::TrackFailed {
+                spotify_uri: format!("spotify:track:track-{index}"),
+                error: "Spotify cannot play this track".into(),
+            },
+        );
+        assert!(matches!(
+            fixture.backend.commands.try_recv(),
+            Ok(BackendCommand::Next)
+        ));
+    }
+    fixture.player_event(BackendEvent::PlaybackContext {
+        current: track(5),
+        next: vec![track(6)],
+    });
+    deliver(
+        &mut fixture,
+        BackendEvent::TrackFailed {
+            spotify_uri: "spotify:track:track-5".into(),
+            error: "Spotify cannot play this track".into(),
+        },
+    );
+    fixture.no_commands();
+    let workspace = fixture.workspace.clone().unwrap();
+    fixture.update(|_, cx| {
+        let notice = workspace.upgrade().unwrap().read(cx).action_notice.clone();
+        assert!(notice.is_some_and(|notice| notice.contains("3 songs in a row")));
+    });
+
+    // A song that plays starts the count over.
+    fixture.player_event(BackendEvent::PlaybackContext {
+        current: track(6),
+        next: vec![track(7)],
+    });
+    fixture.player_event(BackendEvent::Playing {
+        spotify_uri: "spotify:track:track-6".into(),
+    });
+    assert_eq!(fixture.marked_played(), "track-6");
+    deliver(
+        &mut fixture,
+        BackendEvent::TrackFailed {
+            spotify_uri: "spotify:track:track-6".into(),
+            error: "Spotify cannot play this track".into(),
+        },
+    );
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::Next)
+    ));
+}

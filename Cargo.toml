@@ -1,6 +1,6 @@
 [package]
 name = "cadence"
-version = "0.8.36"
+version = "0.8.37"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/parentless/sonder"
@@ -81,6 +81,7 @@ debug = "line-tables-only"
 [patch.crates-io]
 gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
 # Upstream exits the process on a free account; this copy lets Cadence show a screen.
+# It also reports Spotify's answer to each song key request (see src/audio_key.rs).
 librespot-core = { path = "vendor/librespot-core" }
 # Local files: any sample rate or channel count, more formats, and paths found
 # from Sonder's own index instead of a folder scan when the player starts.

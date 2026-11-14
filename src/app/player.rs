@@ -9,6 +9,21 @@ pub(super) struct PlaybackUnavailable;
 
 impl EventEmitter<PlaybackUnavailable> for Player {}
 
+/// After this many songs in a row fail, playback stops instead of skipping
+/// on through the queue.
+const FAILURES_BEFORE_STOPPING: u8 = 3;
+
+/// Something only the listener can act on, shown over the window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum PlaybackProblem {
+    /// Playback could not connect; `detail` is the reason, for support.
+    NotConnected { detail: SharedString },
+    /// The playback sign-in page is open, waiting for approval.
+    AwaitingApproval { url: SharedString },
+    /// Spotify won't unlock songs for this account.
+    AccountRefused,
+}
+
 /// Playback state that belongs to the process rather than to a window.
 pub(super) struct Player {
     backend: BackendHandle,
@@ -31,6 +46,13 @@ pub(super) struct Player {
     volume_before_mute: f32,
     volume_dragging: bool,
     error: Option<SharedString>,
+    problem: Option<PlaybackProblem>,
+    /// The last connection attempt failed; a play can't start until one works.
+    connect_failed: bool,
+    /// Songs that failed since the last one played.
+    failures_in_a_row: u8,
+    /// Playback stopped itself after too many failures.
+    gave_up: bool,
 }
 
 impl Player {
@@ -51,7 +73,41 @@ impl Player {
             volume_before_mute: 0.72,
             volume_dragging: false,
             error: None,
+            problem: None,
+            connect_failed: false,
+            failures_in_a_row: 0,
+            gave_up: false,
         }
+    }
+
+    pub(super) fn problem(&self) -> Option<&PlaybackProblem> {
+        self.problem.as_ref()
+    }
+
+    /// Whether the last failure made playback stop rather than skip on.
+    pub(super) fn gave_up(&self) -> bool {
+        self.gave_up
+    }
+
+    /// Hides the problem; the account menu still says what is wrong.
+    pub(super) fn dismiss_problem(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.problem.take().is_none() {
+            return false;
+        }
+        cx.notify();
+        true
+    }
+
+    pub(super) fn retry_playback(&mut self, cx: &mut Context<Self>) {
+        self.problem = None;
+        self.send(BackendCommand::RetryPlayback, cx);
+        cx.notify();
+    }
+
+    pub(super) fn reset_playback(&mut self, cx: &mut Context<Self>) {
+        self.problem = None;
+        self.send(BackendCommand::ResetPlayback, cx);
+        cx.notify();
     }
 
     pub(super) fn now_playing(&self) -> Option<&model::Track> {
@@ -383,6 +439,10 @@ impl Player {
         self.clock.reset(0, cx.background_executor().now());
         self.saved_position_ms = 0;
         self.error = None;
+        self.problem = None;
+        self.connect_failed = false;
+        self.failures_in_a_row = 0;
+        self.gave_up = false;
         cx.notify();
     }
 
@@ -396,7 +456,40 @@ impl Player {
         match event {
             BackendEvent::PlaybackReady => {
                 self.error = None;
+                self.connect_failed = false;
+                self.failures_in_a_row = 0;
+                if matches!(
+                    self.problem,
+                    Some(
+                        PlaybackProblem::NotConnected { .. }
+                            | PlaybackProblem::AwaitingApproval { .. }
+                    )
+                ) {
+                    self.problem = None;
+                }
                 self.backend.send(BackendCommand::SetVolume(self.volume));
+            }
+            BackendEvent::PlaybackConnectFailed(detail) => {
+                self.connect_failed = true;
+                self.loading = false;
+                self.error = Some("Spotify playback isn’t connected".into());
+                self.problem = Some(PlaybackProblem::NotConnected {
+                    detail: detail.into(),
+                });
+            }
+            BackendEvent::PlaybackApprovalRequested { url } => {
+                self.problem = Some(PlaybackProblem::AwaitingApproval { url: url.into() });
+            }
+            BackendEvent::StreamingRefused => {
+                self.error = Some("Spotify won’t stream to this account".into());
+                self.problem = Some(PlaybackProblem::AccountRefused);
+                self.loading = false;
+                if self.playing || self.now_playing.is_some() {
+                    self.set_playback(false, cx);
+                    // The player would otherwise spend seconds on a song it
+                    // can't unlock.
+                    self.backend.send(BackendCommand::Pause);
+                }
             }
             BackendEvent::PlaybackReconnecting => {
                 if self.restore.is_none() && self.now_playing.is_some() {
@@ -443,6 +536,10 @@ impl Player {
                 if self.restore.is_none() && self.live_track_matches(&spotify_uri) {
                     self.set_playback(true, cx);
                     self.loading = false;
+                    self.failures_in_a_row = 0;
+                    self.gave_up = false;
+                    // A song that plays answers whatever the menu last said.
+                    self.error = None;
                     self.record_first_play();
                 }
             }
@@ -519,13 +616,34 @@ impl Player {
                 self.error = Some(error.into());
             }
             BackendEvent::TrackFailed { spotify_uri, error } => {
-                // librespot parks on a track it cannot open rather than
-                // skipping it, so move on the way a finished track does and
-                // keep the queue the backend still holds.
-                if self.restore.is_none() && self.live_track_matches(&spotify_uri) {
+                self.gave_up = false;
+                if self.connect_failed {
+                    // Nothing can play until playback connects; skipping on
+                    // would only fail every song the same way.
                     self.set_playback(false, cx);
                     self.loading = false;
-                    self.backend.send(BackendCommand::Next);
+                    if self.problem.is_none() {
+                        self.problem = Some(PlaybackProblem::NotConnected {
+                            detail: error.clone().into(),
+                        });
+                    }
+                } else if self.restore.is_none() && self.live_track_matches(&spotify_uri) {
+                    // librespot parks on a track it cannot open rather than
+                    // skipping it, so move on the way a finished track does and
+                    // keep the queue the backend still holds, unless songs keep
+                    // failing or the account can't stream at all.
+                    self.set_playback(false, cx);
+                    self.loading = false;
+                    self.failures_in_a_row = self.failures_in_a_row.saturating_add(1);
+                    let account_refused = self.problem == Some(PlaybackProblem::AccountRefused);
+                    if account_refused {
+                        // The dialog says why; nothing else would play either.
+                    } else if self.failures_in_a_row >= FAILURES_BEFORE_STOPPING {
+                        self.failures_in_a_row = 0;
+                        self.gave_up = true;
+                    } else {
+                        self.backend.send(BackendCommand::Next);
+                    }
                 }
                 cx.notify();
                 return Some(BackendEvent::TrackFailed { spotify_uri, error });

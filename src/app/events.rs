@@ -19,7 +19,14 @@ impl Workspace {
                     }
                 }
                 BackendEvent::TrackFailed { error, .. } => {
-                    self.last_error = Some(error.into());
+                    if self.player.read(cx).gave_up() {
+                        self.action_notice = Some(
+                            "Playback stopped after 3 songs in a row couldn’t play. Check your connection, then press play to try again."
+                                .into(),
+                        );
+                    } else if self.player.read(cx).problem().is_none() {
+                        self.last_error = Some(error.into());
+                    }
                 }
                 BackendEvent::RadioFailed { request_id, error } => {
                     if self.pending_radio_request == Some(request_id) {
@@ -76,7 +83,10 @@ impl Workspace {
                 | BackendEvent::PositionChanged { .. }
                 | BackendEvent::PlaybackSnapshotLoaded { .. }
                 | BackendEvent::PlaybackContext { .. }
-                | BackendEvent::PlaybackFailed(_) => {}
+                | BackendEvent::PlaybackFailed(_)
+                | BackendEvent::PlaybackConnectFailed(_)
+                | BackendEvent::PlaybackApprovalRequested { .. }
+                | BackendEvent::StreamingRefused => {}
             }
         }
         cx.notify();

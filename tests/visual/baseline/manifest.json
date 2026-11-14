@@ -87,6 +87,7 @@
     "Settings shows version 0.8.33; lyrics lines above the current one are now visible (the column glides instead of windowing), so the four lyrics references change; the search dropdown is now opaque so the page title no longer shows through it (search-cached), and the new search-live references show its On Spotify results",
     "Settings shows version 0.8.34; lyric lines keep their wrapping as they grow into focus (each line is as wide as its type is big), so the four lyrics references change",
     "Settings shows version 0.8.36; album review now locks each song until it has been heard, and the review screenshots are pixel-identical because their scene plays each song first",
-    "Settings shows version 0.8.35; the artist header now scrolls away with the page while the toolbar name and cover grow out of the search bar, and the resting and fully docked artist references are pixel-identical"
+    "Settings shows version 0.8.35; the artist header now scrolls away with the page while the toolbar name and cover grow out of the search bar, and the resting and fully docked artist references are pixel-identical",
+    "Playback problems add twelve references: the dialog for an account Spotify won't stream to (streaming-refused), the dialog for playback that could not connect with Try again and Set up again (playback-not-connected), and the wait for approval in the browser (playback-approval); they only appear on those failures, so the other 184 references are pixel-identical to 0.8.29"
   ]
 }
