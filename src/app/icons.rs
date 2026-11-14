@@ -44,7 +44,6 @@ pub(super) enum CadenceIcon {
     FolderFilled,
     Lyrics,
     Sparkle,
-    SparkleFilled,
     Download,
     ChevronDown,
     ChevronUp,
@@ -52,7 +51,7 @@ pub(super) enum CadenceIcon {
 
 impl CadenceIcon {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 42] = [
+    pub(super) const ALL: [Self; 41] = [
         Self::Home,
         Self::HomeFilled,
         Self::Heart,
@@ -91,7 +90,6 @@ impl CadenceIcon {
         Self::FolderFilled,
         Self::Lyrics,
         Self::Sparkle,
-        Self::SparkleFilled,
         Self::Download,
         Self::ChevronDown,
         Self::ChevronUp,
@@ -137,7 +135,6 @@ impl CadenceIcon {
             Self::FolderFilled => "folder-filled",
             Self::Lyrics => "lyrics",
             Self::Sparkle => "sparkle",
-            Self::SparkleFilled => "sparkle-filled",
             Self::Download => "download",
             Self::ChevronDown => "chevron-down",
             Self::ChevronUp => "chevron-up",
