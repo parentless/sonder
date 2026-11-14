@@ -172,17 +172,6 @@ impl Workspace {
                     }
                     cx.notify();
                 }
-                settings::SettingsEvent::SetLyricsEnabled(enabled) => {
-                    let result = services::AppServices::set_lyrics_enabled(*enabled, cx);
-                    let result = services::require_settings_storage(result);
-                    if let Some(error) = services::preference_save_error("lyrics setting", result) {
-                        this.last_error = Some(error);
-                    }
-                    if !*enabled {
-                        this.close_lyrics(cx);
-                    }
-                    cx.notify();
-                }
                 settings::SettingsEvent::SetLyricsView(view) => {
                     let result = services::AppServices::set_lyrics_view(*view, cx);
                     let result = services::require_settings_storage(result);
@@ -559,11 +548,13 @@ impl Render for Workspace {
         });
 
         let overlay_toolbar = route == Route::Artist;
-        // Lyrics show only when turned on, and only in the chosen place.
+        // Lyrics show when opened, in the chosen place.
         let lyrics_preferences = services::AppServices::preferences(cx);
-        let lyrics_view = (lyrics_preferences.lyrics_enabled
-            && self.player_bar.read(cx).lyrics_open())
-        .then_some(lyrics_preferences.lyrics_view);
+        let lyrics_view = self
+            .player_bar
+            .read(cx)
+            .lyrics_open()
+            .then_some(lyrics_preferences.lyrics_view);
         if let Some(view) = lyrics_view {
             self.lyrics
                 .update(cx, |lyrics, cx| lyrics.set_view(view, cx));

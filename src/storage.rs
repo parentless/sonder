@@ -147,7 +147,6 @@ pub struct AppPreferences {
     pub streaming_quality: StreamingQuality,
     /// Shows the lyrics button in the player. Off until the listener turns it
     /// on, because lyrics come from a third-party service.
-    pub lyrics_enabled: bool,
     pub lyrics_view: LyricsView,
 }
 
@@ -200,7 +199,6 @@ impl Default for AppPreferences {
             keep_in_tray: false,
             launch_at_login: false,
             streaming_quality: StreamingQuality::default(),
-            lyrics_enabled: false,
             lyrics_view: LyricsView::default(),
         }
     }
@@ -443,7 +441,6 @@ impl Store {
             .and_then(|value| value.parse().ok())
             .and_then(StreamingQuality::from_kbps)
             .unwrap_or_default();
-        let lyrics_enabled = self.preference("lyrics_enabled")?.as_deref() == Some("true");
         let lyrics_view = self
             .preference("lyrics_view")?
             .and_then(|value| LyricsView::from_key(&value))
@@ -473,7 +470,6 @@ impl Store {
             keep_in_tray,
             launch_at_login,
             streaming_quality,
-            lyrics_enabled,
             lyrics_view,
         })
     }
@@ -539,10 +535,6 @@ impl Store {
         }
         transaction.commit()?;
         Ok(())
-    }
-
-    pub fn set_lyrics_enabled(&mut self, enabled: bool) -> Result<()> {
-        self.set_preference("lyrics_enabled", if enabled { "true" } else { "false" })
     }
 
     pub fn set_lyrics_view(&mut self, view: LyricsView) -> Result<()> {
@@ -896,13 +888,19 @@ impl Store {
     pub fn replace_queue(&mut self, queue: &[QueueItem]) -> Result<()> {
         let transaction = self.connection.transaction()?;
         transaction.execute("DELETE FROM queue", [])?;
-        for (position, item) in queue.iter().enumerate() {
-            let position =
-                i64::try_from(position).context("queue position exceeds SQLite range")?;
-            transaction.execute(
+        {
+            let mut insert = transaction.prepare_cached(
                 "INSERT INTO queue (position, item_id, track_json) VALUES (?1, ?2, ?3)",
-                params![position, item.id, serde_json::to_string(&item.track)?],
             )?;
+            for (position, item) in queue.iter().enumerate() {
+                let position =
+                    i64::try_from(position).context("queue position exceeds SQLite range")?;
+                insert.execute(params![
+                    position,
+                    item.id,
+                    serde_json::to_string(&item.track)?
+                ])?;
+            }
         }
         transaction.commit()?;
         Ok(())
@@ -972,15 +970,48 @@ impl Store {
                 i64::from(position_ms)
             ],
         )?;
+        self.write_playback_index(index)?;
+        self.write_playback_position(position_ms)
+    }
+
+    /// The current index is kept apart from the stored queue too, so moving to
+    /// the next song rewrites two small rows instead of the whole queue.
+    fn write_playback_index(&self, index: usize) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO preferences (key, value) VALUES ('playback_index', ?1)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [index.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Moves to another song of the stored queue, without rewriting it.
+    pub(crate) fn set_playback_index(
+        &self,
+        index: usize,
+        cursor: &Option<(Playlist, u32)>,
+    ) -> Result<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+        self.write_playback_index(index)?;
+        self.write_playback_position(0)?;
+        transaction.execute("INSERT INTO preferences (key, value) VALUES ('playback_playlist_cursor', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [serde_json::to_string(cursor)?])?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// The position lives in its own small row. Saving it every few seconds
+    /// would otherwise rewrite the whole stored queue each time.
+    fn write_playback_position(&self, position_ms: u32) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO preferences (key, value) VALUES ('playback_position_ms', ?1)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [position_ms.to_string()],
+        )?;
         Ok(())
     }
 
     pub fn update_playback_position(&self, position_ms: u32) -> Result<()> {
-        self.connection.execute(
-            "UPDATE playback_state SET position_ms = ?1, updated_at = unixepoch() WHERE id = 1",
-            [i64::from(position_ms)],
-        )?;
-        Ok(())
+        self.write_playback_position(position_ms)
     }
 
     pub fn playback_state(&self) -> Result<Option<PlaybackSnapshot>> {
@@ -1000,6 +1031,14 @@ impl Store {
             Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
             Err(error) => return Err(error.into()),
         };
+        let position_ms = self
+            .preference("playback_position_ms")?
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(position_ms);
+        let index = self
+            .preference("playback_index")?
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(index);
         let tracks: Vec<Track> = serde_json::from_str(&tracks_json)?;
         let index = usize::try_from(index).context("stored playback index is invalid")?;
         anyhow::ensure!(
@@ -1017,6 +1056,10 @@ impl Store {
     pub fn clear_playback_state(&self) -> Result<()> {
         self.connection.execute(
             "DELETE FROM preferences WHERE key = 'playback_playlist_cursor'",
+            [],
+        )?;
+        self.connection.execute(
+            "DELETE FROM preferences WHERE key IN ('playback_position_ms', 'playback_index')",
             [],
         )?;
         self.connection.execute("DELETE FROM playback_state", [])?;
@@ -1378,7 +1421,6 @@ mod tests {
         store
             .set_streaming_quality(super::StreamingQuality::High)
             .unwrap();
-        store.set_lyrics_enabled(true).unwrap();
         store.set_lyrics_view(super::LyricsView::Strip).unwrap();
         assert_eq!(
             store.preferences().unwrap(),
@@ -1392,7 +1434,6 @@ mod tests {
                 keep_in_tray: true,
                 launch_at_login: true,
                 streaming_quality: super::StreamingQuality::High,
-                lyrics_enabled: true,
                 lyrics_view: super::LyricsView::Strip,
             }
         );
@@ -1517,6 +1558,16 @@ mod tests {
 
         store.update_playback_position(45_000).unwrap();
         assert_eq!(store.playback_state().unwrap().unwrap().position_ms, 45_000);
+
+        // Skipping within the stored queue saves only the index.
+        store.set_playback_index(0, &None).unwrap();
+        let state = store.playback_state().unwrap().unwrap();
+        assert_eq!((state.index, state.position_ms), (0, 0));
+        assert_eq!(state.tracks, tracks);
+        // A new queue replaces both again.
+        store.set_playback_state(&tracks, 1, 7).unwrap();
+        let state = store.playback_state().unwrap().unwrap();
+        assert_eq!((state.index, state.position_ms), (1, 7));
 
         store.clear_playback_state().unwrap();
         assert!(store.playback_state().unwrap().is_none());

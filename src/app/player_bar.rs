@@ -93,8 +93,7 @@ impl PlayerBar {
             _metadata_events: page::forward(&metadata, cx),
             metadata,
             queue_open: false,
-            lyrics_open: services::AppServices::lyrics_open(cx)
-                && services::AppServices::preferences(cx).lyrics_enabled,
+            lyrics_open: services::AppServices::lyrics_open(cx),
             scrubber: scrubber::Scrubber::new(cx),
         }
     }
@@ -135,6 +134,11 @@ impl PlayerBar {
     ) -> gpui_kit::base::Button {
         gpui_kit::base::Button::new("lyrics-toggle")
             .key_context(CONTROL_KEY_CONTEXT)
+            .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
+                // A click must not leave this button holding focus: Space then
+                // belongs to playback.
+                window.prevent_default();
+            })
             .accessibility_label("Lyrics")
             .aria_expanded(self.lyrics_open)
             .size_10()
@@ -165,6 +169,11 @@ impl PlayerBar {
     ) -> gpui_kit::base::Button {
         gpui_kit::base::Button::new("queue-toggle")
             .key_context(CONTROL_KEY_CONTEXT)
+            .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
+                // A click must not leave this button holding focus: Space then
+                // belongs to playback.
+                window.prevent_default();
+            })
             .accessibility_label("Queue")
             .aria_expanded(self.queue_open)
             .size_10()
@@ -226,7 +235,6 @@ impl PlayerBar {
             CadenceIcon::Speaker
         };
         let duration_ms = now_playing.as_deref().map_or(0, |track| track.duration_ms);
-        let lyrics_enabled = services::AppServices::preferences(cx).lyrics_enabled;
         div()
             .relative()
             .h_24()
@@ -328,13 +336,8 @@ impl PlayerBar {
                                         this.player.update(cx, |player, cx| player.next(cx));
                                     })),
                             ))
-                            // Balances the shuffle button on the other side; holds
-                            // the lyrics button once lyrics are turned on.
-                            .child(if lyrics_enabled {
-                                self.lyrics_button(palette, window, cx).into_any_element()
-                            } else {
-                                div().size_10().into_any_element()
-                            }),
+                            // Balances the shuffle button on the other side.
+                            .child(self.lyrics_button(palette, window, cx)),
                     )
                     .child(
                         div()
@@ -484,6 +487,9 @@ impl PlayerMetadata {
         match playing_album(Some(track)) {
             Some(album) => gpui_kit::base::Button::new("player-artwork")
                 .role(gpui_kit::Role::Link)
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
+                    window.prevent_default();
+                })
                 .tab_stop(false)
                 .accessibility_label(album.name.clone())
                 .flex_none()

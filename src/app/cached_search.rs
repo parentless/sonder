@@ -35,6 +35,9 @@ pub(super) fn find(query: &str, sources: &[Arc<[model::Track]>; 3]) -> Vec<Match
             text.as_bytes()
                 .windows(needle.len())
                 .any(|part| part.eq_ignore_ascii_case(needle.as_bytes()))
+        } else if text.is_ascii() {
+            // Lowercasing ASCII never produces the non-ASCII character sought.
+            false
         } else {
             text.to_lowercase().contains(needle)
         }

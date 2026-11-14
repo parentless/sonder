@@ -217,6 +217,15 @@ impl BlockingStore {
         .await
     }
 
+    async fn set_playback_index(
+        &self,
+        index: usize,
+        cursor: Option<(Playlist, u32)>,
+    ) -> Result<()> {
+        self.call(move |store| store.set_playback_index(index, &cursor))
+            .await
+    }
+
     async fn update_playback_position(&self, position_ms: u32) -> Result<()> {
         self.call(move |store| store.update_playback_position(position_ms))
             .await
@@ -1193,6 +1202,8 @@ struct Worker {
     radio: Radio,
     autoplay: Autoplay,
     playlist_cursor: Option<(Playlist, u32)>,
+    /// What the stored queue holds, so a skip within it saves only the index.
+    persisted_queue: PersistedQueue,
     pending_playlist_cursor: Option<Option<(Playlist, u32)>>,
     playlist_prefetch: Option<tokio::task::JoinHandle<Result<crate::model::PlaylistTrackPage>>>,
     session: SessionTasks,
@@ -1226,6 +1237,7 @@ impl Worker {
             radio: Radio::default(),
             autoplay: Autoplay::default(),
             playlist_cursor: startup.playlist_cursor,
+            persisted_queue: PersistedQueue::default(),
             pending_playlist_cursor: None,
             playlist_prefetch: None,
             session: SessionTasks::default(),
@@ -1817,6 +1829,7 @@ impl Worker {
             )
             .await?;
         self.history_end = self.history_end.saturating_sub(prune);
+        self.persisted_queue = PersistedQueue::new(&tracks, &self.playlist_cursor);
         self.queue.tracks = tracks;
         self.queue.index = Some(index);
         send_playback_context(&self.queue.tracks, index, &self.events).await;
@@ -2002,16 +2015,31 @@ impl Worker {
         let prune = index.saturating_sub(PLAYED_TRACK_WINDOW);
         self.history_end = self.history_end.max(index).saturating_sub(prune);
         self.queue.prune(prune);
-        if let Err(error) = self
-            .store
-            .set_playback_state(
-                self.queue.tracks.clone(),
-                index - prune,
-                0,
-                self.playlist_cursor.clone(),
-            )
-            .await
+        let saved = match self
+            .persisted_queue
+            .offset_of(&self.queue.tracks, &self.playlist_cursor)
         {
+            // Same queue as stored: only the position in it moved.
+            Some(offset) => {
+                self.store
+                    .set_playback_index(offset + index - prune, self.playlist_cursor.clone())
+                    .await
+            }
+            None => {
+                self.persisted_queue =
+                    PersistedQueue::new(&self.queue.tracks, &self.playlist_cursor);
+                self.store
+                    .set_playback_state(
+                        self.queue.tracks.clone(),
+                        index - prune,
+                        0,
+                        self.playlist_cursor.clone(),
+                    )
+                    .await
+            }
+        };
+        if let Err(error) = saved {
+            self.persisted_queue = PersistedQueue::default();
             send_error(&self.events, error).await;
         }
         self.maybe_prefetch_autoplay();
@@ -2567,6 +2595,48 @@ struct PlayQueue {
     /// EndOfTrack, where play() and seek() are no-ops; only a fresh load
     /// leaves it, so Resume and Seek take different paths while this is set.
     ended: bool,
+}
+
+/// A cheap fingerprint of the queue last written to the store: one hash per
+/// song, plus the playlist cursor saved with it.
+#[derive(Default)]
+struct PersistedQueue {
+    hashes: Vec<u64>,
+    cursor: Option<(Playlist, u32)>,
+}
+
+impl PersistedQueue {
+    fn new(tracks: &[Track], cursor: &Option<(Playlist, u32)>) -> Self {
+        Self {
+            hashes: track_hashes(tracks),
+            cursor: cursor.clone(),
+        }
+    }
+
+    /// Where `tracks` starts inside the stored queue, when they are exactly its
+    /// tail (the played songs in front having been pruned).
+    fn offset_of(&self, tracks: &[Track], cursor: &Option<(Playlist, u32)>) -> Option<usize> {
+        let offset = self.hashes.len().checked_sub(tracks.len())?;
+        (!tracks.is_empty()
+            && self.cursor == *cursor
+            && self.hashes[offset..] == track_hashes(tracks))
+        .then_some(offset)
+    }
+}
+
+fn track_hashes(tracks: &[Track]) -> Vec<u64> {
+    use std::hash::{Hash, Hasher};
+    tracks
+        .iter()
+        .map(|track| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            track.source_id.hash(&mut hasher);
+            track.spotify_uri.hash(&mut hasher);
+            track.title.hash(&mut hasher);
+            track.duration_ms.hash(&mut hasher);
+            hasher.finish()
+        })
+        .collect()
 }
 
 impl PlayQueue {
@@ -3824,6 +3894,35 @@ mod tests {
             .unwrap()
             .unwrap();
         slot.take().unwrap().await.unwrap();
+    }
+
+    #[test]
+    fn a_skip_within_the_stored_queue_is_recognised_but_any_change_is_not() {
+        let numbered = |count: usize| -> Vec<Track> {
+            (0..count)
+                .map(|n| Track {
+                    source_id: n.to_string(),
+                    ..favorite()
+                })
+                .collect()
+        };
+        let all = numbered(10);
+        let stored = super::PersistedQueue::new(&all, &None);
+        assert_eq!(stored.offset_of(&all, &None), Some(0));
+        // Played songs pruned from the front: the rest is the stored tail.
+        assert_eq!(stored.offset_of(&all[3..], &None), Some(3));
+        // Autoplay added songs, one was inserted, or the order changed.
+        assert_eq!(stored.offset_of(&numbered(11), &None), None);
+        let mut inserted = all.clone();
+        inserted.insert(5, favorite());
+        assert_eq!(stored.offset_of(&inserted[2..], &None), None);
+        let mut shuffled = all.clone();
+        shuffled[4..8].rotate_left(1);
+        assert_eq!(stored.offset_of(&shuffled, &None), None);
+        assert_eq!(
+            super::PersistedQueue::default().offset_of(&all, &None),
+            None
+        );
     }
 
     fn favorite() -> Track {

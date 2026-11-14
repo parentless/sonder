@@ -12,7 +12,6 @@ pub(super) enum SettingsEvent {
     SetKeepInTray(bool),
     SetStreamingQuality(StreamingQuality),
     SetLaunchAtLogin(bool),
-    SetLyricsEnabled(bool),
     SetLyricsView(LyricsView),
     SetDiscord(crate::discord::Config),
     SetLastfm(crate::lastfm::Config),
@@ -66,7 +65,6 @@ pub(super) struct Settings {
     lastfm_busy: bool,
     cache_cleared: bool,
     local_files_error: Option<SharedString>,
-    lyrics_focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -132,7 +130,6 @@ impl Settings {
             discord_error: None,
             cache_cleared: false,
             local_files_error: None,
-            lyrics_focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
     }
@@ -164,15 +161,9 @@ impl Settings {
         .detach();
     }
 
-    /// Lyrics: off until chosen, then where they appear.
-    fn lyrics_section(
-        &self,
-        palette: CadencePalette,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
+    /// Lyrics: where they appear.
+    fn lyrics_section(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
         let preferences = services::AppServices::preferences(cx);
-        let enabled = preferences.lyrics_enabled;
         let view = preferences.lyrics_view;
         let card = div()
             .mt_4()
@@ -181,58 +172,39 @@ impl Settings {
             .border_color(rgb(palette.border))
             .bg(rgb(palette.surface_raised))
             .p_5()
-            .child(Self::playback_setting_row(
-                palette,
-                "Show lyrics",
-                "Adds a lyrics button to the player. Lyrics come from LRCLIB, so the song's title, artist and length are sent there when lyrics are open.",
-                components::focus_ring_around(
+            .child(
+                div().child(Self::playback_setting_row(
                     palette,
-                    &self.lyrics_focus,
-                    window,
-                    cx,
-                    Switch::new("settings-lyrics")
-                        .focus_ring(false)
-                        .checked(enabled)
-                        .on_click(cx.listener(|_, checked: &bool, _, cx| {
-                            cx.emit(SettingsEvent::SetLyricsEnabled(*checked));
-                        })),
-                ),
-            ))
-            .when(enabled, |card| {
-                card.child(
-                    div()
-                        .mt_5()
-                        .pt_5()
-                        .border_t_1()
-                        .border_color(rgb(palette.border))
-                        .child(Self::playback_setting_row(
-                            palette,
-                            "Lyrics view",
-                            "A panel beside the page, the whole page, or one line above the player.",
-                            div().flex().flex_wrap().gap_2().children(
-                                LyricsView::ALL.into_iter().enumerate().map(|(index, option)| {
-                                    components::pill(
-                                        palette,
-                                        ("settings-lyrics-view", index),
-                                        option.label(),
-                                        option == view,
-                                    )
-                                    .test_support()
-                                    .h_9()
-                                    .on_click(cx.listener(move |_, _, _, cx| {
+                    "Lyrics view",
+                    "A panel beside the page, the whole page, or one line above the player.",
+                    div().flex().flex_wrap().gap_2().children(
+                        LyricsView::ALL
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, option)| {
+                                components::pill(
+                                    palette,
+                                    ("settings-lyrics-view", index),
+                                    option.label(),
+                                    option == view,
+                                )
+                                .test_support()
+                                .h_9()
+                                .on_click(cx.listener(
+                                    move |_, _, _, cx| {
                                         cx.emit(SettingsEvent::SetLyricsView(option));
-                                    }))
-                                }),
-                            ),
-                        )),
-                )
-            });
+                                    },
+                                ))
+                            }),
+                    ),
+                )),
+            );
         div()
             .mt_12()
             .child(Self::settings_section_header(
                 palette,
                 "Lyrics",
-                "Follow the words as a song plays.",
+                "Follow the words as a song plays. Lyrics come from LRCLIB, so the song’s title, artist and length are sent there when lyrics are open.",
             ))
             .child(card)
     }
@@ -610,7 +582,7 @@ impl Settings {
                             ),
                     )
                     .child(self.local_files_section(palette, cx))
-                    .child(self.lyrics_section(palette, window, cx))
+                    .child(self.lyrics_section(palette, cx))
                     )
                     .when(tab == SettingsTab::Connections, |content| content
                     .child(

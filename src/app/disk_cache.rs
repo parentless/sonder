@@ -10,7 +10,7 @@
 use md5::{Digest, Md5};
 use std::{
     fs,
-    io::Write as _,
+    io::{Read as _, Write as _},
     path::{Path, PathBuf},
     sync::{
         OnceLock,
@@ -90,15 +90,20 @@ impl DiskCache {
     /// blocking pool.
     pub(super) fn load(&self, url: &str) -> Option<(Vec<u8>, &'static str)> {
         let path = self.path(url);
-        let mut bytes = fs::read(&path).ok()?;
-        let format = bytes.first().copied()?;
-        let (_, mime, magic) = FORMATS.iter().find(|(id, ..)| *id == format)?;
-        if !bytes[1..].starts_with(magic) {
+        let mut file = fs::File::open(&path).ok()?;
+        let length = file.metadata().ok()?.len();
+        let mut format = [0u8];
+        file.read_exact(&mut format).ok()?;
+        let (_, mime, magic) = FORMATS.iter().find(|(id, ..)| *id == format[0])?;
+        // The format byte is read apart so the image bytes need no shifting.
+        let mut bytes = Vec::with_capacity(length.saturating_sub(1) as usize);
+        file.read_to_end(&mut bytes).ok()?;
+        if !bytes.starts_with(magic) {
             // Never serve something that cannot be an image; drop it and refetch.
-            self.remove(&path, bytes.len() as u64);
+            self.remove(&path, length);
             return None;
         }
-        bytes.remove(0);
+        touch_if_stale(&file);
         Some((bytes, mime))
     }
 
@@ -149,7 +154,7 @@ impl DiskCache {
         }
     }
 
-    /// Removes the oldest files until the cache is at three quarters of its
+    /// Removes the least recently used files until the cache is at three quarters of its
     /// cap, so the next several writes do not each trigger a sweep.
     fn evict(&self) {
         let Ok(entries) = fs::read_dir(&self.dir) else {
@@ -191,6 +196,21 @@ impl DiskCache {
 fn is_temp(path: &Path) -> bool {
     path.extension()
         .is_some_and(|extension| extension == TEMP_EXTENSION)
+}
+
+/// A file read today is kept: eviction sorts by modification time, so a hit
+/// refreshes it, at most once a day per file, and never fails the read.
+fn touch_if_stale(file: &fs::File) {
+    const DAY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+    let stale = file
+        .metadata()
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age > DAY);
+    if stale {
+        let _ = file.set_modified(std::time::SystemTime::now());
+    }
 }
 
 #[cfg(test)]

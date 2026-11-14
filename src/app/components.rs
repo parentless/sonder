@@ -156,6 +156,9 @@ pub(super) fn link(
 ) -> gpui_kit::base::Button {
     gpui_kit::base::Button::new(id)
         .role(gpui_kit::Role::Link)
+        .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
+            window.prevent_default();
+        })
         .line_height(window.text_style().line_height)
         .cursor_pointer()
         .hover(|style| style.underline().text_color(rgb(palette.text_primary)))

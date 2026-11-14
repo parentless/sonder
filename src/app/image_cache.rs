@@ -489,8 +489,17 @@ impl BoundedImageCache {
         self.touch(resource);
     }
     fn touch(&mut self, resource: &Resource) {
-        self.recency.retain(|cached| cached != resource);
-        self.recency.push_back(resource.clone());
+        // Recently used entries sit near the back, so search from there and move
+        // the existing key rather than cloning it.
+        match self.recency.iter().rposition(|cached| cached == resource) {
+            Some(index) if index + 1 == self.recency.len() => {}
+            Some(index) => {
+                if let Some(key) = self.recency.remove(index) {
+                    self.recency.push_back(key);
+                }
+            }
+            None => self.recency.push_back(resource.clone()),
+        }
     }
     /// Cached scene fragments must repaint if their renderer image was removed.
     /// Collapse an eviction burst into one event; no per-image observer registry

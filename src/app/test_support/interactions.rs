@@ -1959,6 +1959,8 @@ fn tab_reaches_the_sidebar_rows_and_enter_opens_the_focused_row() {
 fn space_activates_a_focused_transport_control_instead_of_toggling_playback() {
     let mut fixture = Fixture::new(false);
     fixture.tab_to("progress-slider");
+    // Back past the lyrics button to Next.
+    fixture.press("shift-tab");
     fixture.press("shift-tab");
 
     fixture.press("space");
@@ -1994,6 +1996,31 @@ fn a_pointer_press_leaves_keyboard_focus_with_the_workspace() {
         BackendCommand::Resume
     ));
     fixture.no_commands();
+}
+
+#[test]
+fn space_after_clicking_the_lyrics_or_queue_button_still_plays_and_pauses() {
+    for button in ["lyrics-toggle", "queue-toggle"] {
+        let mut fixture = Fixture::new(false);
+        fixture.play(track(0));
+        fixture.update(|window, cx| window.click(button, cx));
+        assert!(
+            !fixture.focused(button),
+            "{button} kept focus after a click"
+        );
+        while fixture.backend.commands.try_recv().is_ok() {}
+        let was_playing =
+            fixture.update(|_, cx| services::AppServices::player(cx).read(cx).playing());
+        fixture.press("space");
+        fixture.update(|window, cx| {
+            let playing = services::AppServices::player(cx).read(cx).playing();
+            assert_ne!(playing, was_playing, "space did not toggle playback");
+            // The panel stays as the click left it.
+            let open = window.try_find("lyrics-panel").is_some()
+                || window.try_find("close-queue").is_some();
+            assert!(open, "space closed the panel opened by {button}");
+        });
+    }
 }
 
 #[test]
@@ -4308,21 +4335,15 @@ fn synced_fixture_lyrics() -> crate::lyrics::Lyrics {
 }
 
 #[test]
-fn the_lyrics_button_appears_only_once_lyrics_are_turned_on() {
+fn the_lyrics_button_is_always_there_and_asks_nothing_until_opened() {
     let mut fixture = Fixture::new(true);
     fixture.play(track(0));
+    fixture.update(|window, _| assert!(window.try_find("lyrics-toggle").is_some()));
     fixture.scroll_settings_to_the_end();
-    fixture.update(|window, _| assert!(window.try_find("lyrics-toggle").is_none()));
-    fixture.update(|window, cx| window.click("settings-lyrics", cx));
-    fixture.update(|window, cx| {
-        assert!(services::AppServices::preferences(cx).lyrics_enabled);
-        assert!(window.try_find("lyrics-toggle").is_some());
+    fixture.update(|window, _| {
         assert!(window.try_find(("settings-lyrics-view", 0usize)).is_some());
+        assert!(window.try_find("settings-lyrics").is_none());
     });
-    // Nothing is asked of the lyrics service until the view is opened.
-    fixture.no_commands();
-    fixture.update(|window, cx| window.click("settings-lyrics", cx));
-    fixture.update(|window, _| assert!(window.try_find("lyrics-toggle").is_none()));
     fixture.no_commands();
 }
 
@@ -4331,7 +4352,6 @@ fn opening_lyrics_asks_once_shows_the_lines_and_a_click_seeks() {
     let mut fixture = Fixture::new(true);
     fixture.play(track(0));
     fixture.scroll_settings_to_the_end();
-    fixture.update(|window, cx| window.click("settings-lyrics", cx));
     fixture.update(|window, cx| window.click("lyrics-toggle", cx));
     let BackendCommand::LoadLyrics { query, respond } =
         fixture.backend.commands.try_recv().unwrap()
@@ -4368,7 +4388,6 @@ fn songs_without_lyrics_say_so_and_the_choice_of_view_changes_the_place() {
     let mut fixture = Fixture::new(true);
     fixture.play(track(0));
     fixture.scroll_settings_to_the_end();
-    fixture.update(|window, cx| window.click("settings-lyrics", cx));
     fixture.scroll_settings_to_the_end();
     fixture.update(|window, cx| window.click(("settings-lyrics-view", 2usize), cx));
     fixture.update(|_, cx| {
@@ -4402,7 +4421,6 @@ fn the_lyrics_panel_and_the_queue_share_the_right_edge() {
     let mut fixture = Fixture::new(true);
     fixture.play(track(0));
     fixture.scroll_settings_to_the_end();
-    fixture.update(|window, cx| window.click("settings-lyrics", cx));
     fixture.update(|window, cx| window.click("lyrics-toggle", cx));
     fixture.update(|window, _| assert!(window.try_find("lyrics-panel").is_some()));
     fixture.update(|window, cx| window.click("queue-toggle", cx));
@@ -4434,7 +4452,6 @@ fn moving_to_the_next_line_glides_and_then_goes_quiet() {
     let mut fixture = Fixture::new(true);
     fixture.play(track(0));
     fixture.scroll_settings_to_the_end();
-    fixture.update(|window, cx| window.click("settings-lyrics", cx));
     fixture.update(|window, cx| window.click("lyrics-toggle", cx));
     let BackendCommand::LoadLyrics { respond, .. } = fixture.backend.commands.try_recv().unwrap()
     else {
@@ -4483,7 +4500,6 @@ fn a_reopened_window_comes_back_with_lyrics_open() {
     let mut fixture = Fixture::new(true);
     fixture.play(track(0));
     fixture.scroll_settings_to_the_end();
-    fixture.update(|window, cx| window.click("settings-lyrics", cx));
     fixture.update(|window, cx| window.click("lyrics-toggle", cx));
     fixture.update(|_, cx| {
         assert!(services::AppServices::lyrics_open(cx));

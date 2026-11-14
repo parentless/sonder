@@ -456,9 +456,6 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     }
                 }
                 Scene::Lyrics => {
-                    services::AppServices::set_lyrics_enabled(true, cx)
-                        .expect("store")
-                        .expect("save lyrics setting");
                     services::AppServices::player(cx).update(cx, |player, cx| {
                         player.handle_backend_event(
                             BackendEvent::PlaybackSnapshotLoaded {
