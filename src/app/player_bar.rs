@@ -32,11 +32,17 @@ pub(super) struct PlayerBar {
     metadata: Entity<PlayerMetadata>,
     _metadata_events: Subscription,
     queue_open: bool,
+    lyrics_open: bool,
     scrubber: scrubber::Scrubber,
 }
 
 /// Raised when the listener asks to see or hide the queue.
 pub(super) struct ToggleQueue;
+
+/// Raised when the listener asks to see or hide the lyrics.
+pub(super) struct ToggleLyrics;
+
+impl EventEmitter<ToggleLyrics> for PlayerBar {}
 
 impl EventEmitter<ToggleQueue> for PlayerBar {}
 
@@ -87,6 +93,7 @@ impl PlayerBar {
             _metadata_events: page::forward(&metadata, cx),
             metadata,
             queue_open: false,
+            lyrics_open: false,
             scrubber: scrubber::Scrubber::new(cx),
         }
     }
@@ -105,6 +112,47 @@ impl PlayerBar {
             self.queue_open = open;
             cx.notify();
         }
+    }
+
+    pub(super) fn lyrics_open(&self) -> bool {
+        self.lyrics_open
+    }
+
+    pub(super) fn set_lyrics_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.lyrics_open != open {
+            self.lyrics_open = open;
+            cx.notify();
+        }
+    }
+
+    fn lyrics_button(
+        &self,
+        palette: CadencePalette,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::base::Button {
+        gpui_kit::base::Button::new("lyrics-toggle")
+            .key_context(CONTROL_KEY_CONTEXT)
+            .accessibility_label("Lyrics")
+            .aria_expanded(self.lyrics_open)
+            .size_10()
+            .flex_none()
+            .rounded_full()
+            .line_height(window.text_style().line_height)
+            .text_color(rgb(palette.text_primary))
+            .hover(|style| style.bg(rgb(palette.control)))
+            .active(|style| style.bg(rgb(palette.control_hover)))
+            .focus_visible(|style| style.border_2().border_color(rgb(palette.focus_ring)))
+            .when(self.lyrics_open, |button| button.bg(rgb(palette.selection)))
+            .child(components::icon(
+                CadenceIcon::Lyrics,
+                tokens::CONTROL_ICON,
+                palette.text_primary,
+            ))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.set_lyrics_open(!this.lyrics_open, cx);
+                cx.emit(ToggleLyrics);
+            }))
     }
 
     fn queue_button(
@@ -176,6 +224,7 @@ impl PlayerBar {
             CadenceIcon::Speaker
         };
         let duration_ms = now_playing.as_deref().map_or(0, |track| track.duration_ms);
+        let lyrics_enabled = services::AppServices::preferences(cx).lyrics_enabled;
         div()
             .relative()
             .h_24()
@@ -277,7 +326,13 @@ impl PlayerBar {
                                         this.player.update(cx, |player, cx| player.next(cx));
                                     })),
                             ))
-                            .child(div().size_10()),
+                            // Balances the shuffle button on the other side; holds
+                            // the lyrics button once lyrics are turned on.
+                            .child(if lyrics_enabled {
+                                self.lyrics_button(palette, window, cx).into_any_element()
+                            } else {
+                                div().size_10().into_any_element()
+                            }),
                     )
                     .child(
                         div()

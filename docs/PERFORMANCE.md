@@ -354,3 +354,19 @@ per packet. Only local files that are not 44.1 kHz stereo are resampled, in
 through the real player and check the exact output length; MP3, FLAC, Ogg,
 AAC and ALAC M4A, and 96 kHz 5.1 WAV files were also played to the end. These
 are code bounds and tests, not a Windows working-set measurement of the app.
+
+# Lyrics
+
+Lyrics cost nothing until they are turned on in Settings and opened: the button
+is not drawn, no pane is built on screen, and nothing is asked of the network.
+Once open, a song costs one small request to LRCLIB (a second only when no exact
+match exists), cancelled if the song changes first. The answer is parsed into a
+sorted line list of a few kilobytes, and the last 16 songs' answers are kept,
+including songs with no lyrics, so reopening or skipping back asks nothing.
+
+Following a song is a binary search for the current line and one timer set for
+the moment the next line starts, so the view redraws once per lyric line, not
+once per frame, and not at all while paused. Only the nine or so lines near the
+current one are built. Unsynced lyrics are a plain scrolling list. Responses
+are limited to 512 KiB. These are code bounds and tests, not a Windows
+working-set measurement of the app.

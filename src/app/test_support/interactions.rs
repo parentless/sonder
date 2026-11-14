@@ -5,7 +5,7 @@ use crate::app::{
 };
 use crate::backend::{BackendCommand, BackendEvent};
 use crate::model;
-use crate::storage::ThemePreference;
+use crate::storage::{LyricsView, ThemePreference};
 use gpui_kit::component::Root;
 use gpui_kit::test::{ElementSnapshot, TestWindowExt};
 use gpui_kit::{
@@ -202,6 +202,17 @@ impl Fixture {
             self.cx.advance_clock(Duration::from_millis(10));
         }
         panic!("UI did not settle within 200 ms");
+    }
+
+    /// Scrolls Settings to its last section, where the lyrics switch is.
+    fn scroll_settings_to_the_end(&mut self) {
+        let workspace = self.workspace.clone().expect("workspace fixture");
+        self.update(|_, cx| {
+            let workspace = workspace.upgrade().expect("live workspace");
+            let settings = workspace.read(cx).settings.clone();
+            settings.update(cx, |settings, cx| settings.show_local_files(cx));
+        });
+        self.cx.run_until_parked();
     }
 
     fn no_commands(&mut self) {
@@ -4257,4 +4268,118 @@ fn a_folder_change_during_a_scan_rescans_once_it_finishes() {
         vec![local_track("Harbour")]
     ));
     fixture.no_commands();
+}
+
+fn synced_fixture_lyrics() -> crate::lyrics::Lyrics {
+    crate::lyrics::parse_synced("[00:01.00]First line\n[00:05.00]Second line\n[00:09.00]Third line")
+}
+
+#[test]
+fn the_lyrics_button_appears_only_once_lyrics_are_turned_on() {
+    let mut fixture = Fixture::new(true);
+    fixture.play(track(0));
+    fixture.scroll_settings_to_the_end();
+    fixture.update(|window, _| assert!(window.try_find("lyrics-toggle").is_none()));
+    fixture.update(|window, cx| window.click("settings-lyrics", cx));
+    fixture.update(|window, cx| {
+        assert!(services::AppServices::preferences(cx).lyrics_enabled);
+        assert!(window.try_find("lyrics-toggle").is_some());
+        assert!(window.try_find(("settings-lyrics-view", 0usize)).is_some());
+    });
+    // Nothing is asked of the lyrics service until the view is opened.
+    fixture.no_commands();
+    fixture.update(|window, cx| window.click("settings-lyrics", cx));
+    fixture.update(|window, _| assert!(window.try_find("lyrics-toggle").is_none()));
+    fixture.no_commands();
+}
+
+#[test]
+fn opening_lyrics_asks_once_shows_the_lines_and_a_click_seeks() {
+    let mut fixture = Fixture::new(true);
+    fixture.play(track(0));
+    fixture.scroll_settings_to_the_end();
+    fixture.update(|window, cx| window.click("settings-lyrics", cx));
+    fixture.update(|window, cx| window.click("lyrics-toggle", cx));
+    let BackendCommand::LoadLyrics { query, respond } =
+        fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a lyrics lookup")
+    };
+    assert_eq!(query.title, "Song 1");
+    assert_eq!(query.artist, "Sonder Ensemble");
+    fixture.update(|window, _| {
+        assert!(window.try_find("lyrics-panel").is_some());
+        assert!(window.try_find(("lyric-line", 0usize)).is_none());
+    });
+    respond.send(Ok(synced_fixture_lyrics())).unwrap();
+    fixture.cx.run_until_parked();
+    fixture.update(|window, cx| {
+        assert!(window.try_find(("lyric-line", 0usize)).is_some());
+        assert!(window.try_find(("lyric-line", 2usize)).is_some());
+        window.click(("lyric-line", 2usize), cx);
+    });
+    let BackendCommand::Seek(position) = fixture.backend.commands.try_recv().unwrap() else {
+        panic!("expected a seek")
+    };
+    assert_eq!(position, 9_000);
+    // Closing and reopening for the same song does not ask again.
+    fixture.update(|window, cx| window.click("close-lyrics", cx));
+    fixture.update(|window, _| assert!(window.try_find("lyrics-panel").is_none()));
+    fixture.update(|window, cx| window.click("lyrics-toggle", cx));
+    fixture.update(|window, _| assert!(window.try_find(("lyric-line", 0usize)).is_some()));
+    fixture.no_commands();
+}
+
+#[test]
+fn songs_without_lyrics_say_so_and_the_choice_of_view_changes_the_place() {
+    let mut fixture = Fixture::new(true);
+    fixture.play(track(0));
+    fixture.scroll_settings_to_the_end();
+    fixture.update(|window, cx| window.click("settings-lyrics", cx));
+    fixture.scroll_settings_to_the_end();
+    fixture.update(|window, cx| window.click(("settings-lyrics-view", 2usize), cx));
+    fixture.update(|_, cx| {
+        assert_eq!(
+            services::AppServices::preferences(cx).lyrics_view,
+            LyricsView::Strip
+        );
+    });
+    fixture.update(|window, cx| window.click("lyrics-toggle", cx));
+    let BackendCommand::LoadLyrics { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a lyrics lookup")
+    };
+    fixture.update(|window, _| {
+        assert!(window.try_find("lyrics-strip").is_some());
+        assert!(window.try_find("lyrics-panel").is_none());
+    });
+    respond.send(Ok(crate::lyrics::Lyrics::default())).unwrap();
+    fixture.cx.run_until_parked();
+    fixture.update(|window, _| assert!(window.try_find("lyrics-strip").is_some()));
+    fixture.scroll_settings_to_the_end();
+    fixture.update(|window, cx| window.click(("settings-lyrics-view", 1usize), cx));
+    fixture.update(|window, _| {
+        assert!(window.try_find("lyrics-page").is_some());
+        assert!(window.try_find("lyrics-strip").is_none());
+    });
+}
+
+#[test]
+fn the_lyrics_panel_and_the_queue_share_the_right_edge() {
+    let mut fixture = Fixture::new(true);
+    fixture.play(track(0));
+    fixture.scroll_settings_to_the_end();
+    fixture.update(|window, cx| window.click("settings-lyrics", cx));
+    fixture.update(|window, cx| window.click("lyrics-toggle", cx));
+    fixture.update(|window, _| assert!(window.try_find("lyrics-panel").is_some()));
+    fixture.update(|window, cx| window.click("queue-toggle", cx));
+    fixture.update(|window, _| {
+        assert!(window.try_find("lyrics-panel").is_none());
+        assert!(window.try_find("close-queue").is_some());
+    });
+    fixture.update(|window, cx| window.click("lyrics-toggle", cx));
+    fixture.update(|window, _| {
+        assert!(window.try_find("lyrics-panel").is_some());
+        assert!(window.try_find("close-queue").is_none());
+    });
 }

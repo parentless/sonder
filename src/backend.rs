@@ -376,6 +376,11 @@ pub enum BackendCommand {
         source_id: String,
         respond: Reply<AlbumDetails>,
     },
+    /// Looks up a song's lyrics. Only sent while lyrics are open.
+    LoadLyrics {
+        query: crate::lyrics::Query,
+        respond: Reply<crate::lyrics::Lyrics>,
+    },
     StartRadio {
         request_id: u64,
         seed: Track,
@@ -1364,6 +1369,18 @@ impl Worker {
             }
             BackendCommand::LoadAlbum { source_id, respond } => {
                 self.catalog.album(self.spotify.clone(), source_id, respond);
+                Ok(())
+            }
+            BackendCommand::LoadLyrics { query, mut respond } => {
+                // Skipping on drops the receiver, which ends the request.
+                tokio::spawn(async move {
+                    tokio::select! {
+                        result = crate::lyrics::fetch(&query) => {
+                            let _ = respond.send(result);
+                        }
+                        () = respond.closed() => {}
+                    }
+                });
                 Ok(())
             }
             BackendCommand::StartRadio { request_id, seed } if seed.is_local() => {

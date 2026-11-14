@@ -94,6 +94,12 @@ pub(super) const COLLECTION_ARTWORK: ArtworkSize = ArtworkSize {
     radius: Rems(1.75),
 };
 
+/// The cover on an album page, a step larger than other collections.
+pub(super) const ALBUM_ARTWORK: ArtworkSize = ArtworkSize {
+    size: Rems(14.5),
+    radius: Rems(2.25),
+};
+
 pub(super) const SIDEBAR_PLAYLIST_ARTWORK: ArtworkSize = ArtworkSize {
     size: Rems(1.75),
     radius: Rems(0.375),

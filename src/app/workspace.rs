@@ -29,6 +29,7 @@ pub(super) struct Workspace {
     pub(super) toolbar: Entity<chrome::Toolbar>,
     pub(super) player_bar: Entity<player_bar::PlayerBar>,
     pub(super) queue_drawer: Entity<player_bar::QueueDrawer>,
+    pub(super) lyrics: Entity<lyrics_view::LyricsPane>,
     pub(super) focus_handle: FocusHandle,
     wheel_scroll: Rc<std::cell::RefCell<smooth_scroll::WheelScroll>>,
     wheel_route: Option<Route>,
@@ -159,6 +160,25 @@ impl Workspace {
                     }
                     cx.notify();
                 }
+                settings::SettingsEvent::SetLyricsEnabled(enabled) => {
+                    let result = services::AppServices::set_lyrics_enabled(*enabled, cx);
+                    let result = services::require_settings_storage(result);
+                    if let Some(error) = services::preference_save_error("lyrics setting", result) {
+                        this.last_error = Some(error);
+                    }
+                    if !*enabled {
+                        this.close_lyrics(cx);
+                    }
+                    cx.notify();
+                }
+                settings::SettingsEvent::SetLyricsView(view) => {
+                    let result = services::AppServices::set_lyrics_view(*view, cx);
+                    let result = services::require_settings_storage(result);
+                    if let Some(error) = services::preference_save_error("lyrics view", result) {
+                        this.last_error = Some(error);
+                    }
+                    cx.notify();
+                }
                 settings::SettingsEvent::SetKeepInTray(keep) => {
                     let result = services::AppServices::set_keep_in_tray(*keep, cx);
                     let result = services::require_settings_storage(result);
@@ -252,6 +272,30 @@ impl Workspace {
             |this, bar, _: &player_bar::ToggleQueue, cx| {
                 if bar.read(cx).queue_open() {
                     this.close_account_menu(cx);
+                    if services::AppServices::preferences(cx).lyrics_view == LyricsView::Panel {
+                        this.close_lyrics(cx);
+                    }
+                }
+                cx.notify();
+            },
+        ));
+        let lyrics = cx.new(|cx| lyrics_view::LyricsPane::new(backend.clone(), cx));
+        subscriptions.push(
+            cx.subscribe(&lyrics, |this, _, _: &lyrics_view::CloseLyrics, cx| {
+                this.close_lyrics(cx)
+            }),
+        );
+        subscriptions.push(cx.subscribe(
+            &player_bar,
+            |this, bar, _: &player_bar::ToggleLyrics, cx| {
+                // The panel and the queue share the right edge.
+                if bar.read(cx).lyrics_open()
+                    && services::AppServices::preferences(cx).lyrics_view == LyricsView::Panel
+                {
+                    this.close_queue(cx);
+                }
+                if bar.read(cx).lyrics_open() {
+                    this.close_account_menu(cx);
                 }
                 cx.notify();
             },
@@ -287,6 +331,7 @@ impl Workspace {
             toolbar,
             player_bar,
             queue_drawer,
+            lyrics,
             focus_handle,
             wheel_scroll: Rc::default(),
             wheel_route: None,
@@ -467,6 +512,15 @@ impl Render for Workspace {
         });
 
         let overlay_toolbar = route == Route::Artist;
+        // Lyrics show only when turned on, and only in the chosen place.
+        let lyrics_preferences = services::AppServices::preferences(cx);
+        let lyrics_view = (lyrics_preferences.lyrics_enabled
+            && self.player_bar.read(cx).lyrics_open())
+        .then_some(lyrics_preferences.lyrics_view);
+        if let Some(view) = lyrics_view {
+            self.lyrics
+                .update(cx, |lyrics, cx| lyrics.set_view(view, cx));
+        }
         if self.wheel_route != Some(route) {
             smooth_scroll::cancel(&self.wheel_scroll);
             self.wheel_route = Some(route);
@@ -539,12 +593,21 @@ impl Render for Workspace {
                                         .right_0()
                                         .child(self.toolbar.clone()),
                                 )
+                            })
+                            .when(lyrics_view == Some(LyricsView::Page), |body| {
+                                body.child(self.lyrics.clone())
                             }),
                     )
                     .when(self.player_bar.read(cx).queue_open(), |root| {
                         root.child(self.queue_drawer.clone())
+                    })
+                    .when(lyrics_view == Some(LyricsView::Panel), |root| {
+                        root.child(self.lyrics.clone())
                     }),
             )
+            .when(lyrics_view == Some(LyricsView::Strip), |root| {
+                root.child(self.lyrics.clone())
+            })
             .child(self.player_bar.clone())
             .when_some(scrim, |root, scrim| root.child(deferred(scrim)))
             .when_some(action_notice, |root, notice| root.child(notice))

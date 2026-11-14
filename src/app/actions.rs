@@ -188,6 +188,12 @@ impl Workspace {
         cx.notify();
     }
 
+    pub(super) fn close_lyrics(&mut self, cx: &mut Context<Self>) {
+        self.player_bar
+            .update(cx, |bar, cx| bar.set_lyrics_open(false, cx));
+        cx.notify();
+    }
+
     /// Row action menus are anchored to a page that a route change takes off
     /// screen, so they have to come down with it or they reappear on return.
     pub(super) fn close_track_menus(&mut self, cx: &mut Context<Self>) {

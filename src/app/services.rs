@@ -501,6 +501,30 @@ impl AppServices {
         Some(result)
     }
 
+    pub(super) fn set_lyrics_enabled(enabled: bool, cx: &mut App) -> Option<anyhow::Result<()>> {
+        let services = cx.global_mut::<Self>();
+        let result = services
+            .store
+            .as_mut()
+            .map(|store| store.set_lyrics_enabled(enabled));
+        if result.as_ref().is_some_and(|result| result.is_ok()) {
+            services.preferences.lyrics_enabled = enabled;
+        }
+        result
+    }
+
+    pub(super) fn set_lyrics_view(view: LyricsView, cx: &mut App) -> Option<anyhow::Result<()>> {
+        let services = cx.global_mut::<Self>();
+        let result = services
+            .store
+            .as_mut()
+            .map(|store| store.set_lyrics_view(view));
+        if result.as_ref().is_some_and(|result| result.is_ok()) {
+            services.preferences.lyrics_view = view;
+        }
+        result
+    }
+
     pub(super) fn set_streaming_quality(
         quality: StreamingQuality,
         cx: &mut App,

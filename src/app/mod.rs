@@ -12,7 +12,10 @@ use crate::{
     lifecycle::{Instance, InstanceLifecycle},
     model,
     spotify::{self, ClientIdSource, valid_client_id},
-    storage::{AppPreferences, SelectionColor, Store, StreamingQuality, ThemePreference, UiZoom},
+    storage::{
+        AppPreferences, LyricsView, SelectionColor, Store, StreamingQuality, ThemePreference,
+        UiZoom,
+    },
 };
 use gpui_kit::base::FocusableExt as _;
 use gpui_kit::component::{
@@ -364,6 +367,7 @@ mod fonts;
 mod icons;
 mod library;
 mod library_pages;
+mod lyrics_view;
 mod media_controls;
 mod onboarding;
 mod page;

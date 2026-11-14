@@ -145,6 +145,46 @@ pub struct AppPreferences {
     /// Starts Sonder when the listener signs in to Windows.
     pub launch_at_login: bool,
     pub streaming_quality: StreamingQuality,
+    /// Shows the lyrics button in the player. Off until the listener turns it
+    /// on, because lyrics come from a third-party service.
+    pub lyrics_enabled: bool,
+    pub lyrics_view: LyricsView,
+}
+
+/// Where lyrics are shown.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LyricsView {
+    /// A panel beside the page, like the queue.
+    #[default]
+    Panel,
+    /// The whole page area.
+    Page,
+    /// One line above the player.
+    Strip,
+}
+
+impl LyricsView {
+    pub const ALL: [Self; 3] = [Self::Panel, Self::Page, Self::Strip];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Panel => "Side panel",
+            Self::Page => "Full page",
+            Self::Strip => "Subtitle strip",
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Panel => "panel",
+            Self::Page => "page",
+            Self::Strip => "strip",
+        }
+    }
+
+    fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|view| view.key() == key)
+    }
 }
 
 impl Default for AppPreferences {
@@ -160,6 +200,8 @@ impl Default for AppPreferences {
             keep_in_tray: false,
             launch_at_login: false,
             streaming_quality: StreamingQuality::default(),
+            lyrics_enabled: false,
+            lyrics_view: LyricsView::default(),
         }
     }
 }
@@ -401,6 +443,11 @@ impl Store {
             .and_then(|value| value.parse().ok())
             .and_then(StreamingQuality::from_kbps)
             .unwrap_or_default();
+        let lyrics_enabled = self.preference("lyrics_enabled")?.as_deref() == Some("true");
+        let lyrics_view = self
+            .preference("lyrics_view")?
+            .and_then(|value| LyricsView::from_key(&value))
+            .unwrap_or_default();
         let selection_color = self.preference("selection_color")?;
         let ui_zoom = self
             .preference("ui_zoom")?
@@ -426,6 +473,8 @@ impl Store {
             keep_in_tray,
             launch_at_login,
             streaming_quality,
+            lyrics_enabled,
+            lyrics_view,
         })
     }
 
@@ -490,6 +539,14 @@ impl Store {
         }
         transaction.commit()?;
         Ok(())
+    }
+
+    pub fn set_lyrics_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.set_preference("lyrics_enabled", if enabled { "true" } else { "false" })
+    }
+
+    pub fn set_lyrics_view(&mut self, view: LyricsView) -> Result<()> {
+        self.set_preference("lyrics_view", view.key())
     }
 
     pub fn set_autoplay(&mut self, autoplay: bool) -> Result<()> {
@@ -1321,6 +1378,8 @@ mod tests {
         store
             .set_streaming_quality(super::StreamingQuality::High)
             .unwrap();
+        store.set_lyrics_enabled(true).unwrap();
+        store.set_lyrics_view(super::LyricsView::Strip).unwrap();
         assert_eq!(
             store.preferences().unwrap(),
             AppPreferences {
@@ -1333,6 +1392,8 @@ mod tests {
                 keep_in_tray: true,
                 launch_at_login: true,
                 streaming_quality: super::StreamingQuality::High,
+                lyrics_enabled: true,
+                lyrics_view: super::LyricsView::Strip,
             }
         );
     }

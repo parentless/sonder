@@ -8,6 +8,7 @@ pub(crate) mod discord;
 pub(crate) mod lastfm;
 pub mod lifecycle;
 pub mod local_files;
+pub mod lyrics;
 mod memory;
 pub mod model;
 mod musicbrainz;

@@ -2333,7 +2333,8 @@ impl Render for AlbumPage {
         } else if loaded {
             components::empty_state(palette, "This album has no playable tracks").into_any_element()
         } else {
-            components::empty_state(palette, "Loading album…").into_any_element()
+            // Shaped like the track list that is about to arrive.
+            components::list_skeleton(palette).into_any_element()
         };
         let can_review = self.album.is_some() && !tracks.is_empty();
         let review_label: SharedString = match self.review.as_ref() {
@@ -2355,7 +2356,7 @@ impl Render for AlbumPage {
                     .child(
                         div()
                             .flex_none()
-                            .rounded(Rems(1.75))
+                            .rounded(tokens::ALBUM_ARTWORK.radius)
                             .shadow(vec![
                                 gpui_kit::BoxShadow::new(
                                     px(0.),
@@ -2374,7 +2375,7 @@ impl Render for AlbumPage {
                                 palette,
                                 &self.image_cache,
                                 artwork_url.as_deref(),
-                                tokens::COLLECTION_ARTWORK,
+                                tokens::ALBUM_ARTWORK,
                                 CadenceIcon::MusicNote,
                             )),
                     )
