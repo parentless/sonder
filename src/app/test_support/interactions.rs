@@ -4383,3 +4383,85 @@ fn the_lyrics_panel_and_the_queue_share_the_right_edge() {
         assert!(window.try_find("close-queue").is_none());
     });
 }
+
+impl Fixture {
+    fn lyrics_scroll(&mut self) -> (f32, bool) {
+        let workspace = self.workspace.clone().expect("workspace fixture");
+        self.update(|_, cx| {
+            let workspace = workspace.upgrade().expect("live workspace");
+            let lyrics = workspace.read(cx).lyrics.clone();
+            let lyrics = lyrics.read(cx);
+            (lyrics.scroll_offset_y(), lyrics.gliding())
+        })
+    }
+}
+
+#[test]
+fn moving_to_the_next_line_glides_and_then_goes_quiet() {
+    let mut fixture = Fixture::new(true);
+    fixture.play(track(0));
+    fixture.scroll_settings_to_the_end();
+    fixture.update(|window, cx| window.click("settings-lyrics", cx));
+    fixture.update(|window, cx| window.click("lyrics-toggle", cx));
+    let BackendCommand::LoadLyrics { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a lyrics lookup")
+    };
+    respond.send(Ok(synced_fixture_lyrics())).unwrap();
+    fixture.cx.run_until_parked();
+    // Let the first placement settle.
+    for _ in 0..6 {
+        fixture.update(|window, cx| {
+            window.simulate_next_frame(cx);
+        });
+        fixture.cx.advance_clock(Duration::from_millis(20));
+    }
+    let (resting, gliding) = fixture.lyrics_scroll();
+    assert!(!gliding, "the first placement is done");
+    // Playback reaches the second line.
+    fixture.update(|window, cx| window.click(("lyric-line", 1usize), cx));
+    let _ = fixture.backend.commands.try_recv();
+    let mut offsets = vec![resting];
+    let mut frames_with_work = 0;
+    for _ in 0..40 {
+        let work = fixture.update(|window, cx| window.simulate_next_frame(cx));
+        frames_with_work += usize::from(work > 0);
+        fixture.cx.advance_clock(Duration::from_millis(16));
+        offsets.push(fixture.lyrics_scroll().0);
+    }
+    let (last, gliding) = fixture.lyrics_scroll();
+    assert!(!gliding, "the glide finished");
+    assert!(frames_with_work > 3, "the glide spans several frames");
+    assert!(
+        frames_with_work < 40,
+        "and then stops asking for frames: {frames_with_work}"
+    );
+    // The column only ever moves one way, in steps, and ends somewhere new.
+    let moved: Vec<f32> = offsets.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    assert!(
+        moved.iter().all(|step| *step <= 0.01) || moved.iter().all(|step| *step >= -0.01),
+        "one direction: {offsets:?}"
+    );
+    assert!((last - resting).abs() > 1., "it moved: {offsets:?}");
+}
+
+#[test]
+fn a_reopened_window_comes_back_with_lyrics_open() {
+    let mut fixture = Fixture::new(true);
+    fixture.play(track(0));
+    fixture.scroll_settings_to_the_end();
+    fixture.update(|window, cx| window.click("settings-lyrics", cx));
+    fixture.update(|window, cx| window.click("lyrics-toggle", cx));
+    fixture.update(|_, cx| {
+        assert!(services::AppServices::lyrics_open(cx));
+        // A window made after the last one closed starts from that choice.
+        let bar = cx.new(crate::app::player_bar::PlayerBar::new);
+        assert!(bar.read(cx).lyrics_open());
+    });
+    fixture.update(|window, cx| window.click("lyrics-toggle", cx));
+    fixture.update(|_, cx| {
+        assert!(!services::AppServices::lyrics_open(cx));
+        let bar = cx.new(crate::app::player_bar::PlayerBar::new);
+        assert!(!bar.read(cx).lyrics_open());
+    });
+}

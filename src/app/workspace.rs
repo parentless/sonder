@@ -296,6 +296,7 @@ impl Workspace {
                 }
                 if bar.read(cx).lyrics_open() {
                     this.close_account_menu(cx);
+                    this.lyrics.update(cx, |lyrics, cx| lyrics.reopened(cx));
                 }
                 cx.notify();
             },

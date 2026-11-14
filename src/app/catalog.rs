@@ -1814,7 +1814,13 @@ impl Render for SearchPage {
                             .child(components::page_heading(
                                 palette,
                                 "Search results",
-                                format!("Results for {}", self.query),
+                                format!(
+                                    "Results for {}",
+                                    // What was searched, not what is being typed now.
+                                    self.requested
+                                        .as_ref()
+                                        .map_or(self.query.as_str(), |(asked, _)| asked.as_str())
+                                ),
                             ))
                             .child(
                                 content.relative().child(

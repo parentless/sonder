@@ -93,7 +93,8 @@ impl PlayerBar {
             _metadata_events: page::forward(&metadata, cx),
             metadata,
             queue_open: false,
-            lyrics_open: false,
+            lyrics_open: services::AppServices::lyrics_open(cx)
+                && services::AppServices::preferences(cx).lyrics_enabled,
             scrubber: scrubber::Scrubber::new(cx),
         }
     }
@@ -121,6 +122,7 @@ impl PlayerBar {
     pub(super) fn set_lyrics_open(&mut self, open: bool, cx: &mut Context<Self>) {
         if self.lyrics_open != open {
             self.lyrics_open = open;
+            services::AppServices::set_lyrics_open(open, cx);
             cx.notify();
         }
     }

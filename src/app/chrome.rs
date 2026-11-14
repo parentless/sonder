@@ -383,7 +383,8 @@ impl Toolbar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let library = self.library.read(cx);
-        let mut menu = components::menu_surface(palette)
+        // Solid, so the page title behind it never shows through the rows.
+        let mut menu = components::solid_menu_surface(palette)
             .id("cached-search-suggestions")
             .test_support()
             .absolute()

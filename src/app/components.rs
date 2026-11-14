@@ -402,17 +402,6 @@ pub(super) fn glass_search_frame(
     )
 }
 
-pub(super) fn menu_surface(palette: CadencePalette) -> Div {
-    glass_frame(div(), palette, true)
-        .occlude()
-        .w(tokens::MENU_WIDTH)
-        .p_1p5()
-        .flex()
-        .flex_col()
-        .text_color(rgb(palette.text))
-        .text_size(tokens::BODY_TEXT)
-}
-
 /// A page subtitle that reports a background refresh without replacing the
 /// contents already on screen.
 pub(super) fn revalidating_detail(detail: impl Into<String>, refreshing: bool) -> String {

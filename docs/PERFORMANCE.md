@@ -366,7 +366,9 @@ including songs with no lyrics, so reopening or skipping back asks nothing.
 
 Following a song is a binary search for the current line and one timer set for
 the moment the next line starts, so the view redraws once per lyric line, not
-once per frame, and not at all while paused. Only the nine or so lines near the
-current one are built. Unsynced lyrics are a plain scrolling list. Responses
+once per frame, and not at all while paused. A line change glides the column
+to the new line over 380 ms; frames are requested only during that glide and
+stop once it settles (reduced motion snaps instead). Up to 300 lines are built
+as plain text rows. Unsynced lyrics are a plain scrolling list. Responses
 are limited to 512 KiB. These are code bounds and tests, not a Windows
 working-set measurement of the app.

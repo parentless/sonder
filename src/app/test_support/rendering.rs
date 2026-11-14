@@ -44,6 +44,7 @@ enum Scene {
     Home,
     HomePermission,
     SearchEntered,
+    SearchLive,
     CachedSearch,
     PlaybackPending,
     SearchArtists,
@@ -97,6 +98,7 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("home", Scene::Home),
         ("home-permission", Scene::HomePermission),
         ("search-entered", Scene::SearchEntered),
+        ("search-live", Scene::SearchLive),
         ("search-cached", Scene::CachedSearch),
         ("playback-pending", Scene::PlaybackPending),
         ("search-artists", Scene::SearchArtists),
@@ -726,7 +728,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             })
             .expect("artist menu is visible over backdrop");
         }
-        Scene::SearchEntered | Scene::CachedSearch => {
+        Scene::SearchEntered | Scene::CachedSearch | Scene::SearchLive => {
             press_key(
                 &mut cx,
                 handle.into(),
@@ -736,7 +738,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     "ctrl-k"
                 },
             );
-            for character in (if matches!(scene, Scene::CachedSearch) {
+            for character in (if matches!(scene, Scene::CachedSearch | Scene::SearchLive) {
                 "Song"
             } else {
                 "Blue Train"
@@ -744,6 +746,23 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             .chars()
             {
                 press_key(&mut cx, handle.into(), &character.to_string());
+            }
+            if matches!(scene, Scene::SearchLive) {
+                // Typing pauses, and Spotify answers the live lookup.
+                cx.advance_clock(Duration::from_millis(700));
+                settle(&mut cx, handle.into());
+                let mut answered = false;
+                while let Ok(command) = backend.commands.try_recv() {
+                    match command {
+                        BackendCommand::SearchCatalog { respond, .. } => {
+                            respond.send(Ok(super::gallery_results())).unwrap();
+                            answered = true;
+                        }
+                        other => held_commands.push(other),
+                    }
+                }
+                assert!(answered, "a pause in typing asks Spotify");
+                settle(&mut cx, handle.into());
             }
             if matches!(scene, Scene::CachedSearch) {
                 cx.update(|cx| {

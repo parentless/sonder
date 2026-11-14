@@ -4,7 +4,9 @@
 //! Nothing is asked of the network until this view is on screen, and a song is
 //! asked for once: answers are kept for the last few songs. While a synced song
 //! plays, a single timer is set for the moment the next line starts, so the view
-//! redraws a few times a minute rather than every frame.
+//! redraws a few times a minute rather than every frame. A line change glides:
+//! for a third of a second the lines ease up while the old line shrinks and the
+//! new one grows, then the view goes quiet again.
 
 use std::collections::VecDeque;
 
@@ -20,9 +22,10 @@ const CACHE_ENTRIES: usize = 16;
 /// The soonest a line change is scheduled, so a clock that runs a hair early
 /// cannot spin the timer.
 const MIN_DELAY_MS: u32 = 30;
-/// Lines drawn either side of the current one; the rest would be clipped.
-const LINES_BEFORE: usize = 4;
-const LINES_AFTER: usize = 8;
+/// The most lines drawn for one song.
+const MAX_LINES: usize = 300;
+/// How long moving on to the next line takes.
+const TRANSITION: Duration = Duration::from_millis(380);
 /// Where the current line sits, as a share of the height.
 const CURRENT_AT: f32 = 0.34;
 
@@ -50,7 +53,24 @@ pub(super) struct LyricsPane {
     request: Option<gpui_kit::Task<()>>,
     /// Wakes the view when the next line starts. Replaced on every draw.
     tick: Option<gpui_kit::Task<()>>,
+    scroll: gpui_kit::ScrollHandle,
+    motion: Motion,
     _player_events: Subscription,
+}
+
+/// Where the glide from one line to the next has got to.
+#[derive(Default)]
+struct Motion {
+    /// The line (by style anchor, -1 before the first) the view is laid out for.
+    target: Option<isize>,
+    /// The line the sizes are easing away from.
+    from: isize,
+    /// Where the new line was on screen when the glide began.
+    from_y: Pixels,
+    started: Option<std::time::Instant>,
+    /// Frames still to re-place the view after a jump, so it follows the layout
+    /// of the lines it has just been given rather than the previous song's.
+    settling: u8,
 }
 
 /// Type sizes for one way of showing the lines.
@@ -68,7 +88,6 @@ struct Look {
     palette: CadencePalette,
     /// Whether a line can be clicked to seek.
     synced: bool,
-    reduce_motion: bool,
 }
 
 impl Scale {
@@ -97,12 +116,37 @@ impl LyricsPane {
             cache: VecDeque::new(),
             request: None,
             tick: None,
+            scroll: gpui_kit::ScrollHandle::new(),
+            motion: Motion::default(),
         }
+    }
+
+    /// Forgets where the lines were, so the next draw places them afresh.
+    fn reset_motion(&mut self) {
+        self.motion = Motion::default();
+        self.scroll.set_offset(point(px(0.), px(0.)));
+    }
+
+    #[cfg(test)]
+    pub(super) fn scroll_offset_y(&self) -> f32 {
+        f32::from(self.scroll.offset().y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn gliding(&self) -> bool {
+        self.motion.started.is_some() || self.motion.settling > 0
+    }
+
+    /// The pane was just opened: place the lines without a glide.
+    pub(super) fn reopened(&mut self, cx: &mut Context<Self>) {
+        self.reset_motion();
+        cx.notify();
     }
 
     pub(super) fn set_view(&mut self, view: LyricsView, cx: &mut Context<Self>) {
         if self.view != view {
             self.view = view;
+            self.reset_motion();
             cx.notify();
         }
     }
@@ -121,6 +165,7 @@ impl LyricsPane {
         }
         self.key = key.clone();
         self.request = None;
+        self.reset_motion();
         let (Some(track), Some(key)) = (track, key) else {
             self.state = State::Idle;
             return;
@@ -217,13 +262,13 @@ impl LyricsPane {
             .child(text)
     }
 
-    /// The nearer a line is to the current one, the larger and stronger it
-    /// is. Blank lines (instrumental breaks) show as a note.
+    /// One line. Blank lines (instrumental breaks) show as a note.
     fn line(
         &self,
         index: usize,
         line: &Line,
-        distance: isize,
+        size: Rems,
+        strength: f32,
         look: Look,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -231,29 +276,22 @@ impl LyricsPane {
             scale,
             palette,
             synced,
-            reduce_motion,
         } = look;
-        let current = distance == 0;
-        let strength = match distance.unsigned_abs() {
-            0 => 1.,
-            1 => 0.55,
-            2 => 0.38,
-            _ => 0.26,
-        };
         let text = if line.text.is_empty() {
             "♪".to_owned()
         } else {
             line.text.clone()
         };
         let start_ms = line.start_ms;
-        let row = div()
+        div()
             .id(("lyric-line", index))
             .test_support()
+            .flex_none()
             .w_full()
             .py(scale.padding)
             .font_weight(gpui_kit::FontWeight::BOLD)
             .line_height(relative(1.2))
-            .text_size(if current { scale.current } else { scale.near })
+            .text_size(size)
             .text_color(rgb(palette.text_primary))
             .opacity(strength)
             .when(synced, |row| {
@@ -261,101 +299,149 @@ impl LyricsPane {
                     .hover(|style| style.opacity((strength + 0.3).min(1.)))
                     .on_click(cx.listener(move |this, _, _, cx| this.seek(start_ms, cx)))
             })
-            .child(text);
-        if current && !reduce_motion {
-            // A line eases up to full strength as it starts.
-            row.with_animation(
-                ("lyric-current", index),
-                Animation::new(Duration::from_millis(280)).with_easing(ease_out_quint()),
-                |row, delta| row.opacity(0.4 + 0.6 * delta),
-            )
+            .child(text)
             .into_any_element()
-        } else {
-            row.into_any_element()
-        }
     }
 
-    /// The lines, with the current one a third of the way down.
     fn body(
         &mut self,
         lyrics: &Arc<Lyrics>,
         current: Option<usize>,
         scale: Scale,
         palette: CadencePalette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let reduce_motion = cx.reduce_motion();
         if !lyrics.synced {
             // Without timestamps there is nothing to follow; just let it scroll.
+            let look = Look {
+                scale,
+                palette,
+                synced: false,
+            };
             return div()
                 .id("lyrics-scroll")
                 .size_full()
                 .overflow_y_scroll()
-                .children(lyrics.lines.iter().enumerate().map(|(index, line)| {
-                    self.line(
-                        index,
-                        line,
-                        3,
-                        Look {
-                            scale,
-                            palette,
-                            synced: false,
-                            reduce_motion: true,
-                        },
-                        cx,
-                    )
-                }))
+                .children(
+                    lyrics
+                        .lines
+                        .iter()
+                        .take(MAX_LINES)
+                        .enumerate()
+                        .map(|(index, line)| self.line(index, line, scale.near, 0.85, look, cx)),
+                )
                 .into_any_element();
         }
-        // Before the first line, the whole song is still ahead.
-        let anchor = current.map_or(-1, |index| index as isize);
-        let first = (anchor - LINES_BEFORE as isize).max(0) as usize;
-        let last = ((anchor + LINES_AFTER as isize).max(0) as usize).min(lyrics.lines.len() - 1);
-        let mut before = Vec::new();
-        let mut after = Vec::new();
-        for index in first..=last {
-            let distance = index as isize - anchor;
-            let element = self.line(
-                index,
-                &lyrics.lines[index],
-                distance,
-                Look {
-                    scale,
-                    palette,
-                    synced: true,
-                    reduce_motion,
-                },
-                cx,
-            );
-            if distance < 0 {
-                before.push(element);
-            } else {
-                after.push(element);
+        self.synced_body(lyrics, current, scale, palette, window, cx)
+    }
+
+    /// The lines in one scrolling column, with the current one a third of the
+    /// way down. Moving to the next line eases the column up while the old line
+    /// shrinks and the new one grows; both happen in the same frames.
+    fn synced_body(
+        &mut self,
+        lyrics: &Arc<Lyrics>,
+        current: Option<usize>,
+        scale: Scale,
+        palette: CadencePalette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let now = cx.background_executor().now();
+        let reduce_motion = cx.reduce_motion();
+        let count = lyrics.lines.len().min(MAX_LINES);
+        // Before the first line the whole song is still ahead.
+        let style_anchor = current.map_or(-1, |index| index as isize);
+        let layout_anchor = (style_anchor.max(0) as usize).min(count - 1);
+
+        // Where the line to centre was last laid out, from the top of the view.
+        // The lines are children 1..; child 0 is the space above them.
+        let area = self.scroll.bounds();
+        let anchor_y = area.size.height * CURRENT_AT;
+        let line_y = self
+            .scroll
+            .bounds_for_item(layout_anchor + 1)
+            .map(|bounds| bounds.top() - area.top());
+        let place = |scroll: &gpui_kit::ScrollHandle, line_y: Pixels, y: Pixels| {
+            scroll.set_offset(point(px(0.), y - line_y));
+        };
+        let mut progress = 1.;
+        match line_y {
+            None => window.request_animation_frame(),
+            Some(line_y) => {
+                if self.motion.target != Some(style_anchor) {
+                    match self.motion.target {
+                        Some(previous) if !reduce_motion && self.motion.settling == 0 => {
+                            self.motion.from = previous;
+                            self.motion.from_y = line_y + self.scroll.offset().y;
+                            self.motion.started = Some(now);
+                        }
+                        _ => {
+                            self.motion.started = None;
+                            self.motion.settling = 2;
+                        }
+                    }
+                    self.motion.target = Some(style_anchor);
+                }
+                if let Some(started) = self.motion.started {
+                    let elapsed = now.saturating_duration_since(started);
+                    let t = elapsed.as_secs_f32() / TRANSITION.as_secs_f32();
+                    if t >= 1. {
+                        self.motion.started = None;
+                        place(&self.scroll, line_y, anchor_y);
+                    } else {
+                        progress = ease_out_quint()(t);
+                        let y = self.motion.from_y + (anchor_y - self.motion.from_y) * progress;
+                        place(&self.scroll, line_y, y);
+                        window.request_animation_frame();
+                    }
+                } else {
+                    place(&self.scroll, line_y, anchor_y);
+                    if self.motion.settling > 0 {
+                        self.motion.settling -= 1;
+                        window.request_animation_frame();
+                    }
+                }
             }
         }
+        let shown = self.motion.target.is_some() && self.motion.settling == 0;
+
+        // Bigger and stronger the nearer a line is to the current one.
+        let look_at = |distance: isize| match distance.unsigned_abs() {
+            0 => (scale.current.0, 1.),
+            1 => (scale.near.0, 0.55),
+            2 => (scale.near.0, 0.38),
+            _ => (scale.near.0, 0.26),
+        };
+        let look = Look {
+            scale,
+            palette,
+            synced: true,
+        };
+        let from = self.motion.from;
+        let mut children = Vec::with_capacity(count + 2);
+        children.push(div().h(relative(CURRENT_AT)).flex_none().into_any_element());
+        for index in 0..count {
+            let (mut size, mut strength) = look_at(index as isize - style_anchor);
+            if progress < 1. {
+                let (old_size, old_strength) = look_at(index as isize - from);
+                size = old_size + (size - old_size) * progress;
+                strength = old_strength + (strength - old_strength) * progress;
+            }
+            children.push(self.line(index, &lyrics.lines[index], Rems(size), strength, look, cx));
+        }
+        // Room below, so the last lines can still rise to the centre.
+        children.push(div().h(relative(0.7)).flex_none().into_any_element());
         div()
+            .id("lyrics-scroll")
             .size_full()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .h(relative(CURRENT_AT))
-                    .flex_none()
-                    .overflow_hidden()
-                    .flex()
-                    .flex_col()
-                    .justify_end()
-                    .children(before),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_hidden()
-                    .flex()
-                    .flex_col()
-                    .children(after),
-            )
+            .track_scroll(&self.scroll)
+            .overflow_y_scroll()
+            .opacity(if shown { 1. } else { 0. })
+            .children(children)
             .into_any_element()
     }
 
@@ -367,7 +453,7 @@ impl LyricsPane {
 }
 
 impl Render for LyricsPane {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
         let (track, position_ms, playing) = {
             let player = self.player.read(cx);
@@ -448,7 +534,7 @@ impl Render for LyricsPane {
         let page = self.view == LyricsView::Page;
         let scale = if page { Scale::PAGE } else { Scale::PANEL };
         let body = match &lyrics {
-            Some(lyrics) => self.body(lyrics, current, scale, palette, cx),
+            Some(lyrics) => self.body(lyrics, current, scale, palette, window, cx),
             None => Self::note(palette, status(&self.state)).into_any_element(),
         };
         let close = components::icon_button(palette, "close-lyrics", CadenceIcon::Close)

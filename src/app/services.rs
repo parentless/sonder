@@ -32,6 +32,9 @@ pub(super) struct AppServices {
     /// Once the session has been ready, the main window is the listener's home
     /// and losing the session no longer tears it down.
     has_been_ready: bool,
+    /// Whether the lyrics view was open, kept so a window opened after the
+    /// last one closed comes back showing them.
+    lyrics_open: bool,
     /// Drains backend events for the whole process, not just for a window.
     event_pump: Option<gpui_kit::Task<()>>,
     library_refresh: Option<gpui_kit::Task<()>>,
@@ -73,6 +76,7 @@ impl AppServices {
             onboarding_window: None,
             last_connection_state: ConnectionState::Starting,
             has_been_ready: false,
+            lyrics_open: false,
             event_pump: None,
             library_refresh: None,
             lifecycle: InstanceLifecycle::isolated(),
@@ -176,6 +180,7 @@ impl AppServices {
             onboarding_window: None,
             last_connection_state: ConnectionState::Starting,
             has_been_ready: false,
+            lyrics_open: false,
             event_pump: None,
             library_refresh: None,
             lifecycle,
@@ -606,6 +611,14 @@ impl AppServices {
 
     pub(super) fn take_onboarding_window(cx: &mut App) -> Option<gpui_kit::AnyWindowHandle> {
         cx.global_mut::<Self>().onboarding_window.take()
+    }
+
+    pub(super) fn lyrics_open(cx: &App) -> bool {
+        cx.global::<Self>().lyrics_open
+    }
+
+    pub(super) fn set_lyrics_open(open: bool, cx: &mut App) {
+        cx.global_mut::<Self>().lyrics_open = open;
     }
 
     pub(super) fn has_been_ready(cx: &App) -> bool {
