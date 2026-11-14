@@ -965,7 +965,11 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             let popular = window.find("artist-popular-heading").bounds();
             let last_track = window.find(("spotify-track", 2usize)).bounds();
             assert!(popular.origin.y < last_track.origin.y);
-            if let Some(discography) = window.try_find("artist-discography-heading") {
+            // Five rows and the Show more button push Discography below the
+            // few-row spacing this checks, so that scene is checked on its own.
+            if matches!(scene, Scene::ArtistManyPopular) {
+                assert!(window.try_find("artist-popular-toggle").is_some());
+            } else if let Some(discography) = window.try_find("artist-discography-heading") {
                 let discography = discography.bounds();
                 assert!(discography.origin.y >= last_track.bottom());
                 assert!(
