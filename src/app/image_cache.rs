@@ -353,7 +353,21 @@ impl BoundedImageCache {
             .background_executor()
             .spawn(async move {
                 let _permit = workers.acquire_owned().await.map_err(artwork_error)?;
-                if let Some(uri) = uri {
+                if let Some(path) = uri
+                    .as_ref()
+                    .and_then(|uri| uri.strip_prefix(crate::local_files::ARTWORK_SCHEME))
+                {
+                    // A local file's embedded cover. Reading it again later is
+                    // cheap, so only the decoded picture is kept.
+                    let source = crate::local_files::embedded_artwork(std::path::Path::new(path))
+                        .filter(|bytes| bytes.len() <= super::http::MAX_IMAGE_DOWNLOAD_BYTES)
+                        .ok_or_else(|| artwork_error(anyhow::anyhow!("no embedded artwork")))?;
+                    let image = decode_artwork(&source, target)?;
+                    Ok(DecodedArtwork {
+                        image,
+                        source: None,
+                    })
+                } else if let Some(uri) = uri {
                     let source = if let Some(source) = encoded {
                         source
                     } else {

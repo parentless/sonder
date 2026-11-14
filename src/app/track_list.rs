@@ -373,6 +373,7 @@ impl TrackList {
             .filter(|album| album.source_id.is_some())
             .filter(|album| album.source_id != self.current_album_id);
         let track_url = format!("https://open.spotify.com/track/{}", track.source_id);
+        let local = track.is_local();
         let play_id = ("track-menu-play", index);
         let next_id = ("track-menu-next", index);
         let queue_id = ("track-menu-queue", index);
@@ -479,19 +480,37 @@ impl TrackList {
             } else {
                 components::disabled_text_menu_item(palette, queue_id, "Add to queue")
             })
-            .child(
-                components::text_menu_item(
-                    palette,
-                    ("track-menu-radio", index),
-                    "Start track radio",
+            .when(!local, |menu| {
+                menu.child(
+                    components::text_menu_item(
+                        palette,
+                        ("track-menu-radio", index),
+                        "Start track radio",
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.menu_open = None;
+                        cx.emit(PageEvent::StartRadio(radio_track.clone()));
+                        cx.notify();
+                    })),
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.menu_open = None;
-                    cx.emit(PageEvent::StartRadio(radio_track.clone()));
-                    cx.notify();
-                })),
-            )
+            })
             .child(separator())
+            .when(local, |menu| {
+                let path = std::path::PathBuf::from(&track.source_id);
+                menu.child(
+                    components::text_menu_item(
+                        palette,
+                        ("track-menu-reveal", index),
+                        SHOW_IN_FOLDER,
+                    )
+                    .test_support()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.menu_open = None;
+                        cx.reveal_path(&path);
+                        cx.notify();
+                    })),
+                )
+            })
             .when(track.provider == model::Provider::Spotify, |menu| {
                 let label = if spotify_like_busy {
                     "Updating Spotify library…"
@@ -524,7 +543,7 @@ impl TrackList {
                     )
                 }
             })
-            .child(separator())
+            .when(!local, |menu| menu.child(separator()))
             .when_some(artist, |menu, artist| {
                 menu.child(
                     components::text_menu_item(
@@ -547,34 +566,36 @@ impl TrackList {
                         })),
                 )
             })
-            .child(
-                components::text_menu_item(
-                    palette,
-                    ("track-menu-copy-link", index),
-                    "Copy Spotify link",
+            .when(!local, |menu| {
+                menu.child(
+                    components::text_menu_item(
+                        palette,
+                        ("track-menu-copy-link", index),
+                        "Copy Spotify link",
+                    )
+                    .test_support()
+                    .on_click(cx.listener({
+                        let url = track_url.clone();
+                        move |this, _, _, cx| {
+                            this.menu_open = None;
+                            cx.write_to_clipboard(super::ClipboardItem::new_string(url.clone()));
+                            cx.notify();
+                        }
+                    })),
                 )
-                .test_support()
-                .on_click(cx.listener({
-                    let url = track_url.clone();
-                    move |this, _, _, cx| {
+                .child(
+                    components::text_menu_item(
+                        palette,
+                        ("track-menu-spotify", index),
+                        "Open track in Spotify",
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
                         this.menu_open = None;
-                        cx.write_to_clipboard(super::ClipboardItem::new_string(url.clone()));
+                        cx.open_url(&track_url);
                         cx.notify();
-                    }
-                })),
-            )
-            .child(
-                components::text_menu_item(
-                    palette,
-                    ("track-menu-spotify", index),
-                    "Open track in Spotify",
+                    })),
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.menu_open = None;
-                    cx.open_url(&track_url);
-                    cx.notify();
-                })),
-            );
+            });
         if cx.reduce_motion() {
             menu.into_any_element()
         } else {
@@ -589,6 +610,12 @@ impl TrackList {
         }
     }
 }
+
+/// Opens the system file browser at a local track's file.
+#[cfg(target_os = "macos")]
+const SHOW_IN_FOLDER: &str = "Show in Finder";
+#[cfg(not(target_os = "macos"))]
+const SHOW_IN_FOLDER: &str = "Show in folder";
 
 impl Render for TrackList {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

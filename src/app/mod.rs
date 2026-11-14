@@ -286,6 +286,7 @@ enum Route {
     Home,
     LikedSongs,
     Recent,
+    LocalFiles,
     Search,
     Playlists,
     Playlist,

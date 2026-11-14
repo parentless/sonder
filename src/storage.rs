@@ -1,10 +1,16 @@
-use std::{path::Path, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use anyhow::{Context as _, Result};
 use directories::ProjectDirs;
 use rusqlite::{Connection, params};
 
-use crate::model::{CachedLibrary, LibraryFingerprint, Playlist, QueueItem, Track};
+use crate::{
+    local_files::IndexEntry,
+    model::{CachedLibrary, LibraryFingerprint, Playlist, QueueItem, Track},
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ThemePreference {
@@ -219,7 +225,7 @@ impl Store {
         let version: u32 = self
             .connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if version > 7 {
+        if version > 8 {
             anyhow::bail!("database schema version {version} is newer than this Sonder build");
         }
         if version < 4 {
@@ -246,6 +252,23 @@ impl Store {
             )?;
         } else if version < 7 {
             self.connection.execute_batch("PRAGMA user_version = 7;")?;
+        }
+        if version < 8 {
+            // What the last Local Files scan found. A row without a track is
+            // a file that could not be read, kept so it is not probed again
+            // until it changes.
+            self.connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE IF NOT EXISTS local_files (
+                     path TEXT PRIMARY KEY,
+                     modified_ms INTEGER NOT NULL,
+                     size INTEGER NOT NULL,
+                     sort_key TEXT NOT NULL,
+                     track_json TEXT
+                 );
+                 PRAGMA user_version = 8;
+                 COMMIT;",
+            )?;
         }
         Ok(())
     }
@@ -622,6 +645,76 @@ impl Store {
             &format!("album_review:{album_id}"),
             &serde_json::to_string(review)?,
         )
+    }
+
+    /// The folders Local Files reads, in the order they were added.
+    pub fn local_folders(&self) -> Result<Vec<PathBuf>> {
+        Ok(self
+            .preference("local_folders")?
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default())
+    }
+
+    pub fn set_local_folders(&mut self, folders: &[PathBuf]) -> Result<()> {
+        self.set_preference("local_folders", &serde_json::to_string(folders)?)
+    }
+
+    /// The saved Local Files index, in display order.
+    pub fn local_index(&self) -> Result<Vec<IndexEntry>> {
+        let mut statement = self.connection.prepare(
+            "SELECT path, modified_ms, size, sort_key, track_json
+             FROM local_files ORDER BY sort_key",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })?;
+        let mut entries = Vec::new();
+        for row in rows {
+            let (path, modified_ms, size, sort_key, track_json) = row?;
+            entries.push(IndexEntry {
+                path,
+                modified_ms,
+                size: u64::try_from(size).unwrap_or_default(),
+                sort_key,
+                // A row an older or newer build cannot parse is rescanned.
+                track: track_json.and_then(|json| serde_json::from_str(&json).ok()),
+            });
+        }
+        Ok(entries)
+    }
+
+    /// Replaces the saved index with a new scan's result.
+    pub fn replace_local_index(&mut self, entries: &[IndexEntry]) -> Result<()> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute("DELETE FROM local_files", [])?;
+        {
+            let mut insert = transaction.prepare(
+                "INSERT INTO local_files (path, modified_ms, size, sort_key, track_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for entry in entries {
+                let track_json = entry
+                    .track
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?;
+                insert.execute(params![
+                    entry.path,
+                    entry.modified_ms,
+                    i64::try_from(entry.size).unwrap_or(i64::MAX),
+                    entry.sort_key,
+                    track_json
+                ])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     fn preference(&self, key: &str) -> Result<Option<String>> {
@@ -1035,9 +1128,11 @@ const LIBRARY_FINGERPRINT_KEY: &str = "library_fingerprint";
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use gpui_kit::SharedString;
 
-    use super::{AppPreferences, Store, ThemePreference};
+    use super::{AppPreferences, IndexEntry, Store, ThemePreference};
     use crate::model::{LibraryFingerprint, Playlist, Provider, QueueItem, Track};
 
     fn track(id: &str) -> Track {
@@ -1396,6 +1491,35 @@ mod tests {
                 vec![track("next")]
             );
         }
+    }
+
+    #[test]
+    fn local_files_keep_their_folders_and_index_in_display_order() {
+        let mut store = Store::in_memory().unwrap();
+        assert!(store.local_folders().unwrap().is_empty());
+        let folders = vec![PathBuf::from("C:/Music"), PathBuf::from("D:/Rips")];
+        store.set_local_folders(&folders).unwrap();
+        assert_eq!(store.local_folders().unwrap(), folders);
+
+        let entry = |path: &str, sort_key: &str, track: Option<Track>| IndexEntry {
+            path: path.into(),
+            modified_ms: 1_700_000_000_000,
+            size: 4096,
+            sort_key: sort_key.into(),
+            track,
+        };
+        let mut local = track("C:/Music/b.mp3");
+        local.provider = crate::model::Provider::Local;
+        let entries = vec![
+            entry("C:/Music/b.mp3", "b", Some(local)),
+            entry("C:/Music/a.mp3", "a", None),
+        ];
+        store.replace_local_index(&entries).unwrap();
+        let saved = store.local_index().unwrap();
+        assert_eq!(saved, vec![entries[1].clone(), entries[0].clone()]);
+
+        store.replace_local_index(&entries[..1]).unwrap();
+        assert_eq!(store.local_index().unwrap(), entries[..1]);
     }
 
     #[test]

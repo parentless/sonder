@@ -47,6 +47,7 @@ needed. See [Windows setup](docs/WINDOWS.md) and [releasing](docs/RELEASING.md).
 
 - Search artists, tracks, and playlists in one request, with artists shown above tracks
 - Play music locally with queue, history, favorites, and radio
+- Play your own MP3, FLAC, Ogg, M4A, and WAV files under Local Files once you add their folders in Settings; nothing is scanned until you do. The list follows changes to those folders and can be searched
 - Browse native artist and album pages
 - Browse playlists in an expanded or compact icon sidebar, with tooltips, active-playlist selection, and recently opened playlists moving to the top
 - Add tracks to the front of the upcoming queue without interrupting playback

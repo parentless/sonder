@@ -32,6 +32,8 @@ pub(super) const TOOLBAR_HEIGHT: Rems = Rems(4.5);
 pub(super) const AVATAR_SIZE: Rems = Rems(2.5);
 pub(super) const SEARCH_FIELD_WIDTH: Rems = Rems(32.5);
 pub(super) const COMPACT_SEARCH_FIELD_WIDTH: Rems = Rems(21.25);
+/// A search field that narrows the list on its own page.
+pub(super) const PAGE_SEARCH_FIELD_WIDTH: Rems = Rems(15.);
 pub(super) const MENU_WIDTH: Rems = Rems(13.75);
 pub(super) const DIALOG_WIDTH: Rems = Rems(27.5);
 pub(super) const NOTICE_BANNER_WIDTH: Rems = Rems(22.5);

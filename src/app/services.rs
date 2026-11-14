@@ -184,6 +184,18 @@ impl AppServices {
         });
         Self::pump(events, cx);
         Self::poll_library(cx);
+        // Local Files costs nothing until a folder is added.
+        let local_folders = cx
+            .global::<Self>()
+            .store
+            .as_ref()
+            .and_then(|store| store.local_folders().ok())
+            .unwrap_or_default();
+        if !local_folders.is_empty() {
+            Self::library(cx).update(cx, |library, cx| {
+                library.open_local_files(local_folders, cx)
+            });
+        }
         release_watch::start(cx);
         handle
     }
@@ -431,6 +443,17 @@ impl AppServices {
             .store
             .as_mut()
             .map(|store| store.set_sidebar_collapsed(collapsed))
+    }
+
+    /// Saves the folders Local Files reads.
+    pub(super) fn set_local_folders(
+        folders: &[std::path::PathBuf],
+        cx: &mut App,
+    ) -> Option<anyhow::Result<()>> {
+        cx.global_mut::<Self>()
+            .store
+            .as_mut()
+            .map(|store| store.set_local_folders(folders))
     }
 
     pub(super) fn set_autoplay(autoplay: bool, cx: &mut App) -> Option<anyhow::Result<()>> {
