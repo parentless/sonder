@@ -170,28 +170,41 @@ fn from_entry(entry: &Entry) -> Lyrics {
     entry.plain.as_deref().map(parse_plain).unwrap_or_default()
 }
 
-fn client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+/// One client for the process, so skipping through songs reuses the open
+/// connection instead of setting up TLS for every lookup. It is built on the
+/// first lookup, never before.
+fn client() -> Result<&'static reqwest::Client> {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
         .use_rustls_tls()
         .user_agent(concat!("Sonder/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(Into::into)
+        .pool_idle_timeout(Duration::from_secs(30))
+        .build()?;
+    Ok(CLIENT.get_or_init(|| client))
 }
 
-async fn read_limited(response: reqwest::Response) -> Result<Vec<u8>> {
+/// Reads the body a chunk at a time and stops at the limit, so an answer with
+/// no stated length still cannot grow past it in memory.
+async fn read_limited(mut response: reqwest::Response) -> Result<Vec<u8>> {
     if response
         .content_length()
         .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
     {
         bail!("lyrics answer is too large");
     }
-    let bytes = response.bytes().await?;
-    if bytes.len() > MAX_RESPONSE_BYTES {
-        bail!("lyrics answer is too large");
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
+            bail!("lyrics answer is too large");
+        }
+        body.extend_from_slice(&chunk);
     }
-    Ok(bytes.to_vec())
+    Ok(body)
 }
 
 /// Looks a song up. An empty `Lyrics` means the service has none.

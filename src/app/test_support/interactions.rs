@@ -2126,21 +2126,21 @@ fn artist_tracks_scroll_into_virtualized_discography_and_albums_still_open() {
     });
     fixture.update(|window, _| {
         assert!(
-            window.find("artist-portrait").bounds().size.width
+            window.find("artist-dock-portrait").bounds().size.width
                 < gpui_kit::Rems(3.).to_pixels(window.rem_size()),
             "zoom must preserve the scrolled page instead of resetting to its header"
         );
     });
     let visible_album = fixture.update(|window, cx| {
         let top = crate::app::tokens::TOOLBAR_HEIGHT.to_pixels(window.rem_size());
-        let portrait = window.find("artist-portrait").bounds();
+        let portrait = window.find("artist-dock-portrait").bounds();
         let search = window.find("search-field").bounds();
         let account = window.find("account").bounds();
         assert!(
             (portrait.size.width - gpui_kit::Rems(2.).to_pixels(window.rem_size())).abs() < px(1.)
         );
         assert!(portrait.left() >= search.right());
-        assert!(window.find("artist-moving-name").bounds().right() <= account.left());
+        assert!(window.find("artist-dock-name").bounds().right() <= account.left());
         let index = (0usize..40)
             .find(|index| {
                 window
@@ -2217,7 +2217,7 @@ fn short_artist_pages_fully_dock_and_back_works_after_switching_artists() {
             );
         });
         fixture.update(|window, _| {
-            let portrait = window.find("artist-portrait").bounds();
+            let portrait = window.find("artist-dock-portrait").bounds();
             assert_eq!(
                 portrait.size.width,
                 gpui_kit::Rems(2.).to_pixels(window.rem_size()),
@@ -3219,13 +3219,13 @@ fn discography_cards_fit_the_available_width_at_narrow_and_wide_sizes() {
             );
         });
         fixture.update(|window, _| {
-            let portrait = window.find("artist-portrait").bounds();
+            let portrait = window.find("artist-dock-portrait").bounds();
             assert!(
                 portrait.left() >= window.find("search-field").bounds().right(),
                 "dock must not overlap search at any zoom or sidebar width"
             );
             assert!(
-                window.find("artist-moving-name").bounds().right()
+                window.find("artist-dock-name").bounds().right()
                     <= window.find("account").bounds().left()
             );
             let mut found = 0;

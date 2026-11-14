@@ -12,6 +12,8 @@ pub(super) struct ArtistHeader {
     pub viewport_width: Pixels,
     target: f32,
     current: f32,
+    /// How far the page has scrolled, in rems, up to the dock distance.
+    scrolled: f32,
     previous: Instant,
     changed: Instant,
 }
@@ -27,6 +29,7 @@ impl ArtistHeader {
             viewport_width: px(800.),
             target: 0.,
             current: 0.,
+            scrolled: 0.,
             previous: Instant::now(),
             changed: Instant::now(),
         }
@@ -39,9 +42,15 @@ impl ArtistHeader {
         } else {
             0.
         };
+        // The big identity scrolls with the page, so it follows the real offset.
+        let scrolled = offset.clamp(0., distance.max(0.));
+        let moved = (self.scrolled - scrolled).abs() > 0.005;
         if self.target != target {
             self.target = target;
             self.changed = Instant::now();
+        }
+        if moved || self.target != target {
+            self.scrolled = scrolled;
             cx.notify();
         }
     }
@@ -49,6 +58,7 @@ impl ArtistHeader {
     pub fn reset(&mut self, cx: &mut Context<Self>) {
         self.current = 0.;
         self.target = 0.;
+        self.scrolled = 0.;
         cx.notify();
     }
 }
@@ -70,6 +80,11 @@ impl ArtistHeader {
     }
 }
 
+fn smoothstep(from: f32, to: f32, value: f32) -> f32 {
+    let t = ((value - from) / (to - from)).clamp(0., 1.);
+    t * t * (3. - 2. * t)
+}
+
 impl Render for ArtistHeader {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let reduce_motion = cx.reduce_motion();
@@ -79,10 +94,12 @@ impl Render for ArtistHeader {
             window.on_next_frame(move |_, cx| cx.notify(view));
         }
         let p = self.current;
-        let t = if reduce_motion {
+        // The dock grows out of the search bar once the page has mostly
+        // scrolled; reduced motion shows it whole instead of growing it.
+        let grown = if reduce_motion {
             if p >= 1. { 1. } else { 0. }
         } else {
-            p * p * (3. - 2. * p)
+            1. - (1. - smoothstep(0.3, 1., p)).powi(4)
         };
         let rem = window.rem_size();
         let unit = |value: f32| Rems(value).to_pixels(rem);
@@ -92,69 +109,106 @@ impl Render for ArtistHeader {
         ));
         let x = end.origin.x - self.origin.x;
         let y = end.origin.y - self.origin.y;
-        let lerp = |a: Pixels, b: Pixels| a + (b - a) * t;
-        let side = 10. - 8. * t;
         let palette = appearance::Appearance::palette(cx);
-        // Reduced motion follows ordinary page scrolling, then snaps to the dock.
-        let source_scroll = if reduce_motion && p < 1. {
-            unit(p * 16.25)
-        } else {
-            px(0.)
-        };
-        let identity_opacity = if reduce_motion && p < 1. { 1. - p } else { 1. };
-        div()
-            .absolute()
-            .inset_0()
-            .size_full()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .h(tokens::TOOLBAR_HEIGHT)
-                    .bg(rgb(palette.surface).opacity(((p - 0.5) * 2.).clamp(0., 1.))),
-            )
-            .child(
-                div()
-                    .id("artist-portrait")
-                    .test_support()
-                    .absolute()
-                    .left(lerp(unit(2.), x))
-                    .top(lerp(unit(8.) - source_scroll, y))
-                    .opacity(identity_opacity)
-                    .child(components::artwork(
-                        palette,
-                        &self.cache,
-                        self.artwork.as_deref(),
-                        tokens::ArtworkSize {
-                            size: Rems(side),
-                            radius: Rems(1. - 0.5 * t),
-                        },
-                        CadenceIcon::Person,
-                    )),
-            )
-            .child(
-                div()
-                    .id("artist-moving-name")
-                    .test_support()
-                    .absolute()
-                    .left(lerp(unit(13.5), x + unit(2.5)))
-                    .top(lerp(unit(14.) - source_scroll, y + unit(0.25)))
-                    .opacity(identity_opacity)
-                    .w(lerp(
-                        (self.viewport_width - unit(15.5))
+        // The large identity is part of the page: it scrolls up with it and
+        // fades out as the dock takes over.
+        let hero_scroll = unit(self.scrolled);
+        let hero_opacity = 1. - smoothstep(0.25, 0.75, p);
+        let name_width = (end.size.width - unit(2.5)).max(unit(1.));
+        let mut header = div().absolute().inset_0().size_full().child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(tokens::TOOLBAR_HEIGHT)
+                .bg(rgb(palette.surface).opacity(((p - 0.5) * 2.).clamp(0., 1.))),
+        );
+        if hero_opacity > 0. {
+            header = header
+                .child(
+                    div()
+                        .id("artist-portrait")
+                        .test_support()
+                        .absolute()
+                        .left(unit(2.))
+                        .top(unit(8.) - hero_scroll)
+                        .opacity(hero_opacity)
+                        .child(components::artwork(
+                            palette,
+                            &self.cache,
+                            self.artwork.as_deref(),
+                            tokens::ArtworkSize {
+                                size: Rems(10.),
+                                radius: Rems(1.),
+                            },
+                            CadenceIcon::Person,
+                        )),
+                )
+                .child(
+                    div()
+                        .id("artist-moving-name")
+                        .test_support()
+                        .absolute()
+                        .left(unit(13.5))
+                        .top(unit(14.) - hero_scroll)
+                        .opacity(hero_opacity)
+                        .w((self.viewport_width - unit(15.5))
                             .max(unit(1.))
-                            .min(unit(30.)),
-                        (end.size.width - unit(2.5)).max(unit(1.)),
-                    ))
-                    .truncate()
-                    .text_size(px((40. - 26. * t).round()) * (rem / px(16.)))
-                    .line_height(unit(2.75 - 1.25 * t))
-                    .font_weight(gpui_kit::FontWeight::MEDIUM)
-                    .text_color(rgb(palette.text_primary))
-                    .child(self.name.clone()),
-            )
+                            .min(unit(30.)))
+                        .truncate()
+                        .text_size(px(40.) * (rem / px(16.)))
+                        .line_height(unit(2.75))
+                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                        .text_color(rgb(palette.text_primary))
+                        .child(self.name.clone()),
+                );
+        }
+        if grown > 0. {
+            header = header
+                .child(
+                    div()
+                        .id("artist-dock-portrait")
+                        .test_support()
+                        .absolute()
+                        .left(x - unit(0.75) * (1. - grown))
+                        .top(y)
+                        .opacity(grown)
+                        .child(components::artwork(
+                            palette,
+                            &self.cache,
+                            self.artwork.as_deref(),
+                            tokens::ArtworkSize {
+                                size: Rems(2.),
+                                radius: Rems(0.5),
+                            },
+                            CadenceIcon::Person,
+                        )),
+                )
+                .child(
+                    // The name is uncovered from the left as the chip grows,
+                    // so it is never squeezed or re-wrapped on the way.
+                    div()
+                        .id("artist-dock-name")
+                        .test_support()
+                        .absolute()
+                        .left(x + unit(2.5))
+                        .top(y + unit(0.25))
+                        .w(name_width * grown)
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .w(name_width)
+                                .truncate()
+                                .text_size(px(14.) * (rem / px(16.)))
+                                .line_height(unit(1.5))
+                                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                .text_color(rgb(palette.text_primary))
+                                .child(self.name.clone()),
+                        ),
+                );
+        }
+        header
     }
 }
 

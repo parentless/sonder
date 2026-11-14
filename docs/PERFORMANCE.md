@@ -370,5 +370,13 @@ once per frame, and not at all while paused. A line change glides the column
 to the new line over 380 ms; frames are requested only during that glide and
 stop once it settles (reduced motion snaps instead). Up to 300 lines are built
 as plain text rows. Unsynced lyrics are a plain scrolling list. Responses
-are limited to 512 KiB. These are code bounds and tests, not a Windows
+are limited to 512 KiB, enforced while reading so an answer with no stated length cannot outgrow it. One HTTP client is built on the first lookup and reused, so skipping songs keeps the connection open. During a line change only the line leaving and the line arriving change size, so the other lines keep their cached text layout. These are code bounds and tests, not a Windows
 working-set measurement of the app.
+
+## Artist header
+
+The big artist name and cover scroll with the page and fade out; the small
+name and cover in the toolbar are only built once the page has mostly scrolled,
+and are revealed by clipping rather than resizing, so nothing re-wraps on the
+way. The header redraws only while the first 16 rem of the page scroll, and
+asks for frames only while its short smoothing settles.
