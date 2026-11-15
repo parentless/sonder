@@ -4983,3 +4983,49 @@ fn popular_songs_stop_at_five_until_show_more_is_pressed() {
     });
     fixture.no_commands();
 }
+
+/// A window opened for an install that has never run Sonder.
+fn first_launch_fixture() -> Fixture {
+    let mut cx = HeadlessAppContext::with_asset_source(
+        Arc::new(NoopTextSystem),
+        Arc::new(assets::CadenceAssets),
+    );
+    let backend = cx.update(|cx| initialize(cx, ThemePreference::Dark));
+    cx.update(|cx| services::AppServices::set_launch_intro_pending(true, cx));
+    let (window, workspace) = workspace(&mut cx, 1280., 820.);
+    settle(&mut cx, window.into());
+    Fixture {
+        cx,
+        window,
+        workspace: Some(workspace.downgrade()),
+        backend,
+    }
+}
+
+#[test]
+fn the_launch_intro_covers_a_first_launch_once_and_escape_skips_it() {
+    let mut fixture = first_launch_fixture();
+    fixture.update(|window, _| assert!(window.try_find("launch-intro").is_some()));
+    // It is claimed by this window: no other window (or relaunch) gets it.
+    fixture.update(|_, cx| assert!(!services::AppServices::take_launch_intro(cx)));
+    fixture.press("escape");
+    fixture.update(|_, _| {});
+    fixture.update(|window, _| assert!(window.try_find("launch-intro").is_none()));
+}
+
+#[test]
+fn a_launch_that_is_not_the_first_never_shows_the_intro() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|window, _| assert!(window.try_find("launch-intro").is_none()));
+}
+
+#[test]
+fn a_click_skips_the_launch_intro_and_does_not_reach_the_page_beneath() {
+    let mut fixture = first_launch_fixture();
+    let route = fixture.route();
+    fixture.update(|window, cx| window.click("launch-intro", cx));
+    fixture.update(|_, _| {});
+    fixture.update(|window, _| assert!(window.try_find("launch-intro").is_none()));
+    // The click skipped the intro; it did not also open anything behind it.
+    assert_eq!(fixture.route(), route);
+}

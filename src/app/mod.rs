@@ -366,6 +366,7 @@ mod components;
 mod events;
 mod fonts;
 mod icons;
+mod launch_intro;
 mod library;
 mod library_pages;
 mod lyrics_view;

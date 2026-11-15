@@ -32,6 +32,8 @@ pub(super) struct Workspace {
     pub(super) queue_drawer: Entity<player_bar::QueueDrawer>,
     pub(super) lyrics: Entity<lyrics_view::LyricsPane>,
     pub(super) focus_handle: FocusHandle,
+    /// The first-launch intro, while it plays over the window.
+    pub(super) intro: Option<Entity<launch_intro::LaunchIntro>>,
     wheel_scroll: Rc<std::cell::RefCell<smooth_scroll::WheelScroll>>,
     wheel_route: Option<Route>,
     _subscriptions: Vec<Subscription>,
@@ -311,8 +313,21 @@ impl Workspace {
                 this.close_queue(cx);
             },
         ));
+        // Owed only on the very first launch; it is recorded as played here.
+        // Reduced motion gets no intro at all rather than a lesser one.
+        let intro = (services::AppServices::take_launch_intro(cx) && !cx.reduce_motion())
+            .then(|| cx.new(launch_intro::LaunchIntro::new));
+        if let Some(intro) = &intro {
+            subscriptions.push(
+                cx.subscribe(intro, |this, _, _: &launch_intro::IntroDone, cx| {
+                    this.intro = None;
+                    cx.notify();
+                }),
+            );
+        }
         Self {
             router: Router::new(),
+            intro,
             last_error: None,
             action_notice: None,
             radio_request_id: 0,
@@ -647,6 +662,7 @@ impl Render for Workspace {
                 root.child(self.lyrics.clone())
             })
             .child(self.player_bar.clone())
+            .when_some(self.intro.clone(), |root, intro| root.child(intro))
             .when_some(scrim, |root, scrim| root.child(deferred(scrim)))
             .when_some(action_notice, |root, notice| root.child(notice))
             .when_some(playback_help, |root, dialog| root.child(deferred(dialog)))

@@ -40,6 +40,9 @@ pub(super) struct AppServices {
     library_refresh: Option<gpui_kit::Task<()>>,
     lifecycle: Arc<InstanceLifecycle>,
     store: Option<Store>,
+    /// Whether the first-launch intro is still owed. Set at startup for an
+    /// install that has never run Sonder and cleared when it is played.
+    launch_intro_pending: bool,
     /// The live preference values, so a window opened later starts from what
     /// the listener last chose rather than from what was on disk at launch.
     preferences: AppPreferences,
@@ -81,6 +84,7 @@ impl AppServices {
             library_refresh: None,
             lifecycle: InstanceLifecycle::isolated(),
             store: Some(Store::in_memory().expect("in-memory settings")),
+            launch_intro_pending: false,
             preferences,
         });
     }
@@ -185,6 +189,7 @@ impl AppServices {
             library_refresh: None,
             lifecycle,
             store,
+            launch_intro_pending: false,
             preferences,
         });
         Self::pump(events, cx);
@@ -400,6 +405,27 @@ impl AppServices {
     /// to the front.
     pub(super) fn activations(cx: &App) -> async_channel::Receiver<()> {
         cx.global::<Self>().lifecycle.activation_receiver()
+    }
+
+    /// Notes whether the first-launch intro is owed (startup only).
+    pub(super) fn set_launch_intro_pending(pending: bool, cx: &mut App) {
+        cx.global_mut::<Self>().launch_intro_pending = pending;
+    }
+
+    /// Claims the first-launch intro: true exactly once for an install that
+    /// has never run Sonder. It is recorded as played before it starts, so
+    /// quitting part-way never repeats it.
+    pub(super) fn take_launch_intro(cx: &mut App) -> bool {
+        let services = cx.global_mut::<Self>();
+        if !std::mem::take(&mut services.launch_intro_pending) {
+            return false;
+        }
+        if let Some(store) = services.store.as_mut()
+            && let Err(error) = store.mark_launch_intro_done()
+        {
+            log::warn!("could not record the launch intro: {error:#}");
+        }
+        true
     }
 
     pub(super) fn preferences(cx: &App) -> AppPreferences {

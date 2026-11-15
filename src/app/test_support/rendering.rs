@@ -34,6 +34,9 @@ enum Scene {
     ArtistManyPopular,
     ArtistYours,
     HomeMenu,
+    IntroGlow,
+    IntroClick,
+    IntroOpen,
     ArtistLandscape,
     ArtistZoomLarge,
     Settings,
@@ -109,6 +112,9 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("home", Scene::Home),
         ("home-permission", Scene::HomePermission),
         ("home-range-menu", Scene::HomeMenu),
+        ("launch-intro-glow", Scene::IntroGlow),
+        ("launch-intro-click", Scene::IntroClick),
+        ("launch-intro-open", Scene::IntroOpen),
         ("search-entered", Scene::SearchEntered),
         ("search-live", Scene::SearchLive),
         ("search-empty", Scene::SearchEmpty),
@@ -280,7 +286,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                                         artwork_url: Some(url.into()),
                                     },
                                     if matches!(scene, Scene::ArtistManyPopular) { (0..10).map(track).collect() } else { vec![track(0), track(1), track(2)] },
-                                    model::ArtistAlbumPage { albums: (0..if matches!(scene, Scene::ArtistPageLoading | Scene::ArtistPageFailure) { 10 } else { 20 })
+                                    model::ArtistAlbumPage { albums: (0..match scene { Scene::ArtistPageLoading => 8, Scene::ArtistPageFailure => 10, _ => 20 })
                                         .map(|index| model::Album {
                                             provider: model::Provider::Spotify,
                                             source_id: format!("fixture-album-{index}"),
@@ -291,7 +297,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                                             artwork_url: Some(url.into()),
                                             track_count: Some(10),
                                         })
-                                        .collect(), next_offset: matches!(scene, Scene::ArtistPageLoading | Scene::ArtistPageFailure).then_some(10), total: 20 },
+                                        .collect(), next_offset: match scene { Scene::ArtistPageLoading => Some(8), Scene::ArtistPageFailure => Some(10), _ => None }, total: 20 },
                                 )))
                                 .expect("artist fixture reply");
                         }
@@ -382,7 +388,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     let BackendCommand::SearchCatalog { respond, .. } = backend.commands.try_recv().unwrap() else { panic!("search request") };
                     respond.send(Ok(super::gallery_results())).unwrap();
                 }
-                Scene::Home | Scene::HomePermission | Scene::HomeMenu => {
+                Scene::Home | Scene::HomePermission | Scene::HomeMenu | Scene::IntroGlow | Scene::IntroClick | Scene::IntroOpen => {
                     workspace.navigate(Route::Home, cx);
                     let BackendCommand::LoadHome { respond, .. } = backend.commands.try_recv().unwrap() else { panic!("home request") };
                     let BackendCommand::LoadNewReleases { respond: releases } = backend.commands.try_recv().unwrap() else { panic!("new releases request") };
@@ -413,6 +419,16 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                         crate::app::top_listening::TopListening::existing(cx).update(cx, |top, cx| top.seed(model::HomeRange::AllTime, all_time, Vec::new(), cx));
                         if matches!(scene, Scene::HomeMenu) {
                             workspace.home.update(cx, |home, cx| home.open_range_menu(cx));
+                        }
+                        // The first-launch intro, held at one moment of its 2.3 s.
+                        let intro_at = match scene {
+                            Scene::IntroGlow => Some(600. / 2300.),
+                            Scene::IntroClick => Some(1130. / 2300.),
+                            Scene::IntroOpen => Some(1550. / 2300.),
+                            _ => None,
+                        };
+                        if let Some(progress) = intro_at {
+                            workspace.intro = Some(cx.new(|_| launch_intro::LaunchIntro::frozen(progress)));
                         }
                     }
                 }
@@ -669,7 +685,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 settle(&mut cx, handle.into());
             }
             let BackendCommand::LoadArtistAlbums {
-                offset: 10,
+                offset: 8 | 10,
                 respond,
                 ..
             } = backend

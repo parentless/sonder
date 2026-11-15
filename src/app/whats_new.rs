@@ -44,6 +44,19 @@ const MONTHS: &[Month] = &[
                 date: "Nov 14, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.45",
+                        notes: &[
+                            Note(
+                                New,
+                                "A short intro plays the very first time you open Sonder: a glow lands on the icon and opens into the app. Click or press Escape to skip it.",
+                            ),
+                            Note(
+                                Fixed,
+                                "Album placeholders on artist pages now fill the rest of a half-empty row before starting a new one.",
+                            ),
+                        ],
+                    },
+                    Release {
                         version: "0.8.44",
                         notes: &[
                             Note(

@@ -15,7 +15,12 @@ pub(super) fn run() {
             return;
         }
     };
-    let preferences_store = Store::open_default().ok();
+    let mut preferences_store = Store::open_default().ok();
+    // Decided before anything else writes a setting: only an install that has
+    // never run Sonder gets the first-launch intro.
+    let launch_intro_pending = preferences_store
+        .as_mut()
+        .is_some_and(|store| store.launch_intro_pending().unwrap_or(false));
     let preferences = preferences_store
         .as_ref()
         .and_then(|store| store.preferences().ok())
@@ -48,6 +53,7 @@ pub(super) fn run() {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &CheckForUpdates, cx| updater::check_for_updates(cx));
         services::AppServices::init(cx, lifecycle, preferences_store, preferences);
+        services::AppServices::set_launch_intro_pending(launch_intro_pending, cx);
         #[cfg(target_os = "windows")]
         tray_host::apply(preferences.keep_in_tray, cx);
         // Keep the login entry pointing at this executable, e.g. after a move.

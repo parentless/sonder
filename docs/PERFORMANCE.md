@@ -402,3 +402,9 @@ closes. The panel redraws only when the seconds left change.
 - **Album placeholders** on artist pages are static blocks in a fixed-height footer, so the list never re-measures as pages load.
 - **Queue saves:** skipping within an unchanged queue writes two tiny preference rows (index, position). The full queue is rewritten only when it changes, found by comparing one 64-bit hash per song. The 5-second position save no longer touches the queue row.
 - **Caches:** the image cache moves a used cover to the back without cloning or a full scan. The artwork disk cache refreshes a file's modified time at most once a day on use, so eviction drops what is least recently used.
+
+## First-launch intro
+
+- **Plays once, ever.** `Store::launch_intro_pending` marks a database with no settings as a new install and everything else as already done, so an update never shows it. It is recorded as played the moment the main window claims it, so quitting part-way never repeats it.
+- **Cheap while it runs.** It is its own view, so only about 25 plain elements are rebuilt per frame, not the workspace. Glows are box shadows, with no images or shaders added. It lasts 2.3 s.
+- **Free afterwards.** The view is dropped when it ends, on a click, or on Escape; nothing keeps running. Reduced motion skips it entirely.

@@ -1120,8 +1120,15 @@ impl ArtistPage {
         for album_index in start..end {
             cards = cards.child(self.album_card(&self.albums[album_index], album_index, cx));
         }
+        // The last row's empty slots are where the next releases will land:
+        // while they load, those slots show placeholders too.
+        let loading_more = self.album_request.is_some();
         for _ in end..start + columns {
-            cards = cards.child(div().w(tokens::ALBUM_CARD_ARTWORK.size + Rems(1.)));
+            cards = cards.child(if loading_more {
+                album_skeleton_card(appearance::Appearance::palette(cx))
+            } else {
+                div().w(tokens::ALBUM_CARD_ARTWORK.size + Rems(1.))
+            });
         }
         cards.into_any_element()
     }
@@ -2277,9 +2284,9 @@ impl Render for PlaylistPage {
     }
 }
 
-/// Placeholder cards with the footprint of `album_card`, so releases replace
-/// them without moving anything. Static: no animation to run while loading.
-fn album_skeleton_row(palette: CadencePalette, columns: usize) -> impl IntoElement {
+/// A placeholder with the footprint of `album_card`, so a release replaces it
+/// without moving anything. Static: no animation to run while loading.
+fn album_skeleton_card(palette: CadencePalette) -> Div {
     let bar = |width: Rems, height: Rems| {
         div()
             .w(width)
@@ -2287,27 +2294,30 @@ fn album_skeleton_row(palette: CadencePalette, columns: usize) -> impl IntoEleme
             .rounded_md()
             .bg(rgb(palette.control))
     };
+    div()
+        .w(tokens::ALBUM_CARD_ARTWORK.size + Rems(1.))
+        .flex_none()
+        .p_2()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap_2p5()
+        .child(
+            div()
+                .w(tokens::ALBUM_CARD_ARTWORK.size)
+                .h(tokens::ALBUM_CARD_ARTWORK.size)
+                .rounded(tokens::ALBUM_CARD_ARTWORK.radius)
+                .bg(rgb(palette.control)),
+        )
+        .child(bar(Rems(7.), Rems(0.9)))
+        .child(bar(Rems(3.), Rems(0.75)))
+}
+
+/// A full row of placeholders for the releases still to come.
+fn album_skeleton_row(palette: CadencePalette, columns: usize) -> impl IntoElement {
     let mut row = div().w_full().flex().items_start().gap_2();
     for _ in 0..columns.max(1) {
-        row = row.child(
-            div()
-                .w(tokens::ALBUM_CARD_ARTWORK.size + Rems(1.))
-                .flex_none()
-                .p_2()
-                .flex()
-                .flex_col()
-                .items_start()
-                .gap_2p5()
-                .child(
-                    div()
-                        .w(tokens::ALBUM_CARD_ARTWORK.size)
-                        .h(tokens::ALBUM_CARD_ARTWORK.size)
-                        .rounded(tokens::ALBUM_CARD_ARTWORK.radius)
-                        .bg(rgb(palette.control)),
-                )
-                .child(bar(Rems(7.), Rems(0.9)))
-                .child(bar(Rems(3.), Rems(0.75))),
-        );
+        row = row.child(album_skeleton_card(palette));
     }
     row
 }
