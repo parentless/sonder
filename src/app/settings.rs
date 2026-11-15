@@ -449,6 +449,7 @@ impl Settings {
                                             window,
                                             cx,
                                             Switch::new("settings-autoplay")
+.cursor_pointer()
                                                 .focus_ring(false)
                                                 .checked(autoplay)
                                                 .on_click(cx.listener(
@@ -503,6 +504,7 @@ impl Settings {
                                                     window,
                                                     cx,
                                                     Switch::new("settings-normalise-volume")
+.cursor_pointer()
                                                         .focus_ring(false)
                                                         .checked(normalise_volume)
                                                         .on_click(cx.listener(
@@ -534,6 +536,7 @@ impl Settings {
                                                         window,
                                                         cx,
                                                         Switch::new("settings-keep-in-tray")
+.cursor_pointer()
                                                             .focus_ring(false)
                                                             .checked(keep_in_tray)
                                                             .on_click(cx.listener(
@@ -563,6 +566,7 @@ impl Settings {
                                                                 window,
                                                                 cx,
                                                                 Switch::new("settings-open-on-startup")
+.cursor_pointer()
                                                                     .focus_ring(false)
                                                                     .checked(launch_at_login)
                                                                     .on_click(cx.listener(
@@ -897,7 +901,8 @@ impl Settings {
                 .child(Self::playback_setting_row(palette, "Scrobble to Last.fm",
                     if config.connected() { "Plays after half the track or four minutes. Retries when offline." } else { "Connect an account below to turn this on." },
                     components::focus_ring_around(palette, &self.lastfm_focus, window, cx,
-                        Switch::new("settings-lastfm-enabled").focus_ring(false).checked(config.enabled)
+                        Switch::new("settings-lastfm-enabled")
+.cursor_pointer().focus_ring(false).checked(config.enabled)
                             .on_click(cx.listener(|this, enabled: &bool, _, cx| this.set_lastfm_enabled(*enabled, cx))))))
                 .child(if config.connected() {
                     div().mt_5().pt_5().border_t_1().border_color(rgb(palette.border))
@@ -934,7 +939,8 @@ impl Settings {
                 .bg(rgb(palette.surface_raised)).p_5()
                 .child(Self::playback_setting_row(palette, "Share listening activity", "Requires Discord desktop. Activity clears while paused or signed out.",
                     components::focus_ring_around(palette, &self.discord_focus, window, cx,
-                        Switch::new("settings-discord-enabled").focus_ring(false).checked(enabled)
+                        Switch::new("settings-discord-enabled")
+.cursor_pointer().focus_ring(false).checked(enabled)
                             .on_click(cx.listener(|this, enabled: &bool, _, cx| this.save_discord(*enabled, cx))))))
                 .child(div().mt_5().pt_5().border_t_1().border_color(rgb(palette.border))
                     .child(div().text_xs().text_color(rgb(palette.text)).child("Discord Application ID"))
@@ -992,6 +998,7 @@ impl Settings {
                                         window,
                                         cx,
                                         Switch::new("settings-automatic-install")
+.cursor_pointer()
                                             .focus_ring(false)
                                             .checked(enabled)
                                             .on_click(cx.listener(|_, checked: &bool, _, cx| {
@@ -1035,6 +1042,7 @@ impl Settings {
                                         window,
                                         cx,
                                         Switch::new("settings-automatic-updates")
+.cursor_pointer()
                                             .focus_ring(false)
                                             .checked(enabled)
                                             .on_click(cx.listener(|_, checked: &bool, _, cx| {

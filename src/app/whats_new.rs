@@ -41,6 +41,22 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 15, 2026",
+                releases: &[Release {
+                    version: "0.8.48",
+                    notes: &[
+                        Note(
+                            Fixed,
+                            "Buttons, cards, rows and sliders now show the hand cursor when you hover them, so it is clear what you can click.",
+                        ),
+                        Note(
+                            Better,
+                            "The volume slider is cleaner: the dot only appears while you hover or drag the line, and it no longer has a border.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
                 date: "Nov 14, 2026",
                 releases: &[
                     Release {

@@ -17,6 +17,7 @@ fn keyboard_control(element: Stateful<Div>) -> Stateful<Div> {
     element
         .focusable()
         .tab_stop(true)
+        .cursor_pointer()
         .key_context(CONTROL_KEY_CONTEXT)
         .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
             window.prevent_default();

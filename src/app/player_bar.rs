@@ -134,6 +134,7 @@ impl PlayerBar {
     ) -> gpui_kit::base::Button {
         gpui_kit::base::Button::new("lyrics-toggle")
             .key_context(CONTROL_KEY_CONTEXT)
+            .cursor_pointer()
             .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
                 // A click must not leave this button holding focus: Space then
                 // belongs to playback.
@@ -169,6 +170,7 @@ impl PlayerBar {
     ) -> gpui_kit::base::Button {
         gpui_kit::base::Button::new("queue-toggle")
             .key_context(CONTROL_KEY_CONTEXT)
+            .cursor_pointer()
             .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
                 // A click must not leave this button holding focus: Space then
                 // belongs to playback.
@@ -223,6 +225,7 @@ impl PlayerBar {
                 cx.notify();
             }
         });
+        let volume_dragging = self.player.read(cx).volume_dragging();
         let volume_thumb_left = (VOLUME_SLIDER_WIDTH - VOLUME_THUMB_SIZE) * volume;
         let volume_thumb_top = (VOLUME_TRACK_HEIGHT - VOLUME_THUMB_SIZE) / 2.;
         let duration = SharedString::from(now_playing.as_deref().map_or_else(
@@ -386,7 +389,9 @@ impl PlayerBar {
                         controls.child(
                             div()
                                 .id("volume-slider")
+                                .group("volume-slider")
                                 .test_support()
+                                .cursor_pointer()
                                 .w(VOLUME_SLIDER_WIDTH)
                                 .h_6()
                                 .flex()
@@ -427,8 +432,13 @@ impl PlayerBar {
                                                 .size(VOLUME_THUMB_SIZE)
                                                 .rounded_full()
                                                 .bg(rgb(palette.text_primary))
-                                                .border_2()
-                                                .border_color(rgb(palette.surface)),
+                                                // Only the line shows at rest; the dot
+                                                // appears while the slider is hovered
+                                                // or being dragged.
+                                                .opacity(if volume_dragging { 1. } else { 0. })
+                                                .group_hover("volume-slider", |style| {
+                                                    style.opacity(1.)
+                                                }),
                                         ),
                                 ),
                         )
@@ -839,6 +849,7 @@ impl PlayerBar {
                 }))
                 .when(seekable, |scrubber| {
                     scrubber
+                        .cursor_pointer()
                         .on_drag(scrubber::ScrubberDrag, |_, _, _, cx| {
                             cx.new(|_| scrubber::NoDragPreview)
                         })
