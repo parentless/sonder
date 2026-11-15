@@ -596,6 +596,13 @@ pub(super) struct ArtistPage {
     /// The popular rows on screen: the first few until "Show more" is pressed.
     popular_view: Arc<[model::Track]>,
     popular_expanded: bool,
+    /// The listener's own songs by this artist and their rank in the charts.
+    listening: Entity<top_listening::TopListening>,
+    yours: Arc<[model::Track]>,
+    your_rank: Option<(usize, model::HomeRange)>,
+    /// The "You" tab is selected (only offered for artists the listener plays or likes).
+    showing_yours: bool,
+    _listening_subscription: Subscription,
     albums: Vec<model::Album>,
     album_ids: HashSet<String>,
     next_album_offset: Option<u32>,
@@ -623,6 +630,7 @@ impl ArtistPage {
     pub(super) fn new(backend: BackendHandle, cx: &mut Context<Self>) -> Self {
         let track_list = cx.new(|cx| TrackList::new(cx).with_inline_rows());
         let header_motion = cx.new(|cx| artist_header::ArtistHeader::new(cx));
+        let listening = top_listening::TopListening::shared(&backend, cx);
         let content_state = gpui_kit::ListState::new(0, gpui_kit::ListAlignment::Top, px(256.));
         content_state.set_scroll_handler({
             let page = cx.weak_entity();
@@ -648,6 +656,11 @@ impl ArtistPage {
             tracks: Arc::default(),
             popular_view: Arc::default(),
             popular_expanded: false,
+            _listening_subscription: cx.observe(&listening, |this, _, cx| this.refresh_yours(cx)),
+            listening,
+            yours: Arc::default(),
+            your_rank: None,
+            showing_yours: false,
             albums: Vec::new(),
             album_ids: HashSet::new(),
             next_album_offset: None,
@@ -699,6 +712,9 @@ impl ArtistPage {
             self.tracks = Arc::default();
             self.popular_view = Arc::default();
             self.popular_expanded = false;
+            self.yours = Arc::default();
+            self.your_rank = None;
+            self.showing_yours = false;
             self.albums = Vec::new();
             self.album_ids = HashSet::new();
             self.next_album_offset = None;
@@ -744,6 +760,7 @@ impl ArtistPage {
                             });
                             page.artist = Some(artist);
                             page.tracks = tracks.into();
+                            page.refresh_yours(cx);
                             page.refresh_popular_view();
                             page.albums = Vec::new();
                             page.album_ids = HashSet::new();
@@ -783,6 +800,9 @@ impl ArtistPage {
         self.tracks = Arc::default();
         self.popular_view = Arc::default();
         self.popular_expanded = false;
+        self.yours = Arc::default();
+        self.your_rank = None;
+        self.showing_yours = false;
         self.albums = Vec::new();
         self.album_ids = HashSet::new();
         self.next_album_offset = None;
@@ -1087,11 +1107,108 @@ impl ArtistPage {
     /// Rebuilds the rows on screen. Runs when tracks arrive or the toggle is
     /// pressed, never per frame, so the list sees one stable `Arc`.
     fn refresh_popular_view(&mut self) {
-        self.popular_view = if self.popular_expanded || self.tracks.len() <= POPULAR_COLLAPSED {
-            self.tracks.clone()
+        let shown = self.shown_tracks().clone();
+        self.popular_view = if self.popular_expanded || shown.len() <= POPULAR_COLLAPSED {
+            shown
         } else {
-            self.tracks[..POPULAR_COLLAPSED].into()
+            shown[..POPULAR_COLLAPSED].into()
         };
+    }
+
+    /// The songs the list is showing: everyone's popular ones, or the listener's.
+    fn shown_tracks(&self) -> &Arc<[model::Track]> {
+        if self.showing_yours {
+            &self.yours
+        } else {
+            &self.tracks
+        }
+    }
+
+    /// Whether this is an artist the listener plays or likes, so the "You" tab
+    /// is worth offering.
+    fn offers_yours(&self) -> bool {
+        self.your_rank.is_some() || !self.yours.is_empty()
+    }
+
+    /// Looks the artist up in the charts already in memory. No request is made.
+    fn refresh_yours(&mut self, cx: &mut Context<Self>) {
+        let Some(artist_id) = self
+            .reference
+            .as_ref()
+            .and_then(|artist| artist.source_id.clone())
+        else {
+            return;
+        };
+        let liked = services::AppServices::library(cx)
+            .read(cx)
+            .favorites()
+            .clone();
+        let yours = self.listening.read(cx).yours(&artist_id, &liked);
+        if yours.tracks == self.yours && yours.artist_rank == self.your_rank {
+            return;
+        }
+        self.yours = yours.tracks;
+        self.your_rank = yours.artist_rank;
+        if !self.offers_yours() {
+            self.showing_yours = false;
+        }
+        self.refresh_popular_view();
+        self.remeasure_popular();
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub(super) fn select_yours(&mut self, cx: &mut Context<Self>) {
+        self.showing_yours = true;
+        cx.notify();
+    }
+
+    /// Item 0 holds the popular rows, so re-measure only it.
+    fn remeasure_popular(&self) {
+        if self.content_state.item_count() > 0 {
+            self.content_state.splice(0..1, 1);
+        }
+    }
+
+    /// Everyone's popular songs, or the listener's own.
+    fn popular_tabs(&self, cx: &mut Context<Self>) -> Div {
+        let palette = appearance::Appearance::palette(cx);
+        let tab = |id: &'static str, label: &'static str, yours: bool| {
+            let selected = self.showing_yours == yours;
+            components::bare_button(id)
+                .test_support()
+                .px_3()
+                .py_1()
+                .rounded_full()
+                .text_size(tokens::BODY_TEXT)
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .when(selected, |tab| {
+                    tab.bg(rgb(palette.text_primary))
+                        .text_color(rgb(palette.canvas))
+                })
+                .when(!selected, |tab| {
+                    tab.text_color(rgb(palette.text_muted))
+                        .hover(|style| style.text_color(rgb(palette.text_primary)))
+                })
+                .child(label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if this.showing_yours != yours {
+                        this.showing_yours = yours;
+                        this.popular_expanded = false;
+                        this.refresh_popular_view();
+                        this.remeasure_popular();
+                        cx.notify();
+                    }
+                }))
+        };
+        div()
+            .flex()
+            .items_center()
+            .p_0p5()
+            .rounded_full()
+            .bg(rgb(palette.control))
+            .child(tab("artist-popular-everyone", "Everyone", false))
+            .child(tab("artist-popular-yours", "You", true))
     }
 
     fn popular(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1110,20 +1227,31 @@ impl ArtistPage {
             .flex()
             .flex_col()
             .gap_3()
-            .child(heading("artist-popular-heading", "Popular"))
-            .when(self.tracks.is_empty(), |section| {
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(heading("artist-popular-heading", "Popular"))
+                    .when(self.offers_yours(), |row| row.child(self.popular_tabs(cx))),
+            )
+            .when(self.shown_tracks().is_empty(), |section| {
                 section.child(components::page_detail(
                     appearance::Appearance::palette(cx),
-                    "No popular tracks available",
+                    if self.showing_yours {
+                        "Play more of their songs and this fills in."
+                    } else {
+                        "No popular tracks available"
+                    },
                 ))
             })
-            .when(!self.tracks.is_empty(), |section| {
+            .when(!self.shown_tracks().is_empty(), |section| {
                 section.child(self.track_list.clone())
             })
-            .when(self.tracks.len() > POPULAR_COLLAPSED, |section| {
+            .when(self.shown_tracks().len() > POPULAR_COLLAPSED, |section| {
                 let palette = appearance::Appearance::palette(cx);
                 let expanded = self.popular_expanded;
-                let hidden = self.tracks.len() - POPULAR_COLLAPSED;
+                let hidden = self.shown_tracks().len() - POPULAR_COLLAPSED;
                 section.child(
                     components::bare_button("artist-popular-toggle")
                         .test_support()
@@ -2147,6 +2275,12 @@ impl ArtistPage {
         } else {
             "Spotify artist".to_owned()
         };
+        let detail = match self.your_rank {
+            Some((rank, range)) => {
+                format!("{detail} · Your #{rank} artist · {}", range.short_label())
+            }
+            None => detail,
+        };
         let overlay_inset = tokens::TOOLBAR_HEIGHT.to_pixels(window.rem_size());
 
         let backdrop = artwork_url.clone().map(|url| {
@@ -2277,7 +2411,14 @@ impl Render for ArtistPage {
             .unwrap_or_default();
         self.track_list.update(cx, |list, cx| {
             list.show(
-                (ElementId::from("artist-popular"), source_id),
+                (
+                    ElementId::from("artist-popular"),
+                    if self.showing_yours {
+                        format!("{source_id}:you")
+                    } else {
+                        source_id
+                    },
+                ),
                 self.popular_view.clone(),
                 cx,
             )

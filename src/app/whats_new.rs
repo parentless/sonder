@@ -44,6 +44,31 @@ const MONTHS: &[Month] = &[
                 date: "Nov 14, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.43",
+                        notes: &[
+                            Note(
+                                New,
+                                "Home shows your top artists as an orbit: bigger bubbles for higher ranks, with arrows for who is rising or falling.",
+                            ),
+                            Note(
+                                Better,
+                                "The time range on Home is one menu instead of three buttons.",
+                            ),
+                            Note(
+                                New,
+                                "Artist pages have a You tab with your own top and liked songs, and show where the artist ranks for you.",
+                            ),
+                            Note(
+                                Better,
+                                "The lyrics button is always in the player, and Space plays or pauses after you click any button.",
+                            ),
+                            Note(
+                                Better,
+                                "Skipping songs, saving your place and loading covers use less work.",
+                            ),
+                        ],
+                    },
+                    Release {
                         version: "0.8.42",
                         notes: &[
                             Note(

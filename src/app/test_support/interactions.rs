@@ -3972,8 +3972,14 @@ fn answer_new_releases(fixture: &mut Fixture, result: anyhow::Result<Vec<model::
     if answered {
         // Home asks for announced releases once the new ones are in.
         fixture.update(|_, _| {});
-        let BackendCommand::LoadUpcoming { respond } = fixture.backend.commands.try_recv().unwrap()
-        else {
+        // Home also fetches the next longer chart to see what is rising.
+        let mut next = fixture.backend.commands.try_recv().unwrap();
+        if let BackendCommand::LoadHome { respond, .. } = next {
+            respond.send(Ok(model::HomeData::default())).unwrap();
+            fixture.update(|_, _| {});
+            next = fixture.backend.commands.try_recv().unwrap();
+        }
+        let BackendCommand::LoadUpcoming { respond } = next else {
             panic!("expected an announced-releases request")
         };
         respond
@@ -4050,6 +4056,12 @@ fn home_lists_new_releases_from_top_artists_and_opens_one() {
     assert_eq!(fixture.route(), Route::Album);
 }
 
+/// Opens the range menu and picks a range.
+fn pick_home_range(fixture: &mut Fixture, index: usize) {
+    fixture.update(|window, cx| window.click("home-range-menu", cx));
+    fixture.update(|window, cx| window.click(("home-range", index), cx));
+}
+
 #[test]
 fn home_time_ranges_load_once_each_and_are_remembered() {
     let mut fixture = Fixture::new(false);
@@ -4066,15 +4078,15 @@ fn home_time_ranges_load_once_each_and_are_remembered() {
     reply(&mut fixture, model::HomeRange::Months);
     answer_new_releases(&mut fixture, Ok(Vec::new()));
     fixture.update(|_, _| {});
-    fixture.update(|window, cx| window.click(("home-range", 0usize), cx));
+    pick_home_range(&mut fixture, 0);
     reply(&mut fixture, model::HomeRange::Weeks);
     fixture.update(|_, _| {});
-    fixture.update(|window, cx| window.click(("home-range", 2usize), cx));
-    reply(&mut fixture, model::HomeRange::AllTime);
-    fixture.update(|_, _| {});
+    // The 6-month chart was fetched to compare with, so all time is cached too.
+    pick_home_range(&mut fixture, 2);
+    fixture.no_commands();
     // Every range is now cached, so moving between them asks for nothing.
     for index in [1usize, 0, 2, 1] {
-        fixture.update(|window, cx| window.click(("home-range", index), cx));
+        pick_home_range(&mut fixture, index);
         fixture.no_commands();
     }
 }
@@ -4775,6 +4787,126 @@ fn the_sidebar_offers_an_available_update_with_one_button() {
     });
     fixture.update(|window, _| assert!(window.try_find("sidebar-update").is_some()));
     fixture.no_commands();
+}
+
+fn top_artist(id: &str) -> model::Artist {
+    model::Artist {
+        provider: model::Provider::Spotify,
+        source_id: id.into(),
+        spotify_uri: None,
+        name: id.into(),
+        artwork_url: None,
+    }
+}
+
+#[test]
+fn the_home_range_menu_opens_picks_and_closes() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|window, cx| window.click("nav-home", cx));
+    fixture.update(|window, _| assert!(window.try_find(("home-range", 0usize)).is_none()));
+    fixture.update(|window, cx| window.click("home-range-menu", cx));
+    fixture.update(|window, _| {
+        for index in 0..3usize {
+            assert!(window.try_find(("home-range", index)).is_some());
+        }
+    });
+    // Escape closes it without choosing.
+    fixture.press("escape");
+    fixture.update(|window, _| assert!(window.try_find(("home-range", 0usize)).is_none()));
+    // Choosing closes it too.
+    pick_home_range(&mut fixture, 2);
+    fixture.update(|window, _| assert!(window.try_find(("home-range", 0usize)).is_none()));
+}
+
+#[test]
+fn home_marks_artists_that_moved_against_the_longer_chart() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|_, cx| {
+        let top = crate::app::top_listening::TopListening::existing(cx);
+        top.update(cx, |top, cx| {
+            top.seed(
+                model::HomeRange::Months,
+                vec![top_artist("a"), top_artist("b"), top_artist("c")],
+                Vec::new(),
+                cx,
+            );
+            // Longer chart: c was first, a was second, b was third.
+            top.seed(
+                model::HomeRange::AllTime,
+                vec![top_artist("c"), top_artist("a"), top_artist("b")],
+                Vec::new(),
+                cx,
+            );
+        });
+    });
+    fixture.update(|window, cx| window.click("nav-home", cx));
+    fixture.update(|_, _| {});
+    fixture.update(|window, _| {
+        // a rose one place, b rose one, c fell two.
+        for index in 0..3usize {
+            assert!(
+                window.try_find(("home-artist-change", index)).is_some(),
+                "artist {index} should show a move"
+            );
+        }
+        assert!(window.try_find(("home-artist-change", 3usize)).is_none());
+    });
+}
+
+#[test]
+fn the_you_tab_only_appears_for_artists_the_listener_plays() {
+    for (artist_id, known) in [("artist-known", true), ("artist-stranger", false)] {
+        let mut fixture = Fixture::new(false);
+        let workspace = fixture.workspace.clone().unwrap();
+        fixture.update(|_, cx| {
+            cx.set_reduce_motion(true);
+            let top = crate::app::top_listening::TopListening::existing(cx);
+            let mut mine = track(5);
+            mine.artists = vec![model::ArtistRef {
+                name: "Artist".into(),
+                source_id: Some("artist-known".into()),
+                spotify_uri: None,
+            }];
+            top.update(cx, |top, cx| {
+                top.seed(
+                    model::HomeRange::Months,
+                    vec![top_artist("artist-known")],
+                    vec![mine],
+                    cx,
+                )
+            });
+            workspace.upgrade().unwrap().update(cx, |workspace, cx| {
+                workspace.open_artist(artist_ref("Artist", artist_id), Route::LikedSongs, cx);
+            });
+        });
+        let BackendCommand::LoadArtist { respond, .. } =
+            fixture.backend.commands.try_recv().unwrap()
+        else {
+            panic!("expected artist request");
+        };
+        respond
+            .send(Ok((
+                top_artist(artist_id),
+                (0..3).map(track).collect(),
+                Vec::new().into(),
+            )))
+            .unwrap();
+        fixture.update(|_, _| {});
+        fixture.update(|window, _| {
+            assert_eq!(window.try_find("artist-popular-yours").is_some(), known);
+        });
+        if known {
+            fixture.update(|window, cx| window.click("artist-popular-yours", cx));
+            fixture.update(|window, _| {
+                // Their one top song replaces the three popular ones.
+                assert!(window.try_find(("spotify-track", 0usize)).is_some());
+                assert!(window.try_find(("spotify-track", 1usize)).is_none());
+            });
+            fixture.update(|window, cx| window.click("artist-popular-everyone", cx));
+            fixture
+                .update(|window, _| assert!(window.try_find(("spotify-track", 2usize)).is_some()));
+        }
+    }
 }
 
 #[test]

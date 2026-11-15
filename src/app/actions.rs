@@ -54,6 +54,11 @@ impl Workspace {
         {
             return;
         }
+        if self.router.route() == Route::Home
+            && self.home.update(cx, |page, cx| page.close_range_menu(cx))
+        {
+            return;
+        }
         if self.router.route() == Route::LocalFiles
             && self
                 .local_files

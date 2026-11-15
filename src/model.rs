@@ -257,6 +257,24 @@ impl HomeRange {
             Self::AllTime => 2,
         }
     }
+
+    /// The longer range a chart is compared with, to see what is rising.
+    pub fn longer(self) -> Option<Self> {
+        match self {
+            Self::Weeks => Some(Self::Months),
+            Self::Months => Some(Self::AllTime),
+            Self::AllTime => None,
+        }
+    }
+
+    /// The short name used where space is tight.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Weeks => "4 weeks",
+            Self::Months => "6 months",
+            Self::AllTime => "all time",
+        }
+    }
 }
 
 /// What the Home page shows: the listener's most played artists and tracks.

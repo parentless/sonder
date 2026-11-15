@@ -387,6 +387,7 @@ mod settings;
 mod sidebar;
 mod smooth_scroll;
 mod tokens;
+mod top_listening;
 mod track_list;
 mod track_row;
 #[cfg(target_os = "macos")]

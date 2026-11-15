@@ -46,12 +46,13 @@ pub(super) enum CadenceIcon {
     Sparkle,
     Download,
     ChevronDown,
+    Check,
     ChevronUp,
 }
 
 impl CadenceIcon {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 41] = [
+    pub(super) const ALL: [Self; 42] = [
         Self::Home,
         Self::HomeFilled,
         Self::Heart,
@@ -92,6 +93,7 @@ impl CadenceIcon {
         Self::Sparkle,
         Self::Download,
         Self::ChevronDown,
+        Self::Check,
         Self::ChevronUp,
     ];
 
@@ -137,6 +139,7 @@ impl CadenceIcon {
             Self::Sparkle => "sparkle",
             Self::Download => "download",
             Self::ChevronDown => "chevron-down",
+            Self::Check => "check",
             Self::ChevronUp => "chevron-up",
         }
     }

@@ -32,6 +32,8 @@ enum Scene {
     ArtistMenu,
     ArtistPortrait,
     ArtistManyPopular,
+    ArtistYours,
+    HomeMenu,
     ArtistLandscape,
     ArtistZoomLarge,
     Settings,
@@ -71,6 +73,7 @@ fn scenes() -> Vec<(&'static str, Scene)> {
     vec![
         ("artist", Scene::Artist),
         ("artist-popular-more", Scene::ArtistManyPopular),
+        ("artist-yours", Scene::ArtistYours),
         ("artist-docked", Scene::ArtistDiscography),
         ("artist-releases-loading", Scene::ArtistPageLoading),
         ("artist-releases-failure", Scene::ArtistPageFailure),
@@ -105,6 +108,7 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("premium-required", Scene::PremiumRequired),
         ("home", Scene::Home),
         ("home-permission", Scene::HomePermission),
+        ("home-range-menu", Scene::HomeMenu),
         ("search-entered", Scene::SearchEntered),
         ("search-live", Scene::SearchLive),
         ("search-empty", Scene::SearchEmpty),
@@ -222,6 +226,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 | Scene::ArtistMenu
                 | Scene::ArtistPortrait
                 | Scene::ArtistManyPopular
+                | Scene::ArtistYours
                 | Scene::ArtistLandscape | Scene::ArtistZoomLarge => {
                     if matches!(scene, Scene::ArtistZoomLarge) { appearance::Appearance::set_ui_zoom(crate::storage::UiZoom::from_percent(130).unwrap(), cx).unwrap(); }
                     let (image_width, image_height) = match scene {
@@ -252,6 +257,16 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                         source_id: Some("fixture-artist".into()),
                         spotify_uri: None,
                     };
+                    if matches!(scene, Scene::ArtistYours) {
+                        // The listener's own songs by this artist, and the artist's rank.
+                        let mine: Vec<model::Track> = (3..7).map(|n| {
+                            let mut song = track(n);
+                            song.artists = vec![model::ArtistRef { name: "The Midnight".into(), source_id: Some("fixture-artist".into()), spotify_uri: None }];
+                            song
+                        }).collect();
+                        let artists = ["a", "b", "fixture-artist"].map(|id| model::Artist { provider: model::Provider::Spotify, source_id: id.into(), spotify_uri: None, name: id.into(), artwork_url: None }).to_vec();
+                        crate::app::top_listening::TopListening::existing(cx).update(cx, |top, cx| top.seed(model::HomeRange::Months, artists, mine, cx));
+                    }
                     workspace.open_artist(reference, Route::LikedSongs, cx);
                     match backend.commands.try_recv().expect("artist request") {
                         BackendCommand::LoadArtist { respond, .. } => {
@@ -281,6 +296,9 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                                 .expect("artist fixture reply");
                         }
                         command => panic!("unexpected artist command: {command:?}"),
+                    }
+                    if matches!(scene, Scene::ArtistYours) {
+                        workspace.artist.update(cx, |artist, cx| artist.select_yours(cx));
                     }
                 }
                 Scene::ArtistLoading => workspace.open_artist(model::ArtistRef { name: "Artist".into(), source_id: Some("loading".into()), spotify_uri: None }, Route::LikedSongs, cx),
@@ -364,7 +382,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     let BackendCommand::SearchCatalog { respond, .. } = backend.commands.try_recv().unwrap() else { panic!("search request") };
                     respond.send(Ok(super::gallery_results())).unwrap();
                 }
-                Scene::Home | Scene::HomePermission => {
+                Scene::Home | Scene::HomePermission | Scene::HomeMenu => {
                     workspace.navigate(Route::Home, cx);
                     let BackendCommand::LoadHome { respond, .. } = backend.commands.try_recv().unwrap() else { panic!("home request") };
                     let BackendCommand::LoadNewReleases { respond: releases } = backend.commands.try_recv().unwrap() else { panic!("new releases request") };
@@ -384,6 +402,18 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             }).collect(),
                             tracks: results.tracks,
                         })).unwrap();
+                        // The all-time chart, in another order, so some artists rise and some fall.
+                        let all_time: Vec<model::Artist> = [1, 0, 4, 2, 3, 6, 5].into_iter().map(|index: usize| model::Artist {
+                            provider: model::Provider::Spotify,
+                            source_id: format!("top-{index}"),
+                            spotify_uri: None,
+                            name: "".into(),
+                            artwork_url: None,
+                        }).collect();
+                        crate::app::top_listening::TopListening::existing(cx).update(cx, |top, cx| top.seed(model::HomeRange::AllTime, all_time, Vec::new(), cx));
+                        if matches!(scene, Scene::HomeMenu) {
+                            workspace.home.update(cx, |home, cx| home.open_range_menu(cx));
+                        }
                     }
                 }
                 Scene::PlaybackPending => { services::AppServices::player(cx).update(cx, |player, cx| player.set_loading(true, cx)); }
@@ -949,6 +979,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
         scene,
         Scene::Artist
             | Scene::ArtistManyPopular
+            | Scene::ArtistYours
             | Scene::ArtistMenu
             | Scene::ArtistPortrait
             | Scene::ArtistLandscape
@@ -965,6 +996,8 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             // few-row spacing this checks, so that scene is checked on its own.
             if matches!(scene, Scene::ArtistManyPopular) {
                 assert!(window.try_find("artist-popular-toggle").is_some());
+            } else if matches!(scene, Scene::ArtistYours) {
+                assert!(window.try_find("artist-popular-yours").is_some());
             } else if let Some(discography) = window.try_find("artist-discography-heading") {
                 let discography = discography.bounds();
                 assert!(discography.origin.y >= last_track.bottom());

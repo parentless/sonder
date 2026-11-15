@@ -1,34 +1,42 @@
-//! The Home page: the listener's most played artists and tracks.
+//! The Home page: an orbit of the artists you play most, what is new from
+//! them, and your top tracks.
 //!
-//! Two small Spotify requests, made only when the page is opened and its data
-//! is more than half an hour old. Nothing runs in the background.
+//! Two small Spotify requests per time range, made only when the page is opened
+//! and its data is more than half an hour old. The range on screen is compared
+//! with the next longer one, so one more pair of requests shows what is rising.
+//! Nothing runs in the background.
 use super::page::PageEvent;
+use super::top_listening::{TopEvent, TopListening};
 use super::*;
 use gpui_kit::TestSupportExt as _;
 use std::time::SystemTime;
 
-/// Top items drift over weeks, so there is no reason to fetch them often.
-const HOME_STALE_TIME: Duration = Duration::from_secs(30 * 60);
 /// New releases move more slowly, and finding them costs a request per artist.
 /// Announced dates change slowly, and each lookup costs MusicBrainz about 20 requests.
 const UPCOMING_STALE_TIME: Duration = Duration::from_secs(24 * 60 * 60);
 const RELEASES_STALE_TIME: Duration = Duration::from_secs(6 * 60 * 60);
-const RELEASE_CARD_WIDTH: Rems = Rems(9.5);
+/// How many releases and announcements sit beside the orbit.
+const SIDE_RELEASES: usize = 4;
+const SIDE_UPCOMING: usize = 3;
+/// A rising or falling artist is marked green or red.
+const RISING: u32 = 0x2E9E63;
 
-/// One time range's fetched lists, kept so switching back needs no request.
-struct RangeData {
-    artists: Arc<[model::Artist]>,
-    tracks: Arc<[model::Track]>,
-    loaded_at: SystemTime,
-}
-
-impl RangeData {
-    fn is_fresh(&self) -> bool {
-        self.loaded_at
-            .elapsed()
-            .is_ok_and(|elapsed| elapsed < HOME_STALE_TIME)
-    }
-}
+/// Where each artist's bubble sits in the orbit, by rank: centre x, centre y
+/// and diameter, in rems. Bigger bubbles are higher ranked; names sit below.
+const ORBIT: [(f32, f32, f32); model::HOME_ARTIST_LIMIT] = [
+    (5.625, 5.5, 10.0),
+    (15.5, 3.6, 7.0),
+    (18.5, 13.4, 6.0),
+    (24.0, 3.0, 5.25),
+    (28.5, 11.5, 4.75),
+    (5.5, 18.6, 4.5),
+    (12.5, 19.8, 3.75),
+    (24.0, 21.0, 3.5),
+    (31.0, 20.0, 3.25),
+    (32.5, 3.5, 3.0),
+];
+const ORBIT_WIDTH: Rems = Rems(36.);
+const ORBIT_HEIGHT: Rems = Rems(26.);
 
 struct Upcoming {
     releases: Arc<[model::UpcomingRelease]>,
@@ -43,21 +51,18 @@ struct Releases {
 pub(super) struct HomePage {
     backend: BackendHandle,
     session: Entity<session::Session>,
+    top: Entity<TopListening>,
     track_list: Entity<track_list::TrackList>,
     range: model::HomeRange,
-    data: [Option<RangeData>; 3],
+    range_menu_open: bool,
     releases: Option<Releases>,
     releases_loading: bool,
     releases_request: Option<gpui_kit::Task<()>>,
     upcoming: Option<Upcoming>,
     upcoming_loading: bool,
     upcoming_request: Option<gpui_kit::Task<()>>,
-    loading: bool,
     error: Option<SharedString>,
-    /// The saved sign-in lacks the permission to read top items.
-    permission_missing: bool,
     visible: bool,
-    request: Option<gpui_kit::Task<()>>,
     scroll: gpui_kit::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -68,29 +73,32 @@ impl HomePage {
     pub(super) fn new(backend: BackendHandle, cx: &mut Context<Self>) -> Self {
         let track_list = cx.new(|cx| track_list::TrackList::new(cx).with_inline_rows());
         let session = services::AppServices::session(cx);
+        let top = TopListening::shared(&backend, cx);
         let subscriptions = vec![
             page::forward(&track_list, cx),
             cx.subscribe(&session, |this, _, event: &session::SessionEvent, cx| {
                 this.handle_session_event(event, cx)
             }),
+            cx.subscribe(&top, |this, _, event: &TopEvent, cx| {
+                this.handle_top_event(event, cx)
+            }),
+            cx.observe(&top, |_, _, cx| cx.notify()),
         ];
         Self {
             backend,
             session,
+            top,
             track_list,
             range: model::HomeRange::default(),
-            data: [None, None, None],
+            range_menu_open: false,
             releases: None,
             releases_loading: false,
             releases_request: None,
             upcoming: None,
             upcoming_loading: false,
             upcoming_request: None,
-            loading: false,
             error: None,
-            permission_missing: false,
             visible: false,
-            request: None,
             scroll: gpui_kit::ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
@@ -103,8 +111,9 @@ impl HomePage {
             session::SessionEvent::LoggedOut | session::SessionEvent::Restarted => self.reset(cx),
             session::SessionEvent::Ready => {
                 self.reset(cx);
+                self.top.update(cx, |top, cx| top.reset(cx));
                 if self.visible {
-                    self.load(cx);
+                    self.load_if_needed(cx);
                     self.load_releases_if_needed(cx);
                 }
             }
@@ -112,10 +121,29 @@ impl HomePage {
         }
     }
 
+    fn handle_top_event(&mut self, event: &TopEvent, cx: &mut Context<Self>) {
+        match event {
+            TopEvent::Loaded(range) if *range == self.range => {
+                self.error = None;
+                cx.emit(PageEvent::Loaded);
+                // The next longer range shows what is rising. It is the page's
+                // second request pair, made once the first is on screen.
+                if self.visible
+                    && let Some(longer) = range.longer()
+                {
+                    self.top.update(cx, |top, cx| top.ensure(longer, cx));
+                }
+            }
+            TopEvent::Failed(range, error) if *range == self.range => {
+                self.error = Some(error.clone());
+                cx.emit(PageEvent::Failed(error.clone()));
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
     fn reset(&mut self, cx: &mut Context<Self>) {
-        self.request = None;
-        self.loading = false;
-        self.data = [None, None, None];
         self.releases = None;
         self.releases_loading = false;
         self.releases_request = None;
@@ -123,7 +151,7 @@ impl HomePage {
         self.upcoming_loading = false;
         self.upcoming_request = None;
         self.error = None;
-        self.permission_missing = false;
+        self.range_menu_open = false;
         self.track_list.update(cx, |list, cx| list.clear(cx));
         cx.notify();
     }
@@ -133,6 +161,7 @@ impl HomePage {
     pub(super) fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         self.visible = visible;
         if !visible {
+            self.range_menu_open = false;
             // Leaving frees the list's rows; the few kilobytes of fetched data
             // stay so coming back needs no new request.
             self.track_list.update(cx, |list, cx| list.clear(cx));
@@ -144,14 +173,16 @@ impl HomePage {
         self.load_releases_if_needed(cx);
     }
 
-    fn current(&self) -> Option<&RangeData> {
-        self.data[self.range.index()].as_ref()
-    }
-
     fn load_if_needed(&mut self, cx: &mut Context<Self>) {
-        let fresh = self.current().is_some_and(RangeData::is_fresh);
-        if !fresh && !self.loading && !self.permission_missing {
-            self.load(cx);
+        let range = self.range;
+        self.error = None;
+        self.top.update(cx, |top, cx| top.ensure(range, cx));
+        // Returning to a fresh range still compares it with the longer one.
+        if let Some(longer) = range.longer() {
+            let loaded = self.top.read(cx).data(range).is_some();
+            if loaded && self.visible {
+                self.top.update(cx, |top, cx| top.ensure(longer, cx));
+            }
         }
     }
 
@@ -162,7 +193,7 @@ impl HomePage {
                 .elapsed()
                 .is_ok_and(|elapsed| elapsed < RELEASES_STALE_TIME)
         });
-        if fresh || self.releases_loading || self.permission_missing {
+        if fresh || self.releases_loading || self.top.read(cx).permission_missing() {
             return;
         }
         self.releases_loading = true;
@@ -200,7 +231,8 @@ impl HomePage {
                 .elapsed()
                 .is_ok_and(|elapsed| elapsed < UPCOMING_STALE_TIME)
         });
-        if fresh || self.upcoming_loading || self.permission_missing || !self.visible {
+        if fresh || self.upcoming_loading || self.top.read(cx).permission_missing() || !self.visible
+        {
             return;
         }
         self.upcoming_loading = true;
@@ -227,63 +259,36 @@ impl HomePage {
     }
 
     fn select_range(&mut self, range: model::HomeRange, cx: &mut Context<Self>) {
-        if range == self.range {
-            return;
+        self.range_menu_open = false;
+        if range != self.range {
+            self.range = range;
+            self.load_if_needed(cx);
         }
-        self.range = range;
-        self.error = None;
-        // A request for the previous range is no longer wanted.
-        self.request = None;
-        self.loading = false;
-        self.load_if_needed(cx);
         cx.notify();
+    }
+
+    #[cfg(test)]
+    pub(super) fn open_range_menu(&mut self, cx: &mut Context<Self>) {
+        self.range_menu_open = true;
+        cx.notify();
+    }
+
+    /// Closes the time-range menu, reporting whether it was open.
+    pub(super) fn close_range_menu(&mut self, cx: &mut Context<Self>) -> bool {
+        let was_open = std::mem::take(&mut self.range_menu_open);
+        if was_open {
+            cx.notify();
+        }
+        was_open
     }
 
     pub(super) fn close_menus(&mut self, cx: &mut Context<Self>) {
         self.track_list.update(cx, |list, cx| list.close_menu(cx));
+        self.close_range_menu(cx);
     }
 
-    fn load(&mut self, cx: &mut Context<Self>) {
-        self.loading = true;
-        self.error = None;
-        let range = self.range;
-        let reply = catalog::request(&self.backend, move |respond| BackendCommand::LoadHome {
-            range,
-            respond,
-        });
-        self.request = Some(cx.spawn(async move |this, cx| {
-            let result = reply.await;
-            let _ = this.update(cx, |page, cx| {
-                page.request = None;
-                page.loading = false;
-                match result {
-                    Ok(mut home) => {
-                        home.artists.truncate(model::HOME_ARTIST_LIMIT);
-                        home.tracks.truncate(model::HOME_TRACK_LIMIT);
-                        page.data[range.index()] = Some(RangeData {
-                            artists: home.artists.into(),
-                            tracks: home.tracks.into(),
-                            loaded_at: SystemTime::now(),
-                        });
-                        page.error = None;
-                        cx.emit(PageEvent::Loaded);
-                    }
-                    Err(error) => {
-                        page.permission_missing =
-                            error.as_str() == model::HomePermissionMissing.to_string();
-                        if !page.permission_missing {
-                            page.error = Some(error.clone());
-                            cx.emit(PageEvent::Failed(error));
-                        }
-                    }
-                }
-                cx.notify();
-            });
-        }));
-        cx.notify();
-    }
-
-    fn release_card(
+    /// A release beside the orbit: small cover, name, artist and a NEW mark.
+    fn release_row(
         &self,
         album: &model::Album,
         index: usize,
@@ -306,13 +311,12 @@ impl HomePage {
         }
         components::button(palette, ("home-release", index))
             .test_support()
-            .w(RELEASE_CARD_WIDTH + Rems(0.75))
+            .w_full()
             .min_w_0()
             .p_1p5()
-            .flex_col()
-            .items_start()
+            .gap_3()
+            .items_center()
             .justify_start()
-            .gap_1p5()
             .rounded_xl()
             .hover(|style| style.bg(rgb(palette.surface_hover)))
             .child(components::artwork(
@@ -320,48 +324,40 @@ impl HomePage {
                 &cache,
                 album.artwork_url.as_deref(),
                 tokens::ArtworkSize {
-                    size: RELEASE_CARD_WIDTH,
-                    radius: Rems(0.625),
+                    size: Rems(3.),
+                    radius: Rems(0.5),
                 },
                 CadenceIcon::MusicNote,
             ))
             .child(
                 div()
-                    .w_full()
+                    .flex_1()
                     .min_w_0()
                     .flex()
                     .flex_col()
                     .child(
                         div()
                             .w_full()
-                            .min_w_0()
-                            .flex()
-                            .items_center()
-                            .gap_1p5()
-                            .when(is_new, |row| {
-                                row.child(
-                                    div()
-                                        .id(("home-release-new", index))
-                                        .flex_none()
-                                        .px_1p5()
-                                        .rounded_md()
-                                        .bg(rgb(palette.link))
-                                        .text_color(rgb(palette.on_accent))
-                                        .text_xs()
-                                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                        .child("NEW"),
-                                )
-                            })
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .font_weight(gpui_kit::FontWeight::MEDIUM)
-                                    .child(album.name.clone()),
-                            ),
+                            .truncate()
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .child(album.name.clone()),
                     )
                     .child(components::page_detail(palette, detail).w_full().truncate()),
             )
+            .when(is_new, |row| {
+                row.child(
+                    div()
+                        .id(("home-release-new", index))
+                        .flex_none()
+                        .px_1p5()
+                        .rounded_md()
+                        .bg(rgb(palette.link))
+                        .text_color(rgb(palette.on_accent))
+                        .text_xs()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .child("NEW"),
+                )
+            })
             .on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(album) = this
                     .releases
@@ -379,43 +375,89 @@ impl HomePage {
             .into_any_element()
     }
 
-    fn artist_card(
+    /// One artist as a bubble: bigger for a higher rank, with the way their
+    /// rank moved against the longer chart.
+    fn orbit_bubble(
         &self,
         artist: &model::Artist,
         index: usize,
+        change: Option<i32>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let palette = appearance::Appearance::palette(cx);
         let cache = services::AppServices::image_cache(cx);
+        let (x, y, diameter) = ORBIT[index];
+        let width = diameter.max(7.);
+        let artwork = components::rectangular_artwork(
+            palette,
+            &cache,
+            artist.artwork_url.as_deref(),
+            tokens::ArtworkSize {
+                size: Rems(diameter),
+                radius: Rems(diameter / 2.),
+            },
+            Rems(diameter),
+            CadenceIcon::Person,
+        );
         components::button(palette, ("home-artist", index))
             .test_support()
-            .w(HOME_CARD_WIDTH + Rems(0.75))
+            .absolute()
+            .left(Rems(x - width / 2.))
+            .top(Rems(y - diameter / 2.))
+            .w(Rems(width))
             .min_w_0()
-            .p_1p5()
             .flex_col()
-            .items_start()
+            .items_center()
             .justify_start()
             .gap_1p5()
+            .py_0p5()
             .rounded_xl()
             .hover(|style| style.bg(rgb(palette.surface_hover)))
-            .child(components::rectangular_artwork(
-                palette,
-                &cache,
-                artist.artwork_url.as_deref(),
-                tokens::SEARCH_ARTIST_ARTWORK,
-                HOME_CARD_WIDTH,
-                CadenceIcon::Person,
-            ))
             .child(
-                // Name and rank sit close together, away from the picture.
+                div()
+                    .relative()
+                    .flex_none()
+                    .child(artwork)
+                    .when_some(change, |wrap, change| {
+                        let (glyph, color) = if change > 0 {
+                            (CadenceIcon::ChevronUp, RISING)
+                        } else {
+                            (CadenceIcon::ChevronDown, palette.danger)
+                        };
+                        wrap.child(
+                            div()
+                                .id(("home-artist-change", index))
+                                .test_support()
+                                .absolute()
+                                .top_0()
+                                .right(Rems(-0.25))
+                                .flex()
+                                .items_center()
+                                .gap_0p5()
+                                .pl_1()
+                                .pr_1p5()
+                                .rounded_full()
+                                .bg(rgb(palette.surface_raised))
+                                .border_1()
+                                .border_color(rgb(palette.border))
+                                .text_xs()
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .text_color(rgb(color))
+                                .child(components::icon(glyph, Rems(0.625), color))
+                                .child(change.unsigned_abs().to_string()),
+                        )
+                    }),
+            )
+            .child(
                 div()
                     .w_full()
                     .min_w_0()
                     .flex()
                     .flex_col()
+                    .items_center()
                     .child(
                         div()
-                            .w_full()
+                            .max_w_full()
                             .truncate()
                             .font_weight(gpui_kit::FontWeight::MEDIUM)
                             .child(artist.name.clone()),
@@ -431,7 +473,12 @@ impl HomePage {
             )
             // Capture just the index, resolving the current data on activation.
             .on_click(cx.listener(move |this, _, _, cx| {
-                if let Some(artist) = this.current().and_then(|data| data.artists.get(index)) {
+                let artist = this
+                    .top
+                    .read(cx)
+                    .data(this.range)
+                    .and_then(|data| data.artists.get(index).cloned());
+                if let Some(artist) = artist {
                     cx.emit(PageEvent::OpenArtist(model::ArtistRef {
                         name: artist.name.clone(),
                         source_id: Some(artist.source_id.clone()),
@@ -442,22 +489,72 @@ impl HomePage {
             .into_any_element()
     }
 
-    /// Last 4 weeks, 6 months or all time; the chosen one is filled.
-    fn range_chips(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
-        let mut chips = div().mt_4().flex().flex_wrap().gap_2();
-        for range in model::HomeRange::ALL {
-            chips = chips.child(
-                components::pill(
-                    palette,
-                    ("home-range", range.index()),
-                    range.label(),
-                    range == self.range,
+    /// The time range as one button that opens a short menu.
+    fn range_menu(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
+        let selected = self.range;
+        div().flex().child(
+            div()
+                .relative()
+                .flex_none()
+                .child(
+                    components::pill(palette, "home-range-menu", selected.label(), false)
+                        .test_support()
+                        .gap_2()
+                        .child(components::icon(
+                            if self.range_menu_open {
+                                CadenceIcon::ChevronUp
+                            } else {
+                                CadenceIcon::ChevronDown
+                            },
+                            tokens::INLINE_ICON,
+                            palette.text_primary,
+                        ))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.range_menu_open = !this.range_menu_open;
+                            cx.notify();
+                        })),
                 )
-                .test_support()
-                .on_click(cx.listener(move |this, _, _, cx| this.select_range(range, cx))),
-            );
-        }
-        chips
+                .when(self.range_menu_open, |anchor| {
+                    anchor.child(deferred(
+                        components::solid_menu_surface(palette)
+                            .on_mouse_up_out(
+                                gpui_kit::MouseButton::Left,
+                                cx.listener(|this, _, _, cx| this.close_menus(cx)),
+                            )
+                            .absolute()
+                            .top(Rems(2.75))
+                            .left_0()
+                            .w(Rems(13.))
+                            .children(model::HomeRange::ALL.into_iter().map(|range| {
+                                let chosen = range == selected;
+                                components::button(palette, ("home-range", range.index()))
+                                    .test_support()
+                                    .w_full()
+                                    .h_9()
+                                    .px_2p5()
+                                    .justify_between()
+                                    .rounded_lg()
+                                    .text_size(tokens::BODY_TEXT)
+                                    .text_color(rgb(palette.text_primary))
+                                    .when(chosen, |row| {
+                                        row.font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                    })
+                                    .hover(|style| style.bg(rgb(palette.control_hover)))
+                                    .child(range.label())
+                                    .when(chosen, |row| {
+                                        row.child(components::icon(
+                                            CadenceIcon::Check,
+                                            tokens::MENU_ICON,
+                                            palette.text_primary,
+                                        ))
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.select_range(range, cx)
+                                    }))
+                            })),
+                    ))
+                }),
+        )
     }
 
     fn permission_prompt(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
@@ -492,9 +589,6 @@ impl HomePage {
     }
 }
 
-/// Wide enough for five across at the default window width.
-const HOME_CARD_WIDTH: Rems = Rems(9.5);
-
 impl Render for HomePage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
@@ -507,12 +601,21 @@ impl Render for HomePage {
                 .text_color(rgb(palette.text_primary))
                 .child(text)
         };
-        let (artists, tracks) = self
-            .current()
-            .map(|data| (data.artists.clone(), data.tracks.clone()))
-            .unwrap_or_default();
-        let loaded = self.current().is_some();
-        let content = if self.permission_missing {
+        let (permission_missing, current, compare) = {
+            let top = self.top.read(cx);
+            (
+                top.permission_missing(),
+                top.data(self.range)
+                    .map(|data| (data.artists.clone(), data.tracks.clone())),
+                self.range
+                    .longer()
+                    .and_then(|longer| top.data(longer))
+                    .map(|data| data.artists.clone()),
+            )
+        };
+        let loaded = current.is_some();
+        let (artists, tracks) = current.unwrap_or_default();
+        let content = if permission_missing {
             self.permission_prompt(palette, cx)
         } else if self.error.is_some() && !loaded {
             div().child(components::empty_state(
@@ -534,9 +637,16 @@ impl Render for HomePage {
                 ),
             ))
         } else {
-            let mut cards = div().flex().flex_wrap().gap_4();
-            for (index, artist) in artists.iter().enumerate() {
-                cards = cards.child(self.artist_card(artist, index, cx));
+            let mut orbit = div().relative().flex_none().w(ORBIT_WIDTH).h(ORBIT_HEIGHT);
+            for (index, artist) in artists.iter().take(ORBIT.len()).enumerate() {
+                let change = compare.as_ref().and_then(|longer| {
+                    let before = longer
+                        .iter()
+                        .position(|other| other.source_id == artist.source_id)?;
+                    let change = before as i32 - index as i32;
+                    (change != 0).then_some(change)
+                });
+                orbit = orbit.child(self.orbit_bubble(artist, index, change, cx));
             }
             self.track_list.update(cx, |list, cx| {
                 list.show(("home-tracks", self.range.index()), tracks.clone(), cx);
@@ -555,60 +665,44 @@ impl Render for HomePage {
             // Shown while looking, and once looked even when nothing turned up,
             // so an empty row is explained rather than missing.
             let upcoming_shown = upcoming_pending || self.upcoming.is_some();
-            let mut upcoming_cards = div().flex().flex_wrap().gap_3();
-            for (index, release) in upcoming.iter().enumerate() {
-                upcoming_cards = upcoming_cards.child(upcoming_card(palette, release, index));
-            }
-            let mut release_cards = div().flex().flex_wrap().gap_4();
-            for (index, album) in releases.iter().enumerate() {
-                release_cards = release_cards.child(self.release_card(album, index, cx));
-            }
-            div()
+            let side = div()
+                .flex_1()
+                .min_w(Rems(20.))
                 .flex()
                 .flex_col()
                 .gap_6()
-                .when(!artists.is_empty(), |content| {
-                    content.child(
+                .when(releases_pending, |side| {
+                    side.child(
                         div()
                             .flex()
                             .flex_col()
-                            .gap_3()
-                            .child(heading("home-artists-heading", "Your top artists"))
-                            .child(cards),
-                    )
-                })
-                .when(releases_pending, |content| {
-                    content.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(heading(
-                                "home-releases-heading",
-                                "New from artists you listen to",
-                            ))
+                            .gap_2()
+                            .child(heading("home-releases-heading", "New from your orbit"))
                             .child(release_skeleton(palette)),
                     )
                 })
-                .when(!releases.is_empty(), |content| {
-                    content.child(
+                .when(!releases.is_empty(), |side| {
+                    side.child(
                         div()
                             .flex()
                             .flex_col()
-                            .gap_3()
-                            .child(heading(
-                                "home-releases-heading",
-                                "New from artists you listen to",
-                            ))
-                            .child(release_cards),
+                            .gap_2()
+                            .child(heading("home-releases-heading", "New from your orbit"))
+                            .children(
+                                releases
+                                    .iter()
+                                    .take(SIDE_RELEASES)
+                                    .enumerate()
+                                    .map(|(index, album)| self.release_row(album, index, cx)),
+                            ),
                     )
                 })
-                .when(upcoming_shown, |content| {
-                    content.child(
+                .when(upcoming_shown, |side| {
+                    side.child(
                         div()
                             .flex()
                             .flex_col()
-                            .gap_3()
+                            .gap_2()
                             .child(heading("home-upcoming-heading", "Coming soon"))
                             .child(if upcoming_pending {
                                 release_skeleton(palette).into_any_element()
@@ -619,10 +713,44 @@ impl Render for HomePage {
                                 )
                                 .into_any_element()
                             } else {
-                                upcoming_cards.into_any_element()
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .children(
+                                        upcoming
+                                            .iter()
+                                            .take(SIDE_UPCOMING)
+                                            .enumerate()
+                                            .map(|(index, release)| {
+                                                upcoming_row(palette, release, index)
+                                            }),
+                                    )
+                                    .into_any_element()
                             }),
                     )
-                })
+                });
+            div()
+                .flex()
+                .flex_col()
+                .gap_6()
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap_x_10()
+                        .gap_y_6()
+                        .when(!artists.is_empty(), |row| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_3()
+                                    .child(heading("home-artists-heading", "Your top artists"))
+                                    .child(orbit),
+                            )
+                        })
+                        .child(side),
+                )
                 .when(!tracks.is_empty(), |content| {
                     content.child(
                         div()
@@ -658,8 +786,8 @@ impl Render for HomePage {
                                 "Home",
                                 "Based on what you play most",
                             ))
-                            .when(!self.permission_missing, |page| {
-                                page.child(self.range_chips(palette, cx))
+                            .when(!permission_missing, |page| {
+                                page.child(self.range_menu(palette, cx))
                             })
                             .child(div().mt_5().child(content)),
                     ),
@@ -667,42 +795,47 @@ impl Render for HomePage {
     }
 }
 
-/// `2026-11-07` as `Nov 7`; anything not an exact date gives nothing.
-/// Placeholder cards the size of a release card, so the section does not
-/// change height when the data arrives.
+/// Placeholder rows the size of a release row, so the section does not change
+/// height when the data arrives.
 fn release_skeleton(palette: CadencePalette) -> Div {
-    div().flex().flex_wrap().gap_4().children((0..5).map(|_| {
+    div().flex().flex_col().children((0..3).map(|_| {
         div()
-            .w(RELEASE_CARD_WIDTH + Rems(0.75))
             .p_1p5()
             .flex()
-            .flex_col()
-            .gap_1p5()
+            .items_center()
+            .gap_3()
             .child(
                 div()
-                    .size(RELEASE_CARD_WIDTH)
-                    .rounded(Rems(0.625))
+                    .size(Rems(3.))
+                    .rounded(Rems(0.5))
                     .bg(rgb(palette.control)),
             )
             .child(
                 div()
-                    .h_3()
-                    .w(relative(0.7))
-                    .rounded_md()
-                    .bg(rgb(palette.control)),
-            )
-            .child(
-                div()
-                    .h_2()
-                    .w(relative(0.45))
-                    .rounded_md()
-                    .bg(rgb(palette.control)),
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        div()
+                            .h_3()
+                            .w(relative(0.6))
+                            .rounded_md()
+                            .bg(rgb(palette.control)),
+                    )
+                    .child(
+                        div()
+                            .h_2()
+                            .w(relative(0.4))
+                            .rounded_md()
+                            .bg(rgb(palette.control)),
+                    ),
             )
     }))
 }
 
 /// A release that is announced but not out: no artwork or link yet, just when.
-fn upcoming_card(
+fn upcoming_row(
     palette: CadencePalette,
     release: &model::UpcomingRelease,
     index: usize,
@@ -711,32 +844,56 @@ fn upcoming_card(
     div()
         .id(("home-upcoming", index))
         .test_support()
-        .w(RELEASE_CARD_WIDTH + Rems(0.75))
+        .w_full()
         .min_w_0()
-        .p_3()
+        .p_1p5()
         .flex()
-        .flex_col()
-        .gap_1()
-        .rounded_xl()
-        .bg(rgb(palette.surface_raised))
+        .items_center()
+        .gap_3()
         .child(
             div()
+                .flex_none()
+                .size(Rems(3.))
+                .rounded(Rems(0.5))
+                .bg(rgb(palette.control))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(components::icon(
+                    CadenceIcon::MusicNote,
+                    Rems(1.),
+                    palette.text_muted,
+                )),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .w_full()
+                        .truncate()
+                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                        .child(release.title.clone()),
+                )
+                .child(
+                    components::page_detail(
+                        palette,
+                        format!("{} · {}", release.artist, release.kind),
+                    )
+                    .w_full()
+                    .truncate(),
+                ),
+        )
+        .child(
+            div()
+                .flex_none()
                 .text_xs()
                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                 .text_color(rgb(palette.link))
                 .child(when.to_uppercase()),
-        )
-        .child(
-            div()
-                .w_full()
-                .truncate()
-                .font_weight(gpui_kit::FontWeight::MEDIUM)
-                .child(release.title.clone()),
-        )
-        .child(
-            components::page_detail(palette, format!("{} · {}", release.artist, release.kind))
-                .w_full()
-                .truncate(),
         )
 }
 
