@@ -43,10 +43,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Escape skips the first-launch intro.
-        if let Some(intro) = self.intro.take() {
-            intro.update(cx, |intro, cx| intro.skip(cx));
-            cx.notify();
+        // The first-launch intro cannot be skipped, so Escape does nothing
+        // until it ends.
+        if self.intro.is_some() {
             return;
         }
         // An in-flight scrub is the most immediate thing Escape can undo, so it

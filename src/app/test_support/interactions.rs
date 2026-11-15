@@ -5003,14 +5003,14 @@ fn first_launch_fixture() -> Fixture {
 }
 
 #[test]
-fn the_launch_intro_covers_a_first_launch_once_and_escape_skips_it() {
+fn the_launch_intro_covers_a_first_launch_once_and_cannot_be_skipped() {
     let mut fixture = first_launch_fixture();
     fixture.update(|window, _| assert!(window.try_find("launch-intro").is_some()));
     // It is claimed by this window: no other window (or relaunch) gets it.
     fixture.update(|_, cx| assert!(!services::AppServices::take_launch_intro(cx)));
     fixture.press("escape");
     fixture.update(|_, _| {});
-    fixture.update(|window, _| assert!(window.try_find("launch-intro").is_none()));
+    fixture.update(|window, _| assert!(window.try_find("launch-intro").is_some()));
 }
 
 #[test]
@@ -5020,12 +5020,11 @@ fn a_launch_that_is_not_the_first_never_shows_the_intro() {
 }
 
 #[test]
-fn a_click_skips_the_launch_intro_and_does_not_reach_the_page_beneath() {
+fn a_click_neither_skips_the_launch_intro_nor_reaches_the_page_beneath() {
     let mut fixture = first_launch_fixture();
     let route = fixture.route();
     fixture.update(|window, cx| window.click("launch-intro", cx));
     fixture.update(|_, _| {});
-    fixture.update(|window, _| assert!(window.try_find("launch-intro").is_none()));
-    // The click skipped the intro; it did not also open anything behind it.
+    fixture.update(|window, _| assert!(window.try_find("launch-intro").is_some()));
     assert_eq!(fixture.route(), route);
 }

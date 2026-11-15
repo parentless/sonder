@@ -65,14 +65,10 @@ impl LaunchIntro {
             _timer: None,
         }
     }
-
-    pub(super) fn skip(&mut self, cx: &mut Context<Self>) {
-        cx.emit(IntroDone);
-    }
 }
 
 impl Render for LaunchIntro {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let viewport = window.viewport_size();
         let scale = f32::from(window.rem_size()) / 16.;
         let (width, height) = (f32::from(viewport.width), f32::from(viewport.height));
@@ -84,12 +80,9 @@ impl Render for LaunchIntro {
             .left_0()
             .size_full()
             .overflow_hidden()
-            // Nothing behind it can be clicked while it plays; a click skips it.
-            .occlude()
-            .on_mouse_down(
-                gpui_kit::MouseButton::Left,
-                cx.listener(|this, _, _, cx| this.skip(cx)),
-            );
+            // Nothing behind it can be clicked while it plays, and it cannot be
+            // skipped: it is over in 2.3 seconds, once.
+            .occlude();
         match self.frozen {
             Some(progress) => overlay
                 .child(frame(

@@ -44,6 +44,13 @@ const MONTHS: &[Month] = &[
                 date: "Nov 14, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.47",
+                        notes: &[Note(
+                            Better,
+                            "The intro now plays through every time it appears, so it can no longer be skipped by clicking or pressing Escape. It still only plays once.",
+                        )],
+                    },
+                    Release {
                         version: "0.8.46",
                         notes: &[Note(
                             New,
