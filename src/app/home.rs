@@ -1,10 +1,11 @@
-//! The Home page: an orbit of the artists you play most, what is new from
-//! them, and your top tracks.
+//! The Home page, a briefing for you: story cards for what is new, what is
+//! coming and who to come back to, beside your top artists, then your top
+//! tracks.
 //!
 //! Two small Spotify requests per time range, made only when the page is opened
 //! and its data is more than half an hour old. The range on screen is compared
-//! with the next longer one, so one more pair of requests shows what is rising.
-//! Nothing runs in the background.
+//! with the next longer one, so one more pair of requests shows what is rising
+//! and who has gone quiet. Nothing runs in the background.
 use super::page::PageEvent;
 use super::top_listening::{TopEvent, TopListening};
 use super::*;
@@ -15,28 +16,21 @@ use std::time::SystemTime;
 /// Announced dates change slowly, and each lookup costs MusicBrainz about 20 requests.
 const UPCOMING_STALE_TIME: Duration = Duration::from_secs(24 * 60 * 60);
 const RELEASES_STALE_TIME: Duration = Duration::from_secs(6 * 60 * 60);
-/// How many releases and announcements sit beside the orbit.
-const SIDE_RELEASES: usize = 4;
-const SIDE_UPCOMING: usize = 3;
+/// How many stories of each kind the briefing shows.
+const STORY_RELEASES: usize = 3;
+const STORY_UPCOMING: usize = 2;
+const STORY_COME_BACK: usize = 2;
 /// A rising or falling artist is marked green or red.
 const RISING: u32 = 0x2E9E63;
+/// Artists listed before "See all".
+const ARTISTS_SHOWN: usize = 5;
+/// An artist is "come back to" when they rank this high on the longer chart.
+const COME_BACK_RANK: usize = 5;
 
-/// Where each artist's bubble sits in the orbit, by rank: centre x, centre y
-/// and diameter, in rems. Bigger bubbles are higher ranked; names sit below.
-const ORBIT: [(f32, f32, f32); model::HOME_ARTIST_LIMIT] = [
-    (5.625, 5.5, 10.0),
-    (15.5, 3.6, 7.0),
-    (18.5, 13.4, 6.0),
-    (24.0, 3.0, 5.25),
-    (28.5, 11.5, 4.75),
-    (5.5, 18.6, 4.5),
-    (12.5, 19.8, 3.75),
-    (24.0, 21.0, 3.5),
-    (31.0, 20.0, 3.25),
-    (32.5, 3.5, 3.0),
-];
-const ORBIT_WIDTH: Rems = Rems(36.);
-const ORBIT_HEIGHT: Rems = Rems(26.);
+enum StoryTarget {
+    Album(model::AlbumRef),
+    Artist(model::ArtistRef),
+}
 
 struct Upcoming {
     releases: Arc<[model::UpcomingRelease]>,
@@ -55,6 +49,7 @@ pub(super) struct HomePage {
     track_list: Entity<track_list::TrackList>,
     range: model::HomeRange,
     range_menu_open: bool,
+    all_artists: bool,
     releases: Option<Releases>,
     releases_loading: bool,
     releases_request: Option<gpui_kit::Task<()>>,
@@ -91,6 +86,7 @@ impl HomePage {
             track_list,
             range: model::HomeRange::default(),
             range_menu_open: false,
+            all_artists: false,
             releases: None,
             releases_loading: false,
             releases_request: None,
@@ -287,29 +283,142 @@ impl HomePage {
         self.close_range_menu(cx);
     }
 
-    /// A release beside the orbit: small cover, name, artist and a NEW mark.
-    fn release_row(
+    /// One story in the briefing: cover, a small tag, a title and a line of
+    /// detail. Opens `target` when there is one.
+    #[allow(clippy::too_many_arguments)]
+    fn story_card(
         &self,
-        album: &model::Album,
         index: usize,
+        artwork: Option<&str>,
+        tag: String,
+        accent: bool,
+        title: String,
+        detail: String,
+        target: Option<StoryTarget>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let palette = appearance::Appearance::palette(cx);
         let cache = services::AppServices::image_cache(cx);
-        let is_new = release_watch::is_new(&album.source_id, cx);
-        let mut detail = album
-            .artists
-            .iter()
-            .map(|artist| artist.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        if let Some(date) = album.release_date.as_deref().and_then(release_label) {
-            if !detail.is_empty() {
-                detail.push_str(" · ");
-            }
-            detail.push_str(&date);
-        }
-        components::button(palette, ("home-release", index))
+        let cover = tokens::ArtworkSize {
+            size: Rems(5.),
+            radius: Rems(0.75),
+        };
+        let tag = div()
+            .id(("home-story-tag", index))
+            .flex_none()
+            .px_1p5()
+            .rounded_md()
+            .text_xs()
+            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+            .when(accent, |tag| {
+                tag.bg(rgb(palette.link)).text_color(rgb(palette.on_accent))
+            })
+            .when(!accent, |tag| {
+                tag.bg(rgb(palette.control))
+                    .text_color(rgb(palette.text_muted))
+            })
+            .child(tag);
+        let body = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap_1()
+            .child(tag)
+            .child(
+                div()
+                    .max_w_full()
+                    .truncate()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .text_color(rgb(palette.text_primary))
+                    .child(title),
+            )
+            .child(
+                components::page_detail(palette, detail)
+                    .max_w_full()
+                    .truncate(),
+            );
+        let cover = if artwork.is_some() || target.is_some() {
+            components::artwork(palette, &cache, artwork, cover, CadenceIcon::MusicNote)
+                .into_any_element()
+        } else {
+            div()
+                .flex_none()
+                .size(cover.size)
+                .rounded(cover.radius)
+                .bg(rgb(palette.control))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(components::icon(
+                    CadenceIcon::MusicNote,
+                    Rems(1.5),
+                    palette.text_muted,
+                ))
+                .into_any_element()
+        };
+        let Some(target) = target else {
+            return div()
+                .id(("home-story", index))
+                .test_support()
+                .w_full()
+                .min_w_0()
+                .p_3()
+                .flex()
+                .items_center()
+                .gap_4()
+                .rounded_2xl()
+                .border_1()
+                .border_color(rgb(palette.border))
+                .child(cover)
+                .child(body)
+                .into_any_element();
+        };
+        components::button(palette, ("home-story", index))
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .p_3()
+            .gap_4()
+            .items_center()
+            .justify_start()
+            .rounded_2xl()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .hover(|style| style.bg(rgb(palette.surface_hover)))
+            .child(cover)
+            .child(body)
+            .on_click(cx.listener(move |_, _, _, cx| match &target {
+                StoryTarget::Album(album) => cx.emit(PageEvent::OpenAlbum(album.clone())),
+                StoryTarget::Artist(artist) => cx.emit(PageEvent::OpenArtist(artist.clone())),
+            }))
+            .into_any_element()
+    }
+
+    /// One artist in the list: rank, face, name, and the way their rank moved
+    /// against the longer chart.
+    fn artist_row(
+        &self,
+        artist: &model::Artist,
+        index: usize,
+        change: Option<i32>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let palette = appearance::Appearance::palette(cx);
+        let cache = services::AppServices::image_cache(cx);
+        let artwork = components::rectangular_artwork(
+            palette,
+            &cache,
+            artist.artwork_url.as_deref(),
+            tokens::ArtworkSize {
+                size: Rems(2.75),
+                radius: Rems(1.375),
+            },
+            Rems(2.75),
+            CadenceIcon::Person,
+        );
+        components::button(palette, ("home-artist", index))
             .test_support()
             .w_full()
             .min_w_0()
@@ -319,158 +428,50 @@ impl HomePage {
             .justify_start()
             .rounded_xl()
             .hover(|style| style.bg(rgb(palette.surface_hover)))
-            .child(components::artwork(
-                palette,
-                &cache,
-                album.artwork_url.as_deref(),
-                tokens::ArtworkSize {
-                    size: Rems(3.),
-                    radius: Rems(0.5),
-                },
-                CadenceIcon::MusicNote,
-            ))
+            .child(
+                div()
+                    .flex_none()
+                    .w(Rems(1.25))
+                    .text_color(rgb(palette.text_muted))
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .child((index + 1).to_string()),
+            )
+            .child(artwork)
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .w_full()
-                            .truncate()
-                            .font_weight(gpui_kit::FontWeight::MEDIUM)
-                            .child(album.name.clone()),
-                    )
-                    .child(components::page_detail(palette, detail).w_full().truncate()),
+                    .truncate()
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .child(artist.name.clone()),
             )
-            .when(is_new, |row| {
+            .when_some(change, |row, change| {
+                let (glyph, color) = if change > 0 {
+                    (CadenceIcon::ChevronUp, RISING)
+                } else {
+                    (CadenceIcon::ChevronDown, palette.danger)
+                };
                 row.child(
                     div()
-                        .id(("home-release-new", index))
+                        .id(("home-artist-change", index))
+                        .test_support()
                         .flex_none()
-                        .px_1p5()
-                        .rounded_md()
-                        .bg(rgb(palette.link))
-                        .text_color(rgb(palette.on_accent))
+                        .flex()
+                        .items_center()
+                        .gap_0p5()
+                        .pl_1()
+                        .pr_1p5()
+                        .rounded_full()
+                        .bg(rgb(palette.surface_raised))
+                        .border_1()
+                        .border_color(rgb(palette.border))
                         .text_xs()
                         .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .child("NEW"),
+                        .text_color(rgb(color))
+                        .child(components::icon(glyph, Rems(0.625), color))
+                        .child(change.unsigned_abs().to_string()),
                 )
             })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                if let Some(album) = this
-                    .releases
-                    .as_ref()
-                    .and_then(|releases| releases.albums.get(index))
-                {
-                    cx.emit(PageEvent::OpenAlbum(model::AlbumRef {
-                        name: album.name.clone(),
-                        source_id: Some(album.source_id.clone()),
-                        spotify_uri: album.spotify_uri.clone(),
-                        artwork_url: album.artwork_url.clone(),
-                    }));
-                }
-            }))
-            .into_any_element()
-    }
-
-    /// One artist as a bubble: bigger for a higher rank, with the way their
-    /// rank moved against the longer chart.
-    fn orbit_bubble(
-        &self,
-        artist: &model::Artist,
-        index: usize,
-        change: Option<i32>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let palette = appearance::Appearance::palette(cx);
-        let cache = services::AppServices::image_cache(cx);
-        let (x, y, diameter) = ORBIT[index];
-        let width = diameter.max(7.);
-        let artwork = components::rectangular_artwork(
-            palette,
-            &cache,
-            artist.artwork_url.as_deref(),
-            tokens::ArtworkSize {
-                size: Rems(diameter),
-                radius: Rems(diameter / 2.),
-            },
-            Rems(diameter),
-            CadenceIcon::Person,
-        );
-        components::button(palette, ("home-artist", index))
-            .test_support()
-            .absolute()
-            .left(Rems(x - width / 2.))
-            .top(Rems(y - diameter / 2.))
-            .w(Rems(width))
-            .min_w_0()
-            .flex_col()
-            .items_center()
-            .justify_start()
-            .gap_1p5()
-            .py_0p5()
-            .rounded_xl()
-            .hover(|style| style.bg(rgb(palette.surface_hover)))
-            .child(
-                div()
-                    .relative()
-                    .flex_none()
-                    .child(artwork)
-                    .when_some(change, |wrap, change| {
-                        let (glyph, color) = if change > 0 {
-                            (CadenceIcon::ChevronUp, RISING)
-                        } else {
-                            (CadenceIcon::ChevronDown, palette.danger)
-                        };
-                        wrap.child(
-                            div()
-                                .id(("home-artist-change", index))
-                                .test_support()
-                                .absolute()
-                                .top_0()
-                                .right(Rems(-0.25))
-                                .flex()
-                                .items_center()
-                                .gap_0p5()
-                                .pl_1()
-                                .pr_1p5()
-                                .rounded_full()
-                                .bg(rgb(palette.surface_raised))
-                                .border_1()
-                                .border_color(rgb(palette.border))
-                                .text_xs()
-                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                .text_color(rgb(color))
-                                .child(components::icon(glyph, Rems(0.625), color))
-                                .child(change.unsigned_abs().to_string()),
-                        )
-                    }),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .child(
-                        div()
-                            .max_w_full()
-                            .truncate()
-                            .font_weight(gpui_kit::FontWeight::MEDIUM)
-                            .child(artist.name.clone()),
-                    )
-                    .child(components::page_detail(
-                        palette,
-                        if index == 0 {
-                            "#1 · Most played".to_owned()
-                        } else {
-                            format!("#{}", index + 1)
-                        },
-                    )),
-            )
             // Capture just the index, resolving the current data on activation.
             .on_click(cx.listener(move |this, _, _, cx| {
                 let artist = this
@@ -592,7 +593,7 @@ impl HomePage {
 impl Render for HomePage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
-        let heading = |id, text| {
+        let heading = |id, text: SharedString| {
             div()
                 .id(id)
                 .test_support()
@@ -637,17 +638,6 @@ impl Render for HomePage {
                 ),
             ))
         } else {
-            let mut orbit = div().relative().flex_none().w(ORBIT_WIDTH).h(ORBIT_HEIGHT);
-            for (index, artist) in artists.iter().take(ORBIT.len()).enumerate() {
-                let change = compare.as_ref().and_then(|longer| {
-                    let before = longer
-                        .iter()
-                        .position(|other| other.source_id == artist.source_id)?;
-                    let change = before as i32 - index as i32;
-                    (change != 0).then_some(change)
-                });
-                orbit = orbit.child(self.orbit_bubble(artist, index, change, cx));
-            }
             self.track_list.update(cx, |list, cx| {
                 list.show(("home-tracks", self.range.index()), tracks.clone(), cx);
             });
@@ -662,73 +652,106 @@ impl Render for HomePage {
                 .map_or_else(|| Arc::from([]), |upcoming| upcoming.releases.clone());
             let releases_pending = self.releases.is_none() && self.releases_loading;
             let upcoming_pending = self.upcoming.is_none() && self.upcoming_loading;
-            // Shown while looking, and once looked even when nothing turned up,
-            // so an empty row is explained rather than missing.
-            let upcoming_shown = upcoming_pending || self.upcoming.is_some();
-            let side = div()
-                .flex_1()
-                .min_w(Rems(20.))
-                .flex()
-                .flex_col()
-                .gap_6()
-                .when(releases_pending, |side| {
-                    side.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .child(heading("home-releases-heading", "New from your orbit"))
-                            .child(release_skeleton(palette)),
-                    )
-                })
-                .when(!releases.is_empty(), |side| {
-                    side.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .child(heading("home-releases-heading", "New from your orbit"))
-                            .children(
-                                releases
-                                    .iter()
-                                    .take(SIDE_RELEASES)
-                                    .enumerate()
-                                    .map(|(index, album)| self.release_row(album, index, cx)),
-                            ),
-                    )
-                })
-                .when(upcoming_shown, |side| {
-                    side.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .child(heading("home-upcoming-heading", "Coming soon"))
-                            .child(if upcoming_pending {
-                                release_skeleton(palette).into_any_element()
-                            } else if upcoming.is_empty() {
-                                components::page_detail(
-                                    palette,
-                                    "Nothing announced yet for your top artists. Dates come from MusicBrainz, so some may be missing.",
-                                )
-                                .into_any_element()
-                            } else {
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .children(
-                                        upcoming
-                                            .iter()
-                                            .take(SIDE_UPCOMING)
-                                            .enumerate()
-                                            .map(|(index, release)| {
-                                                upcoming_row(palette, release, index)
-                                            }),
-                                    )
-                                    .into_any_element()
-                            }),
-                    )
+            let mut stories: Vec<AnyElement> = Vec::new();
+            for album in releases.iter().take(STORY_RELEASES) {
+                let is_new = release_watch::is_new(&album.source_id, cx);
+                let mut detail = album
+                    .artists
+                    .iter()
+                    .map(|artist| artist.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if let Some(date) = album.release_date.as_deref().and_then(release_label) {
+                    if !detail.is_empty() {
+                        detail.push_str(" · ");
+                    }
+                    detail.push_str(&date);
+                }
+                let target = StoryTarget::Album(model::AlbumRef {
+                    name: album.name.clone(),
+                    source_id: Some(album.source_id.clone()),
+                    spotify_uri: album.spotify_uri.clone(),
+                    artwork_url: album.artwork_url.clone(),
                 });
+                let index = stories.len();
+                stories.push(self.story_card(
+                    index,
+                    album.artwork_url.as_deref(),
+                    if is_new { "NEW RELEASE" } else { "RECENT" }.to_owned(),
+                    is_new,
+                    album.name.to_string(),
+                    detail,
+                    Some(target),
+                    cx,
+                ));
+            }
+            for release in upcoming.iter().take(STORY_UPCOMING) {
+                let when = release_label(&release.date).unwrap_or_else(|| release.date.clone());
+                let index = stories.len();
+                stories.push(self.story_card(
+                    index,
+                    None,
+                    format!("COMING {}", when.to_uppercase()),
+                    false,
+                    release.title.clone(),
+                    format!("{} · {}", release.artist, release.kind),
+                    None,
+                    cx,
+                ));
+            }
+            if let (Some(longer_range), Some(longer)) = (self.range.longer(), compare.as_ref()) {
+                let quiet = longer
+                    .iter()
+                    .take(COME_BACK_RANK)
+                    .enumerate()
+                    .filter(|(_, artist)| {
+                        !artists
+                            .iter()
+                            .any(|current| current.source_id == artist.source_id)
+                    })
+                    .take(STORY_COME_BACK);
+                for (rank, artist) in quiet {
+                    let index = stories.len();
+                    stories.push(self.story_card(
+                        index,
+                        artist.artwork_url.as_deref(),
+                        "COME BACK TO".to_owned(),
+                        false,
+                        format!("{}, quiet lately", artist.name),
+                        format!(
+                            "#{} for {} · not in {}",
+                            rank + 1,
+                            longer_range.short_label(),
+                            self.range.short_label()
+                        ),
+                        Some(StoryTarget::Artist(model::ArtistRef {
+                            name: artist.name.clone(),
+                            source_id: Some(artist.source_id.clone()),
+                            spotify_uri: artist.spotify_uri.clone(),
+                        })),
+                        cx,
+                    ));
+                }
+            }
+            let stories_pending = (releases_pending || upcoming_pending) && stories.is_empty();
+            let shown_artists = if self.all_artists {
+                artists.len()
+            } else {
+                artists.len().min(ARTISTS_SHOWN)
+            };
+            let mut artist_rows = div().flex().flex_col();
+            for (index, artist) in artists.iter().take(shown_artists).enumerate() {
+                let change = compare.as_ref().and_then(|longer| {
+                    let before = longer
+                        .iter()
+                        .position(|other| other.source_id == artist.source_id)?;
+                    let change = before as i32 - index as i32;
+                    (change != 0).then_some(change)
+                });
+                artist_rows = artist_rows.child(self.artist_row(artist, index, change, cx));
+            }
+            let more = artists.len() > ARTISTS_SHOWN;
+            let all_artists = self.all_artists;
             div()
                 .flex()
                 .flex_col()
@@ -739,17 +762,84 @@ impl Render for HomePage {
                         .flex_wrap()
                         .gap_x_10()
                         .gap_y_6()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(Rems(22.))
+                                .flex()
+                                .flex_col()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .h_10()
+                                        .flex()
+                                        .items_center()
+                                        .child(heading("home-stories-heading", "For you".into())),
+                                )
+                                .when(stories_pending, |column| {
+                                    column.child(release_skeleton(palette))
+                                })
+                                .when(!stories_pending && stories.is_empty(), |column| {
+                                    column.child(components::page_detail(
+                                        palette,
+                                        "Nothing new or announced for your top artists yet. Dates come from MusicBrainz, so some may be missing.",
+                                    ))
+                                })
+                                .children(stories),
+                        )
                         .when(!artists.is_empty(), |row| {
                             row.child(
                                 div()
+                                    .flex_1()
+                                    .min_w(Rems(20.))
                                     .flex()
                                     .flex_col()
                                     .gap_3()
-                                    .child(heading("home-artists-heading", "Your top artists"))
-                                    .child(orbit),
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .child(heading(
+                                                "home-artists-heading",
+                                                if all_artists {
+                                                    SharedString::from("Your top artists")
+                                                } else {
+                                                    SharedString::from(format!(
+                                                        "Your top {}",
+                                                        artists.len().min(ARTISTS_SHOWN)
+                                                    ))
+                                                },
+                                            ))
+                                            .when(more, |head| {
+                                                head.child(
+                                                    components::pill(
+                                                        palette,
+                                                        "home-artists-more",
+                                                        if all_artists {
+                                                            "Show less".to_owned()
+                                                        } else {
+                                                            format!("See all {}", artists.len())
+                                                        },
+                                                        false,
+                                                    )
+                                                    .test_support()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.all_artists = !this.all_artists;
+                                                        cx.notify();
+                                                    })),
+                                                )
+                                            }),
+                                    )
+                                    .child(artist_rows)
+                                    .when(compare.is_some(), |column| {
+                                        column.child(components::page_detail(
+                                            palette,
+                                            "Arrows compare with a longer stretch.",
+                                        ))
+                                    }),
                             )
-                        })
-                        .child(side),
+                        }),
                 )
                 .when(!tracks.is_empty(), |content| {
                     content.child(
@@ -757,7 +847,7 @@ impl Render for HomePage {
                             .flex()
                             .flex_col()
                             .gap_3()
-                            .child(heading("home-tracks-heading", "Your top tracks"))
+                            .child(heading("home-tracks-heading", "Your top tracks".into()))
                             .child(self.track_list.clone()),
                     )
                 })
@@ -832,69 +922,6 @@ fn release_skeleton(palette: CadencePalette) -> Div {
                     ),
             )
     }))
-}
-
-/// A release that is announced but not out: no artwork or link yet, just when.
-fn upcoming_row(
-    palette: CadencePalette,
-    release: &model::UpcomingRelease,
-    index: usize,
-) -> impl IntoElement {
-    let when = release_label(&release.date).unwrap_or_else(|| release.date.clone());
-    div()
-        .id(("home-upcoming", index))
-        .test_support()
-        .w_full()
-        .min_w_0()
-        .p_1p5()
-        .flex()
-        .items_center()
-        .gap_3()
-        .child(
-            div()
-                .flex_none()
-                .size(Rems(3.))
-                .rounded(Rems(0.5))
-                .bg(rgb(palette.control))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(components::icon(
-                    CadenceIcon::MusicNote,
-                    Rems(1.),
-                    palette.text_muted,
-                )),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .w_full()
-                        .truncate()
-                        .font_weight(gpui_kit::FontWeight::MEDIUM)
-                        .child(release.title.clone()),
-                )
-                .child(
-                    components::page_detail(
-                        palette,
-                        format!("{} · {}", release.artist, release.kind),
-                    )
-                    .w_full()
-                    .truncate(),
-                ),
-        )
-        .child(
-            div()
-                .flex_none()
-                .text_xs()
-                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                .text_color(rgb(palette.link))
-                .child(when.to_uppercase()),
-        )
 }
 
 fn release_label(date: &str) -> Option<String> {

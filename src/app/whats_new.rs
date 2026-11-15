@@ -44,6 +44,19 @@ const MONTHS: &[Month] = &[
                 date: "Nov 14, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.44",
+                        notes: &[
+                            Note(
+                                New,
+                                "Home is now a briefing: story cards for new releases, announced releases and artists to come back to, beside your top artists with arrows for who moved.",
+                            ),
+                            Note(
+                                Better,
+                                "Artist pages show placeholder albums while releases load, and while more load in.",
+                            ),
+                        ],
+                    },
+                    Release {
                         version: "0.8.43",
                         notes: &[
                             Note(

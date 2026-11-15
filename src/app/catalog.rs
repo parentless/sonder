@@ -915,7 +915,7 @@ impl ArtistPage {
         cx.notify();
     }
 
-    fn discography_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn discography_footer(&self, columns: usize, cx: &mut Context<Self>) -> AnyElement {
         let palette = appearance::Appearance::palette(cx);
         let error = self.album_error.clone();
         let loading = self.album_request.is_some();
@@ -926,41 +926,48 @@ impl ArtistPage {
         } else {
             "Load more releases"
         };
+        // Constant height, so the list never re-measures when a page starts
+        // or finishes loading; the releases on their way fill the same space.
         div()
             .id("artist-discography-footer")
             .test_support()
             .relative()
             .w_full()
-            .h_16()
+            .h(tokens::ALBUM_CARD_HEIGHT + Rems(0.5))
             .px_8()
             .flex()
-            .items_center()
+            .items_start()
             .gap_3()
+            .when(loading, |footer| {
+                footer.child(album_skeleton_row(palette, columns))
+            })
             .when(error.is_some(), |footer| {
                 footer.child(components::page_detail(
                     palette,
                     "Couldn't load more releases",
                 ))
             })
-            .child(
-                components::button(palette, "artist-load-more")
-                    .test_support()
-                    .h_10()
-                    .px_3()
-                    .rounded_lg()
-                    .text_color(rgb(palette.text_primary))
-                    .when(!loading, |button| {
-                        button.hover(|style| style.bg(rgb(palette.surface_hover)))
-                    })
-                    .child(label)
-                    .when_some(error, |button, error| {
-                        button.tooltip(move |window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(error.clone())
-                                .build(window, cx)
+            .when(!loading, |footer| {
+                footer.child(
+                    components::button(palette, "artist-load-more")
+                        .test_support()
+                        .h_10()
+                        .px_3()
+                        .rounded_lg()
+                        .text_color(rgb(palette.text_primary))
+                        .when(!loading, |button| {
+                            button.hover(|style| style.bg(rgb(palette.surface_hover)))
                         })
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| this.load_more_albums(cx))),
-            )
+                        .child(label)
+                        .when_some(error, |button, error| {
+                            button.tooltip(move |window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new(error.clone())
+                                    .build(window, cx)
+                            })
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.load_more_albums(cx))),
+                )
+            })
             .child(
                 gpui_kit::canvas(
                     {
@@ -1040,11 +1047,20 @@ impl ArtistPage {
             };
         }
         if !self.loaded {
+            let palette = appearance::Appearance::palette(cx);
             return div()
                 .px_8()
-                .child(components::list_skeleton(appearance::Appearance::palette(
-                    cx,
-                )))
+                .child(components::list_skeleton_rows(palette, 3))
+                .child(
+                    div()
+                        .mt_6()
+                        .mb_3()
+                        .h_5()
+                        .w(Rems(8.))
+                        .rounded_md()
+                        .bg(rgb(palette.control)),
+                )
+                .child(album_skeleton_row(palette, columns))
                 .into_any_element();
         }
         if let Some(error) = &self.error {
@@ -1084,7 +1100,7 @@ impl ArtistPage {
                 .into_any_element();
         }
         if index == 2 + self.albums.len().div_ceil(columns) {
-            return self.discography_footer(cx);
+            return self.discography_footer(columns, cx);
         }
         let start = (index - 2) * columns;
         let end = (start + columns).min(self.albums.len());
@@ -2253,6 +2269,41 @@ impl Render for PlaylistPage {
             )
             .child(list)
     }
+}
+
+/// Placeholder cards with the footprint of `album_card`, so releases replace
+/// them without moving anything. Static: no animation to run while loading.
+fn album_skeleton_row(palette: CadencePalette, columns: usize) -> impl IntoElement {
+    let bar = |width: Rems, height: Rems| {
+        div()
+            .w(width)
+            .h(height)
+            .rounded_md()
+            .bg(rgb(palette.control))
+    };
+    let mut row = div().w_full().flex().items_start().gap_2();
+    for _ in 0..columns.max(1) {
+        row = row.child(
+            div()
+                .w(tokens::ALBUM_CARD_ARTWORK.size + Rems(1.))
+                .flex_none()
+                .p_2()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2p5()
+                .child(
+                    div()
+                        .w(tokens::ALBUM_CARD_ARTWORK.size)
+                        .h(tokens::ALBUM_CARD_ARTWORK.size)
+                        .rounded(tokens::ALBUM_CARD_ARTWORK.radius)
+                        .bg(rgb(palette.control)),
+                )
+                .child(bar(Rems(7.), Rems(0.9)))
+                .child(bar(Rems(3.), Rems(0.75))),
+        );
+    }
+    row
 }
 
 impl ArtistPage {

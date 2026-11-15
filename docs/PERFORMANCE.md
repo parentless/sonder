@@ -398,6 +398,7 @@ closes. The panel redraws only when the seconds left change.
 ## Home, artist pages and saves
 
 - **Top listening** is one shared in-memory store. Home loads the range on screen, then the next longer one (to show who is rising): two request pairs per half hour at most, none while the page is closed. Artist pages only read what is already loaded, so opening a profile costs no request. Finding an artist's songs is one pass over at most 60 chart rows plus the liked list.
-- **The orbit** is at most ten absolutely placed bubbles. Covers use the same bounded image cache as everywhere else.
+- **The briefing** is at most seven story cards and ten artist rows, built from data already fetched. Covers use the same bounded image cache as everywhere else. The "come back to" cards compare the two charts already loaded, with no extra request.
+- **Album placeholders** on artist pages are static blocks in a fixed-height footer, so the list never re-measures as pages load.
 - **Queue saves:** skipping within an unchanged queue writes two tiny preference rows (index, position). The full queue is rewritten only when it changes, found by comparing one 64-bit hash per song. The 5-second position save no longer touches the queue row.
 - **Caches:** the image cache moves a used cover to the back without cloning or a full scan. The artwork disk cache refreshes a file's modified time at most once a day on use, so eviction drops what is least recently used.

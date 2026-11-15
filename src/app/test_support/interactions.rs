@@ -4041,18 +4041,18 @@ fn home_lists_new_releases_from_top_artists_and_opens_one() {
     // While the releases load, the section holds its place with placeholders.
     fixture.update(|_, _| {});
     fixture.update(|window, _| {
-        assert!(window.try_find("home-releases-heading").is_some());
-        assert!(window.try_find(("home-release", 0usize)).is_none());
+        assert!(window.try_find("home-stories-heading").is_some());
+        assert!(window.try_find(("home-story", 0usize)).is_none());
     });
     answer_new_releases(&mut fixture, Ok(vec![release_album()]));
     fixture.update(|_, _| {});
     fixture.update(|window, _| {
-        assert!(window.try_find("home-releases-heading").is_some());
-        assert!(window.try_find(("home-release", 0usize)).is_some());
-        assert!(window.try_find("home-upcoming-heading").is_some());
-        assert!(window.try_find(("home-upcoming", 0usize)).is_some());
+        assert!(window.try_find("home-stories-heading").is_some());
+        assert!(window.try_find(("home-story", 0usize)).is_some());
+        // The announced release follows the new one.
+        assert!(window.try_find(("home-story", 1usize)).is_some());
     });
-    fixture.update(|window, cx| window.click(("home-release", 0usize), cx));
+    fixture.update(|window, cx| window.click(("home-story", 0usize), cx));
     assert_eq!(fixture.route(), Route::Album);
 }
 
