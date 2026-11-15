@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.46",
+    "cadence": "0.8.47",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "d2b6d3c46711ec060c0e0958488d16a9b64229dd",
-    "lockfile_sha256": "c020420999f5d69686c532f70542fdc2f85e8d0bab6063cda62d6252dcf55d46"
+    "revision": "8fe37253cb4e0ecc0653875d7eaae780fbd41c02",
+    "lockfile_sha256": "3ede742d410da6c495dc3973e180d3da1e62bf9041ea5113b4d41f4bfbbfc890"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43674674001",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/43677210526",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.46",
+      "cadence": "0.8.47",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "d2b6d3c46711ec060c0e0958488d16a9b64229dd",
-      "lockfile_sha256": "c020420999f5d69686c532f70542fdc2f85e8d0bab6063cda62d6252dcf55d46"
+      "revision": "8fe37253cb4e0ecc0653875d7eaae780fbd41c02",
+      "lockfile_sha256": "3ede742d410da6c495dc3973e180d3da1e62bf9041ea5113b4d41f4bfbbfc890"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43674674001"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/43677210526"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -98,6 +98,7 @@
     "0.8.43: the player bar always shows the lyrics button, so every full-window capture changed; Home shows an orbit of artist bubbles with a range menu (home, home-permission, and four new home-range-menu references); artist pages gain a You tab and rank line (four new artist-yours references); Settings drops the Show lyrics switch and shows version 0.8.43; What's new lists the new release",
     "0.8.44: Home becomes a briefing (For you story cards beside Your top 5 with rank arrows, then top tracks), so home and home-range-menu changed; artist pages show placeholder albums while loading (artist-loading, artist-releases-loading) and the retry row sits in a fixed-height footer (artist-releases-failure); Settings shows version 0.8.44; What's new lists the new release",
     "0.8.45: the first-launch intro adds twelve references (launch-intro-glow, launch-intro-click, launch-intro-open) held at three moments of its 2.3 s; artist-releases-loading shows placeholders filling the partial last row; Settings shows version 0.8.45; What's new lists the new release",
-    "0.8.46: only Settings (the version) and the What's new list changed"
+    "0.8.46: only Settings (the version) and the What's new list changed",
+    "0.8.47: only Settings (the version) and the What's new list changed"
   ]
 }
