@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.43",
+    "cadence": "0.8.44",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "a2df0dd059ec85568d2597a672bf170517771645",
-    "lockfile_sha256": "af53dd6e3a17ccadda44d1e0aa9823e14cc2503e7e91b5799f51dd7999de4653"
+    "revision": "07551600862db0499d3db0281736e9dc1998ff68",
+    "lockfile_sha256": "0c2e6c372e1d77e313febcde519fc8ee56088985a46d917fc3c38364c41f2da2"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43656213114",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/43660044600",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.43",
+      "cadence": "0.8.44",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "a2df0dd059ec85568d2597a672bf170517771645",
-      "lockfile_sha256": "af53dd6e3a17ccadda44d1e0aa9823e14cc2503e7e91b5799f51dd7999de4653"
+      "revision": "07551600862db0499d3db0281736e9dc1998ff68",
+      "lockfile_sha256": "0c2e6c372e1d77e313febcde519fc8ee56088985a46d917fc3c38364c41f2da2"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43656213114"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/43660044600"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",

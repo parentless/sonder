@@ -936,36 +936,42 @@ impl ArtistPage {
             .h(tokens::ALBUM_CARD_HEIGHT + Rems(0.5))
             .px_8()
             .flex()
-            .items_start()
-            .gap_3()
+            .flex_col()
             .when(loading, |footer| {
                 footer.child(album_skeleton_row(palette, columns))
             })
-            .when(error.is_some(), |footer| {
-                footer.child(components::page_detail(
-                    palette,
-                    "Couldn't load more releases",
-                ))
-            })
             .when(!loading, |footer| {
                 footer.child(
-                    components::button(palette, "artist-load-more")
-                        .test_support()
-                        .h_10()
-                        .px_3()
-                        .rounded_lg()
-                        .text_color(rgb(palette.text_primary))
-                        .when(!loading, |button| {
-                            button.hover(|style| style.bg(rgb(palette.surface_hover)))
+                    div()
+                        .h_16()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .when(error.is_some(), |row| {
+                            row.child(components::page_detail(
+                                palette,
+                                "Couldn't load more releases",
+                            ))
                         })
-                        .child(label)
-                        .when_some(error, |button, error| {
-                            button.tooltip(move |window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new(error.clone())
-                                    .build(window, cx)
-                            })
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| this.load_more_albums(cx))),
+                        .child(
+                            components::button(palette, "artist-load-more")
+                                .test_support()
+                                .h_10()
+                                .px_3()
+                                .rounded_lg()
+                                .text_color(rgb(palette.text_primary))
+                                .when(!loading, |button| {
+                                    button.hover(|style| style.bg(rgb(palette.surface_hover)))
+                                })
+                                .child(label)
+                                .when_some(error, |button, error| {
+                                    button.tooltip(move |window, cx| {
+                                        gpui_kit::component::tooltip::Tooltip::new(error.clone())
+                                            .build(window, cx)
+                                    })
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| this.load_more_albums(cx))),
+                        ),
                 )
             })
             .child(
