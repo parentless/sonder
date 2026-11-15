@@ -2,9 +2,9 @@
 //! lands on the Sonder icon, which is selected and pressed, and the icon opens
 //! into the app.
 //!
-//! It plays once, ever: on the first time the main window opens for an install
-//! that has never run Sonder (see `Store::launch_intro_pending`). A click or
-//! Escape skips it, and with reduced motion it is not shown at all.
+//! It plays once, ever: the first time the main window opens on an install
+//! that has not seen it, new or updated (see `Store::launch_intro_pending`). A
+//! click or Escape skips it, and with reduced motion it is not shown at all.
 //!
 //! Every frame is a pure function of the elapsed time ([`frame`]), built from a
 //! few dozen plain elements. Nothing runs once it ends, and the overlay is

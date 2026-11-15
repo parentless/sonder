@@ -40,8 +40,8 @@ pub(super) struct AppServices {
     library_refresh: Option<gpui_kit::Task<()>>,
     lifecycle: Arc<InstanceLifecycle>,
     store: Option<Store>,
-    /// Whether the first-launch intro is still owed. Set at startup for an
-    /// install that has never run Sonder and cleared when it is played.
+    /// Whether the first-launch intro is still owed. Set at startup until it
+    /// has been played once, then cleared.
     launch_intro_pending: bool,
     /// The live preference values, so a window opened later starts from what
     /// the listener last chose rather than from what was on disk at launch.
@@ -412,8 +412,7 @@ impl AppServices {
         cx.global_mut::<Self>().launch_intro_pending = pending;
     }
 
-    /// Claims the first-launch intro: true exactly once for an install that
-    /// has never run Sonder. It is recorded as played before it starts, so
+    /// Claims the first-launch intro: true exactly once per install. It is recorded as played before it starts, so
     /// quitting part-way never repeats it.
     pub(super) fn take_launch_intro(cx: &mut App) -> bool {
         let services = cx.global_mut::<Self>();

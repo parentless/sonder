@@ -15,11 +15,10 @@ pub(super) fn run() {
             return;
         }
     };
-    let mut preferences_store = Store::open_default().ok();
-    // Decided before anything else writes a setting: only an install that has
-    // never run Sonder gets the first-launch intro.
+    let preferences_store = Store::open_default().ok();
+    // The intro plays once, the first launch that has not seen it.
     let launch_intro_pending = preferences_store
-        .as_mut()
+        .as_ref()
         .is_some_and(|store| store.launch_intro_pending().unwrap_or(false));
     let preferences = preferences_store
         .as_ref()

@@ -585,34 +585,15 @@ impl Store {
         self.set_preference("theme", value)
     }
 
-    /// Decides, once per install, whether the launch intro is still owed.
-    ///
-    /// A database with nothing in its preferences has never run Sonder, so the
-    /// intro is pending until the main window plays it. Any other database
-    /// belongs to someone who already uses Sonder (an update, not a first
-    /// launch) and is marked done without ever showing it.
-    pub(crate) fn launch_intro_pending(&mut self) -> Result<bool> {
-        match self.preference(LAUNCH_INTRO_KEY)?.as_deref() {
-            Some("pending") => Ok(true),
-            Some(_) => Ok(false),
-            None => {
-                let used_before: bool = self.connection.query_row(
-                    "SELECT EXISTS (SELECT 1 FROM preferences)",
-                    [],
-                    |row| row.get(0),
-                )?;
-                self.set_preference(
-                    LAUNCH_INTRO_KEY,
-                    if used_before { "done" } else { "pending" },
-                )?;
-                Ok(!used_before)
-            }
-        }
+    /// Whether the launch intro is still owed: until it has been played once,
+    /// for everyone, whether they are new or had used Sonder before it existed.
+    pub(crate) fn launch_intro_pending(&self) -> Result<bool> {
+        Ok(self.preference(LAUNCH_INTRO_KEY)?.is_none())
     }
 
     /// Records that the intro has played, so it never plays again.
     pub(crate) fn mark_launch_intro_done(&mut self) -> Result<()> {
-        self.set_preference(LAUNCH_INTRO_KEY, "done")
+        self.set_preference(LAUNCH_INTRO_KEY, "played")
     }
 
     pub fn spotify_client_id(&self) -> Result<Option<String>> {
@@ -1255,7 +1236,9 @@ impl Store {
 }
 
 const LIBRARY_FINGERPRINT_KEY: &str = "library_fingerprint";
-const LAUNCH_INTRO_KEY: &str = "launch_intro";
+/// 0.8.45 used "launch_intro" and marked every existing install done without
+/// showing it; a new key gives those installs their one play.
+const LAUNCH_INTRO_KEY: &str = "launch_intro_played";
 
 #[cfg(test)]
 mod tests {
@@ -1439,21 +1422,20 @@ mod tests {
     }
 
     #[test]
-    fn the_launch_intro_is_owed_only_to_a_brand_new_install_and_only_once() {
-        // A fresh database has never run Sonder: the intro is pending, and
-        // stays pending until it has been played.
+    fn the_launch_intro_is_owed_to_everyone_until_it_has_played_once() {
+        // A new install, and an install that already holds settings (an
+        // update), both owe it; once played it never comes back.
         let mut fresh = Store::in_memory().unwrap();
         assert!(fresh.launch_intro_pending().unwrap());
-        assert!(fresh.launch_intro_pending().unwrap());
-        fresh.mark_launch_intro_done().unwrap();
-        assert!(!fresh.launch_intro_pending().unwrap());
-
-        // A database that already holds settings is an update, not a first
-        // launch, and never sees the intro.
         let mut existing = Store::in_memory().unwrap();
         existing.set_sidebar_collapsed(true).unwrap();
-        assert!(!existing.launch_intro_pending().unwrap());
-        assert!(!existing.launch_intro_pending().unwrap());
+        // The marker 0.8.45 left on installs that never saw it does not count.
+        existing.set_preference("launch_intro", "done").unwrap();
+        for store in [&mut fresh, &mut existing] {
+            assert!(store.launch_intro_pending().unwrap());
+            store.mark_launch_intro_done().unwrap();
+            assert!(!store.launch_intro_pending().unwrap());
+        }
     }
 
     #[test]

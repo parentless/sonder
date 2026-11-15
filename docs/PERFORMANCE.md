@@ -405,6 +405,6 @@ closes. The panel redraws only when the seconds left change.
 
 ## First-launch intro
 
-- **Plays once, ever.** `Store::launch_intro_pending` marks a database with no settings as a new install and everything else as already done, so an update never shows it. It is recorded as played the moment the main window claims it, so quitting part-way never repeats it.
+- **Plays once, ever.** `Store::launch_intro_pending` is true until a `launch_intro_played` setting exists, so new installs and updated ones each get it exactly once. It is recorded the moment the main window claims it, so quitting part-way never repeats it.
 - **Cheap while it runs.** It is its own view, so only about 25 plain elements are rebuilt per frame, not the workspace. Glows are box shadows, with no images or shaders added. It lasts 2.3 s.
 - **Free afterwards.** The view is dropped when it ends, on a click, or on Escape; nothing keeps running. Reduced motion skips it entirely.
