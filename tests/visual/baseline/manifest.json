@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.42",
+    "cadence": "0.8.43",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "c3c81f4bc23281cc99a4439f675b3e7684e32ec3",
-    "lockfile_sha256": "a909931d0dbe98cc42dff5c6d916864f0efe0f161ff9fd76542950a596ce1158"
+    "revision": "a2df0dd059ec85568d2597a672bf170517771645",
+    "lockfile_sha256": "af53dd6e3a17ccadda44d1e0aa9823e14cc2503e7e91b5799f51dd7999de4653"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43648601199",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/43656213114",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.42",
+      "cadence": "0.8.43",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "c3c81f4bc23281cc99a4439f675b3e7684e32ec3",
-      "lockfile_sha256": "a909931d0dbe98cc42dff5c6d916864f0efe0f161ff9fd76542950a596ce1158"
+      "revision": "a2df0dd059ec85568d2597a672bf170517771645",
+      "lockfile_sha256": "af53dd6e3a17ccadda44d1e0aa9823e14cc2503e7e91b5799f51dd7999de4653"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43648601199"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/43656213114"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -94,6 +94,7 @@
     "In 0.8.39 the sidebar gains a What's new row after the last library item (with a red dot until it is opened) and an update card at its foot when an update is offered, so nearly every full-window capture changed; four whats-new references are new, the update-available references show the card, and Settings shows version 0.8.39 plus the Install updates automatically and What's new rows",
     "In 0.8.40 What's new moves into the account menu (a New pill on the row and a red dot on the avatar until it is opened) and the sidebar loses its What's new row, so every full-window capture changes back to five library rows; the account-menu references gain the row, and the four whats-new references show the latest release card with the months folded below; Settings shows version 0.8.40",
     "In 0.8.41 the What's new months lose their outer border and artist pages show five popular songs with a Show more button when an artist has more; four artist-popular-more references are new, the four whats-new references change, and Settings shows version 0.8.41",
-    "0.8.42 only changes the Settings version and the What's new list (a new top release); the update-available scenes are unchanged because the avatar never showed the update dot there"
+    "0.8.42 only changes the Settings version and the What's new list (a new top release); the update-available scenes are unchanged because the avatar never showed the update dot there",
+    "0.8.43: the player bar always shows the lyrics button, so every full-window capture changed; Home shows an orbit of artist bubbles with a range menu (home, home-permission, and four new home-range-menu references); artist pages gain a You tab and rank line (four new artist-yours references); Settings drops the Show lyrics switch and shows version 0.8.43; What's new lists the new release"
   ]
 }
