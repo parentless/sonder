@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.47",
+    "cadence": "0.8.48",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "8fe37253cb4e0ecc0653875d7eaae780fbd41c02",
-    "lockfile_sha256": "3ede742d410da6c495dc3973e180d3da1e62bf9041ea5113b4d41f4bfbbfc890"
+    "revision": "c44ea648bf1163baf39c2d02824cc92d531206d0",
+    "lockfile_sha256": "b569829fe3245cc39f5ce2c1df7991bf233f9df83a7c322b6e02576318bc0a33"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43677210526",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/43696099386",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.47",
+      "cadence": "0.8.48",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "8fe37253cb4e0ecc0653875d7eaae780fbd41c02",
-      "lockfile_sha256": "3ede742d410da6c495dc3973e180d3da1e62bf9041ea5113b4d41f4bfbbfc890"
+      "revision": "c44ea648bf1163baf39c2d02824cc92d531206d0",
+      "lockfile_sha256": "b569829fe3245cc39f5ce2c1df7991bf233f9df83a7c322b6e02576318bc0a33"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43677210526"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/43696099386"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -99,6 +99,7 @@
     "0.8.44: Home becomes a briefing (For you story cards beside Your top 5 with rank arrows, then top tracks), so home and home-range-menu changed; artist pages show placeholder albums while loading (artist-loading, artist-releases-loading) and the retry row sits in a fixed-height footer (artist-releases-failure); Settings shows version 0.8.44; What's new lists the new release",
     "0.8.45: the first-launch intro adds twelve references (launch-intro-glow, launch-intro-click, launch-intro-open) held at three moments of its 2.3 s; artist-releases-loading shows placeholders filling the partial last row; Settings shows version 0.8.45; What's new lists the new release",
     "0.8.46: only Settings (the version) and the What's new list changed",
-    "0.8.47: only Settings (the version) and the What's new list changed"
+    "0.8.47: only Settings (the version) and the What's new list changed",
+    "0.8.48: the volume slider shows only its line at rest (the dot appears on hover or drag and has no border), so the 100 full-window captures with the player bar changed only in the volume slider; Settings shows version 0.8.48; What's new lists the new release"
   ]
 }
