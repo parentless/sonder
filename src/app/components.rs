@@ -566,6 +566,26 @@ pub(super) fn artwork(
     )
 }
 
+/// A cover that is round only on its left side, for one that sits flush
+/// against the left edge of a card.
+pub(super) fn artwork_flush_right(
+    palette: CadencePalette,
+    image_cache: &Entity<image_cache::BoundedImageCache>,
+    url: Option<&str>,
+    artwork_size: tokens::ArtworkSize,
+    fallback_icon: CadenceIcon,
+) -> gpui_kit::AnyElement {
+    shaped_artwork(
+        palette,
+        image_cache,
+        url,
+        artwork_size,
+        artwork_size.size,
+        fallback_icon,
+        true,
+    )
+}
+
 /// Fixed external dimensions keep source image proportions out of layout.
 /// Search portraits use a wide frame; cache decoding still follows its short edge.
 pub(super) fn rectangular_artwork(
@@ -576,13 +596,39 @@ pub(super) fn rectangular_artwork(
     width: Rems,
     fallback_icon: CadenceIcon,
 ) -> gpui_kit::AnyElement {
+    shaped_artwork(
+        palette,
+        image_cache,
+        url,
+        artwork_size,
+        width,
+        fallback_icon,
+        false,
+    )
+}
+
+fn shaped_artwork(
+    palette: CadencePalette,
+    image_cache: &Entity<image_cache::BoundedImageCache>,
+    url: Option<&str>,
+    artwork_size: tokens::ArtworkSize,
+    width: Rems,
+    fallback_icon: CadenceIcon,
+    flush_right: bool,
+) -> gpui_kit::AnyElement {
     let frame = div()
         .w(width)
         .h(artwork_size.size)
         .relative()
         .flex_none()
-        .rounded(artwork_size.radius)
         .overflow_hidden();
+    let frame = if flush_right {
+        frame
+            .rounded_tl(artwork_size.radius)
+            .rounded_bl(artwork_size.radius)
+    } else {
+        frame.rounded(artwork_size.radius)
+    };
     if let Some(url) = url {
         let cache = image_cache.clone();
         let resource = gpui_kit::Resource::Uri(url.to_owned().into());
@@ -609,7 +655,16 @@ pub(super) fn rectangular_artwork(
                             if let Err(error) = window.paint_image(
                                 bounds,
                                 fitted,
-                                gpui_kit::Corners::all(radius),
+                                if flush_right {
+                                    gpui_kit::Corners {
+                                        top_left: radius,
+                                        top_right: gpui_kit::px(0.),
+                                        bottom_right: gpui_kit::px(0.),
+                                        bottom_left: radius,
+                                    }
+                                } else {
+                                    gpui_kit::Corners::all(radius)
+                                },
                                 image,
                                 0,
                                 false,
@@ -620,7 +675,18 @@ pub(super) fn rectangular_artwork(
                             // A placeholder replaces the missing image; it is
                             // never an extra opaque quad behind a loaded cover.
                             window.paint_quad(
-                                gpui_kit::fill(bounds, rgb(palette.selection)).corner_radii(radius),
+                                gpui_kit::fill(bounds, rgb(palette.selection)).corner_radii(
+                                    if flush_right {
+                                        gpui_kit::Corners {
+                                            top_left: radius,
+                                            top_right: gpui_kit::px(0.),
+                                            bottom_right: gpui_kit::px(0.),
+                                            bottom_left: radius,
+                                        }
+                                    } else {
+                                        gpui_kit::Corners::all(radius)
+                                    },
+                                ),
                             );
                         }
                     },

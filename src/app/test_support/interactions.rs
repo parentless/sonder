@@ -4056,6 +4056,8 @@ fn home_loads_top_items_once_when_opened_and_opens_an_artist() {
     fixture.update(|window, cx| window.click("nav-recent", cx));
     fixture.update(|window, cx| window.click("nav-home", cx));
     fixture.no_commands();
+    // The top artists sit below the opening rows.
+    scroll_home(&mut fixture, 700.);
     fixture.update(|window, cx| window.click(("home-artist", 0usize), cx));
     assert_eq!(fixture.route(), Route::Artist);
 }
@@ -4087,9 +4089,9 @@ fn home_lists_new_releases_from_top_artists_and_opens_one() {
         assert!(window.try_find("home-releases-loading").is_none());
         assert!(window.try_find("home-releases-heading").is_some());
         assert!(window.try_find(("home-release", 0usize)).is_some());
-        // The announced release is a story, below the artist to try.
-        assert!(window.try_find("home-stories-heading").is_some());
-        assert!(window.try_find(("home-story", 0usize)).is_some());
+        // The announced release sits beside the artist to try.
+        assert!(window.try_find("home-discover-heading").is_some());
+        assert!(window.try_find("home-upcoming").is_some());
     });
     fixture.update(|window, cx| window.click(("home-release", 0usize), cx));
     assert_eq!(fixture.route(), Route::Album);
@@ -4115,6 +4117,16 @@ fn home_opens_with_shortcuts_back_into_the_library_and_the_song_to_carry_on_with
         assert!(window.try_find("home-continue").is_some());
         assert!(window.try_find("home-continue-progress").is_some());
     });
+
+    // The play button on a tile starts its songs without leaving Home.
+    fixture.update(|window, cx| window.hover(("home-shortcut", 0usize), cx));
+    fixture.update(|window, cx| window.click(("home-shortcut-play", 0usize), cx));
+    let mut started = false;
+    while let Ok(command) = fixture.backend.commands.try_recv() {
+        started |= matches!(command, BackendCommand::PlayContext { index: 0, .. });
+    }
+    assert!(started, "the tile's songs start");
+    assert_eq!(fixture.route(), Route::Home);
 
     fixture.update(|window, cx| window.click(("home-shortcut", 0usize), cx));
     assert_eq!(fixture.route(), Route::LikedSongs);
@@ -5502,9 +5514,7 @@ fn home_offers_an_artist_to_try_plays_a_sample_and_steps_on_when_dismissed() {
     fixture.update(|window, _| {
         assert!(window.try_find("home-discover").is_some());
         assert!(window.try_find("home-discover-play").is_some());
-        assert!(window.try_find(("home-discover-song", 1usize)).is_some());
-        // The other artist waits under "Up next".
-        assert!(window.try_find(("home-discover-next", 1usize)).is_some());
+        assert!(window.try_find("home-discover-pending").is_none());
     });
 
     // The artist to try sits below the shortcuts and what is new.
@@ -5534,8 +5544,8 @@ fn home_offers_an_artist_to_try_plays_a_sample_and_steps_on_when_dismissed() {
     assert_eq!(source_id, "sug-1");
     answer_offered_artist(&mut fixture, "sug-2", vec![track(3)]);
     fixture.update(|window, _| {
-        assert!(window.try_find(("home-discover-next", 1usize)).is_none());
-        assert!(window.try_find(("home-discover-song", 0usize)).is_some());
+        assert!(window.try_find("home-discover").is_some());
+        assert!(window.try_find("home-discover-play").is_some());
     });
 
     // Opening the artist goes to their page.
@@ -5544,11 +5554,11 @@ fn home_offers_an_artist_to_try_plays_a_sample_and_steps_on_when_dismissed() {
 }
 
 #[test]
-fn home_keeps_its_stories_when_there_is_nobody_to_suggest() {
+fn home_keeps_its_other_rows_when_there_is_nobody_to_suggest() {
     let mut fixture = home_offering(Vec::new(), Vec::new());
     fixture.update(|window, _| {
         assert!(window.try_find("home-discover").is_none());
-        assert!(window.try_find("home-stories-heading").is_some());
+        assert!(window.try_find("home-shortcuts").is_some());
         assert!(window.try_find("home-range-menu").is_some());
     });
 }

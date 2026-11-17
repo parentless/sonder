@@ -25,27 +25,26 @@ const DISCOVER_STALE_TIME: Duration = Duration::from_secs(6 * 60 * 60);
 const DISCOVER_SONGS: usize = 3;
 /// Artists whose songs are kept, so stepping back and forth asks for nothing.
 const DISCOVER_SONGS_KEPT: usize = 8;
-/// Other artists shown under the one on offer.
-const DISCOVER_NEXT_SHOWN: usize = 4;
 /// New albums shown under Home's first heading.
 const RELEASES_SHOWN: usize = 3;
-/// How many stories of each kind the briefing shows.
-const STORY_UPCOMING: usize = 2;
-const STORY_COME_BACK: usize = 2;
+/// The hue of the Liked Songs tile.
+const LIKED_HUE: f32 = 340.;
 /// A rising or falling artist is marked green or red.
 const RISING: u32 = 0x2E9E63;
 /// Artists listed before "See all".
 const ARTISTS_SHOWN: usize = 5;
-/// An artist is "come back to" when they rank this high on the longer chart.
-const COME_BACK_RANK: usize = 5;
 
 /// One way back into the library, drawn as a tile at the top of Home.
 struct Shortcut {
     url: Option<String>,
     icon: CadenceIcon,
+    /// The hue of a flat colour standing in for a cover, when there is none.
+    tint: Option<f32>,
     round: bool,
     title: SharedString,
     detail: String,
+    /// What a play button on the tile starts, when it can start at once.
+    play: Option<Arc<[model::Track]>>,
     event: PageEvent,
 }
 
@@ -429,18 +428,6 @@ impl HomePage {
         }));
     }
 
-    fn show_suggestion(&mut self, index: usize, cx: &mut Context<Self>) {
-        let count = self
-            .discover
-            .as_ref()
-            .map_or(0, |discover| discover.suggestions.len());
-        if index < count && index != self.discover_index {
-            self.discover_index = index;
-            self.load_discover_songs(cx);
-            cx.notify();
-        }
-    }
-
     /// "Not for me": remembered for good, and the next artist takes the place.
     fn dismiss_suggestion(&mut self, cx: &mut Context<Self>) {
         let Some(discover) = self.discover.as_mut() else {
@@ -519,118 +506,6 @@ impl HomePage {
     pub(super) fn close_menus(&mut self, cx: &mut Context<Self>) {
         self.track_list.update(cx, |list, cx| list.close_menu(cx));
         self.close_range_menu(cx);
-    }
-
-    /// One story in the briefing: cover, a small tag, a title and a line of
-    /// detail. Opens `target` when there is one.
-    #[allow(clippy::too_many_arguments)]
-    fn story_card(
-        &self,
-        index: usize,
-        artwork: Option<&str>,
-        tag: String,
-        accent: bool,
-        title: String,
-        detail: String,
-        target: Option<model::ArtistRef>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let palette = appearance::Appearance::palette(cx);
-        let cache = services::AppServices::image_cache(cx);
-        let cover = tokens::ArtworkSize {
-            size: Rems(5.),
-            radius: Rems(0.75),
-        };
-        let tag = div()
-            .id(("home-story-tag", index))
-            .flex_none()
-            .px_1p5()
-            .rounded_md()
-            .text_xs()
-            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-            .when(accent, |tag| {
-                tag.bg(rgb(palette.link)).text_color(rgb(palette.on_accent))
-            })
-            .when(!accent, |tag| {
-                tag.bg(rgb(palette.control))
-                    .text_color(rgb(palette.text_muted))
-            })
-            .child(tag);
-        let body = div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .items_start()
-            .gap_1()
-            .child(tag)
-            .child(
-                div()
-                    .max_w_full()
-                    .truncate()
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                    .text_color(rgb(palette.text_primary))
-                    .child(title),
-            )
-            .child(
-                components::page_detail(palette, detail)
-                    .max_w_full()
-                    .truncate(),
-            );
-        let cover = if artwork.is_some() || target.is_some() {
-            components::artwork(palette, &cache, artwork, cover, CadenceIcon::MusicNote)
-                .into_any_element()
-        } else {
-            div()
-                .flex_none()
-                .size(cover.size)
-                .rounded(cover.radius)
-                .bg(rgb(palette.control))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(components::icon(
-                    CadenceIcon::MusicNote,
-                    Rems(1.5),
-                    palette.text_muted,
-                ))
-                .into_any_element()
-        };
-        let Some(target) = target else {
-            return div()
-                .id(("home-story", index))
-                .test_support()
-                .w_full()
-                .min_w_0()
-                .p_3()
-                .flex()
-                .items_center()
-                .gap_4()
-                .rounded_2xl()
-                .border_1()
-                .border_color(rgb(palette.border))
-                .child(cover)
-                .child(body)
-                .into_any_element();
-        };
-        components::button(palette, ("home-story", index))
-            .test_support()
-            .w_full()
-            .min_w_0()
-            .p_3()
-            .gap_4()
-            .items_center()
-            .justify_start()
-            .rounded_2xl()
-            .border_1()
-            .border_color(rgb(palette.border))
-            .hover(|style| style.bg(rgb(palette.surface_hover)))
-            .child(cover)
-            .child(body)
-            .on_click(
-                cx.listener(move |_, _, _, cx| cx.emit(PageEvent::OpenArtist(target.clone()))),
-            )
-            .into_any_element()
     }
 
     /// One artist in the list: rank, face, name, and the way their rank moved
@@ -727,289 +602,38 @@ impl HomePage {
             .into_any_element()
     }
 
-    /// The artist on offer: why they were picked, who they are, songs to hear
-    /// right here, and the few after them.
-    fn discover_card(&self, palette: CadencePalette, cx: &mut Context<Self>) -> AnyElement {
-        let Some(discover) = self.discover.as_ref() else {
-            return div().into_any_element();
-        };
-        let Some(suggestion) = discover.suggestions.get(self.discover_index) else {
-            return div().into_any_element();
-        };
-        let cache = services::AppServices::image_cache(cx);
-        let artist = &suggestion.artist;
-        let songs = self.songs_of(&artist.source_id).cloned();
-        let because = match suggestion.because.as_slice() {
-            [] => String::new(),
-            [only] => only.clone(),
-            [first, second] => format!("{first} and {second}"),
-            [first, second, rest @ ..] => format!("{first}, {second} and {} more", rest.len()),
-        };
-        let faint = |text: &'static str| {
-            div()
-                .text_xs()
-                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                .text_color(rgb(palette.text_muted))
-                .child(text)
-        };
-
-        let header = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(
-                div()
-                    .flex_none()
-                    .px_1p5()
-                    .rounded_md()
-                    .text_xs()
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                    .bg(rgb(palette.link))
-                    .text_color(rgb(palette.on_accent))
-                    .child("BECAUSE YOU PLAY"),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_sm()
-                    .text_color(rgb(palette.text_muted))
-                    .child(because),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .text_sm()
-                    .text_color(rgb(palette.text_muted))
-                    .child(format!(
-                        "{} of {}",
-                        self.discover_index + 1,
-                        discover.suggestions.len()
-                    )),
-            );
-
-        let play = match songs.as_deref() {
-            None => Some(
-                components::pending_pill(palette, "home-discover-play-pending", "Play sample")
-                    .opacity(0.5)
-                    .into_any_element(),
-            ),
-            Some([]) => None,
-            Some(_) => Some(
-                components::pill(palette, "home-discover-play", "Play sample", true)
-                    .test_support()
-                    .on_click(cx.listener(|this, _, _, cx| this.play_sample(0, cx)))
-                    .into_any_element(),
-            ),
-        };
-        let buttons = div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
-            .children(play)
-            .child(
-                components::pill(palette, "home-discover-open", "Open artist", false)
-                    .test_support()
-                    .on_click(cx.listener(|this, _, _, cx| this.open_suggested_artist(cx))),
-            )
-            .child(
-                components::pill(palette, "home-discover-dismiss", "Not for me", false)
-                    .test_support()
-                    .on_click(cx.listener(|this, _, _, cx| this.dismiss_suggestion(cx))),
-            );
-        let identity = div()
-            .flex()
-            .items_center()
-            .gap_4()
-            .child(components::rectangular_artwork(
-                palette,
-                &cache,
-                artist.artwork_url.as_deref(),
-                tokens::ArtworkSize {
-                    size: Rems(7.),
-                    radius: Rems(3.5),
-                },
-                Rems(7.),
-                CadenceIcon::Person,
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .gap_1()
-                    .child(
-                        div()
-                            .id("home-discover-name")
-                            .test_support()
-                            .max_w_full()
-                            .truncate()
-                            .text_2xl()
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .text_color(rgb(palette.text_primary))
-                            .child(artist.name.clone()),
-                    )
-                    .child(components::page_detail(
-                        palette,
-                        format!("{}% match", suggestion.match_percent),
-                    )),
-            );
-
-        let song_rows: Vec<AnyElement> = songs
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .enumerate()
-            .map(|(index, track)| {
-                components::button(palette, ("home-discover-song", index))
-                    .test_support()
-                    .w_full()
-                    .min_w_0()
-                    .p_1p5()
-                    .gap_3()
-                    .items_center()
-                    .justify_start()
-                    .rounded_xl()
-                    .hover(|style| style.bg(rgb(palette.surface_hover)))
-                    .child(components::artwork(
-                        palette,
-                        &cache,
-                        track.artwork_url.as_deref(),
-                        tokens::ArtworkSize {
-                            size: Rems(2.5),
-                            radius: Rems(0.5),
-                        },
-                        CadenceIcon::MusicNote,
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .font_weight(gpui_kit::FontWeight::MEDIUM)
-                            .child(track.title.clone()),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_sm()
-                            .text_color(rgb(palette.text_muted))
-                            .child(format_duration(track.duration_ms)),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| this.play_sample(index, cx)))
-                    .into_any_element()
-            })
-            .collect();
-
-        let next: Vec<AnyElement> = discover
-            .suggestions
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| *index != self.discover_index)
-            .take(DISCOVER_NEXT_SHOWN)
-            .map(|(index, other)| {
-                components::button(palette, ("home-discover-next", index))
-                    .test_support()
-                    .w(Rems(5.5))
-                    .flex_none()
-                    .flex_col()
-                    .items_center()
-                    .gap_1p5()
-                    .p_1p5()
-                    .rounded_xl()
-                    .hover(|style| style.bg(rgb(palette.surface_hover)))
-                    .child(components::rectangular_artwork(
-                        palette,
-                        &cache,
-                        other.artist.artwork_url.as_deref(),
-                        tokens::ArtworkSize {
-                            size: Rems(3.25),
-                            radius: Rems(1.625),
-                        },
-                        Rems(3.25),
-                        CadenceIcon::Person,
-                    ))
-                    .child(
-                        div()
-                            .max_w_full()
-                            .truncate()
-                            .text_xs()
-                            .text_color(rgb(palette.text))
-                            .child(other.artist.name.clone()),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| this.show_suggestion(index, cx)))
-                    .into_any_element()
-            })
-            .collect();
-
-        div()
-            .id("home-discover")
-            .test_support()
-            .w_full()
-            .min_w_0()
-            .p_4()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .rounded_2xl()
-            .border_1()
-            .border_color(rgb(palette.border))
-            .child(header)
-            .child(identity)
-            .child(buttons)
-            .when(!song_rows.is_empty(), |card| {
-                card.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(faint("THEIR TOP SONGS"))
-                        .children(song_rows),
-                )
-            })
-            .when(!next.is_empty(), |card| {
-                card.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(faint("UP NEXT"))
-                        .child(div().flex().flex_wrap().gap_1().children(next)),
-                )
-            })
-            .into_any_element()
-    }
-
-    /// The time range as one button that opens a short menu.
     /// The ways back into the library, in the order they are shown. A tile is
     /// left out when there is nothing behind it yet.
     fn shortcuts(&self, cx: &App) -> Vec<Shortcut> {
         let library = services::AppServices::library(cx);
         let library = library.read(cx);
-        let mut tiles = Vec::new();
-        tiles.push(Shortcut {
-            url: None,
-            icon: CadenceIcon::HeartFilled,
-            round: false,
-            title: "Liked Songs".into(),
-            detail: if library.loaded() {
-                format!("{} songs", library.liked_tracks().len())
-            } else {
-                "Songs you liked".to_owned()
+        let playable = |tracks: &Arc<[model::Track]>| (!tracks.is_empty()).then(|| tracks.clone());
+        let mut tiles = vec![
+            Shortcut {
+                url: None,
+                icon: CadenceIcon::HeartFilled,
+                tint: Some(LIKED_HUE),
+                round: false,
+                title: "Liked Songs".into(),
+                detail: if library.loaded() {
+                    format!("{} songs", library.liked_tracks().len())
+                } else {
+                    "Songs you liked".to_owned()
+                },
+                play: playable(library.liked_tracks()),
+                event: PageEvent::Navigate(Route::LikedSongs),
             },
-            event: PageEvent::Navigate(Route::LikedSongs),
-        });
-        tiles.push(Shortcut {
-            url: None,
-            icon: CadenceIcon::ClockFilled,
-            round: false,
-            title: "Recently played".into(),
-            detail: "What you played lately".to_owned(),
-            event: PageEvent::Navigate(Route::Recent),
-        });
+            Shortcut {
+                url: None,
+                icon: CadenceIcon::ClockFilled,
+                tint: None,
+                round: false,
+                title: "Recently played".into(),
+                detail: "What you played lately".to_owned(),
+                play: playable(library.recently_played()),
+                event: PageEvent::Navigate(Route::Recent),
+            },
+        ];
         // The album behind the latest song, when Spotify named one.
         if let Some((track, album)) = library.recently_played().iter().find_map(|track| {
             let album = track.album_ref.as_ref()?;
@@ -1022,9 +646,11 @@ impl HomePage {
                     .clone()
                     .or_else(|| track.artwork_url.clone()),
                 icon: CadenceIcon::MusicNote,
+                tint: None,
                 round: false,
                 title: album.name.clone(),
                 detail: format!("Album · {}", track.artist),
+                play: None,
                 event: PageEvent::OpenAlbum(album.clone()),
             });
         }
@@ -1036,9 +662,11 @@ impl HomePage {
             tiles.push(Shortcut {
                 url: playlist.artwork_url.clone(),
                 icon: CadenceIcon::Playlist,
+                tint: None,
                 round: false,
                 title: playlist.name.clone(),
                 detail: "Playlist".to_owned(),
+                play: None,
                 event: PageEvent::OpenPlaylist(playlist.clone()),
             });
         }
@@ -1051,9 +679,11 @@ impl HomePage {
             tiles.push(Shortcut {
                 url: artist.artwork_url.clone(),
                 icon: CadenceIcon::Person,
+                tint: None,
                 round: true,
                 title: artist.name.clone(),
                 detail: "Artist · your most played".to_owned(),
+                play: None,
                 event: PageEvent::OpenArtist(model::ArtistRef {
                     name: artist.name.clone(),
                     source_id: Some(artist.source_id.clone()),
@@ -1065,24 +695,30 @@ impl HomePage {
             Shortcut {
                 url: None,
                 icon: CadenceIcon::FolderFilled,
+                tint: None,
                 round: false,
                 title: "Local Files".into(),
                 detail: format!("{} songs", library.local_tracks().len()),
+                play: playable(library.local_tracks()),
                 event: PageEvent::Navigate(Route::LocalFiles),
             }
         } else {
             Shortcut {
                 url: None,
                 icon: CadenceIcon::PlaylistFilled,
+                tint: None,
                 round: false,
                 title: "Playlists".into(),
                 detail: "All your playlists".to_owned(),
+                play: None,
                 event: PageEvent::Navigate(Route::Playlists),
             }
         });
         tiles
     }
 
+    /// One shortcut: a cover flush with the tile's left edge, two lines of
+    /// text, and, for what can start at once, a play button on hover.
     fn shortcut_tile(
         &self,
         index: usize,
@@ -1091,55 +727,101 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cache = services::AppServices::image_cache(cx);
-        let art = components::artwork(
-            palette,
-            &cache,
-            shortcut.url.as_deref(),
-            tokens::ArtworkSize {
-                size: Rems(3.5),
-                radius: if shortcut.round {
-                    Rems(1.75)
-                } else {
-                    Rems(0.625)
+        let dark = palette.canvas == CadencePalette::DARK.canvas;
+        let cover: AnyElement = match (shortcut.url.as_deref(), shortcut.tint) {
+            (None, Some(hue)) => div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_tl(px(14.))
+                .rounded_bl(px(14.))
+                .bg(gpui_kit::Hsla {
+                    h: hue / 360.,
+                    s: if dark { 0.18 } else { 0.30 },
+                    l: if dark { 0.34 } else { 0.86 },
+                    a: 1.,
+                })
+                .child(div().opacity(0.55).child(components::icon(
+                    shortcut.icon,
+                    Rems(1.625),
+                    palette.text_primary,
+                )))
+                .into_any_element(),
+            _ if shortcut.round => div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(components::artwork(
+                    palette,
+                    &cache,
+                    shortcut.url.as_deref(),
+                    tokens::ArtworkSize {
+                        size: Rems(2.875),
+                        radius: Rems(1.4375),
+                    },
+                    shortcut.icon,
+                ))
+                .into_any_element(),
+            _ => components::artwork_flush_right(
+                palette,
+                &cache,
+                shortcut.url.as_deref(),
+                tokens::ArtworkSize {
+                    size: Rems(4.),
+                    radius: Rems(0.875),
                 },
-            },
-            shortcut.icon,
-        );
+                shortcut.icon,
+            ),
+        };
+        let group = format!("home-tile-{index}");
+        let playable = shortcut.play.is_some();
+        let play = shortcut.play.map(|tracks| {
+            let player = services::AppServices::player(cx);
+            components::button(palette, ("home-shortcut-play", index))
+                .test_support()
+                .absolute()
+                .right(px(12.))
+                .top(px(16.))
+                .size(px(32.))
+                .rounded_full()
+                .bg(rgb(palette.text_primary))
+                .invisible()
+                .group_hover(group.clone(), |style| style.visible())
+                .child(components::icon(
+                    CadenceIcon::Play,
+                    Rems(0.875),
+                    palette.on_accent,
+                ))
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.stop_propagation();
+                    let tracks = tracks.clone();
+                    player.update(cx, |player, cx| {
+                        player.play_context(tracks, 0, cx);
+                    });
+                }))
+        });
         let event = shortcut.event;
         components::button(palette, ("home-shortcut", index))
             .test_support()
-            .w(Rems(18.))
+            .group(group)
+            .relative()
+            .w(px(300.))
             .flex_none()
-            .p_2()
-            .gap_3()
-            .items_center()
+            .h(px(64.))
             .justify_start()
-            .rounded_2xl()
-            .border_1()
-            .border_color(rgb(palette.border))
-            .hover(|style| style.bg(rgb(palette.surface_hover)))
-            .child(art)
+            .overflow_hidden()
+            .rounded(px(18.))
+            .bg(rgb(palette.card))
+            .hover(|style| style.bg(rgb(palette.card_hover)))
+            .child(div().size(px(64.)).flex_none().child(cover))
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .child(
-                        div()
-                            .max_w_full()
-                            .truncate()
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .text_color(rgb(palette.text_primary))
-                            .child(shortcut.title),
-                    )
-                    .child(
-                        components::page_detail(palette, shortcut.detail)
-                            .max_w_full()
-                            .truncate(),
-                    ),
+                row_text(palette, shortcut.title, shortcut.detail)
+                    .ml(px(12.))
+                    .when(playable, |text| text.pr(px(52.))),
             )
+            .children(play)
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(event.clone())))
             .into_any_element()
     }
@@ -1168,7 +850,7 @@ impl HomePage {
             &cache,
             track.artwork_url.as_deref(),
             tokens::ArtworkSize {
-                size: Rems(7.),
+                size: Rems(7.625),
                 radius: Rems(0.875),
             },
             CadenceIcon::MusicNote,
@@ -1186,24 +868,27 @@ impl HomePage {
             let position = position.min(track.duration_ms);
             (
                 position as f32 / track.duration_ms as f32,
-                format!(
-                    "{} / {}",
-                    format_duration(position),
-                    format_duration(track.duration_ms)
-                ),
+                format_duration(position),
+                format_duration(track.duration_ms),
             )
         });
+        let muted = |text: String, size: f32| {
+            div()
+                .text_size(px(size))
+                .line_height(px(size * 1.4))
+                .text_color(rgb(palette.text_muted))
+                .child(text)
+        };
         Some(
             div()
                 .id("home-continue")
                 .test_support()
                 .w_full()
-                .p_4()
+                .p(px(14.))
                 .flex()
-                .gap_4()
-                .rounded_2xl()
-                .border_1()
-                .border_color(rgb(palette.border))
+                .gap(px(16.))
+                .rounded(px(18.))
+                .bg(rgb(palette.card))
                 .child(art)
                 .child(
                     div()
@@ -1212,39 +897,44 @@ impl HomePage {
                         .flex()
                         .flex_col()
                         .justify_between()
-                        .gap_2()
                         .child(
                             div()
                                 .child(
                                     div()
                                         .truncate()
-                                        .text_lg()
+                                        .text_size(px(20.))
+                                        .line_height(px(28.))
                                         .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                         .text_color(rgb(palette.text_primary))
                                         .child(track.title.clone()),
                                 )
-                                .child(
-                                    components::page_detail(palette, track.artist.to_string())
-                                        .truncate(),
-                                ),
+                                .child(muted(track.artist.to_string(), 16.).truncate()),
                         )
                         .child(
                             div()
                                 .flex()
                                 .flex_col()
                                 .items_start()
-                                .gap_2()
-                                .when_some(progress, |column, (fraction, text)| {
+                                .when_some(progress, |column, (fraction, at, total)| {
                                     column
                                         .w_full()
+                                        .child(
+                                            div()
+                                                .w_full()
+                                                .flex()
+                                                .justify_between()
+                                                .child(muted(at, 12.))
+                                                .child(muted(total, 12.)),
+                                        )
                                         .child(
                                             div()
                                                 .id("home-continue-progress")
                                                 .test_support()
                                                 .w_full()
-                                                .h(px(4.))
+                                                .h(px(5.))
+                                                .my(px(4.))
                                                 .rounded_full()
-                                                .bg(rgb(palette.control))
+                                                .bg(rgb(palette.card_hover))
                                                 .child(
                                                     div()
                                                         .h_full()
@@ -1253,30 +943,32 @@ impl HomePage {
                                                         .bg(rgb(palette.text_primary)),
                                                 ),
                                         )
-                                        .child(components::page_detail(palette, text))
                                 })
                                 .child(
-                                    components::icon_pill(
-                                        palette,
-                                        "home-continue-play",
-                                        icon,
-                                        label,
-                                        true,
-                                    )
-                                    .test_support()
-                                    .on_click(cx.listener(
-                                        move |_, _, _, cx| {
-                                            if resuming {
-                                                player.update(cx, |player, cx| player.toggle(cx));
-                                            } else {
-                                                let list =
-                                                    library.read(cx).recently_played().clone();
-                                                player.update(cx, |player, cx| {
-                                                    player.play_context(list, 0, cx);
-                                                });
-                                            }
-                                        },
-                                    )),
+                                    div().child(
+                                        components::icon_pill(
+                                            palette,
+                                            "home-continue-play",
+                                            icon,
+                                            label,
+                                            true,
+                                        )
+                                        .test_support()
+                                        .on_click(
+                                            cx.listener(move |_, _, _, cx| {
+                                                if resuming {
+                                                    player
+                                                        .update(cx, |player, cx| player.toggle(cx));
+                                                } else {
+                                                    let list =
+                                                        library.read(cx).recently_played().clone();
+                                                    player.update(cx, |player, cx| {
+                                                        player.play_context(list, 0, cx);
+                                                    });
+                                                }
+                                            }),
+                                        ),
+                                    ),
                                 ),
                         ),
                 )
@@ -1292,7 +984,7 @@ impl HomePage {
     ) -> Option<AnyElement> {
         let cache = services::AppServices::image_cache(cx);
         let size = tokens::ArtworkSize {
-            size: Rems(8.),
+            size: Rems(9.25),
             radius: Rems(0.875),
         };
         let Some(releases) = self.releases.as_ref() else {
@@ -1302,12 +994,12 @@ impl HomePage {
                     .id("home-releases-loading")
                     .test_support()
                     .flex()
-                    .gap_4()
+                    .gap(px(12.))
                     .children((0..RELEASES_SHOWN).map(|_| {
                         div()
                             .size(size.size)
                             .rounded(size.radius)
-                            .bg(rgb(palette.control))
+                            .bg(rgb(palette.card))
                     }))
                     .into_any_element()
             });
@@ -1315,15 +1007,17 @@ impl HomePage {
         if releases.albums.is_empty() {
             return None;
         }
-        let mut shelf = div().id("home-releases").test_support().flex().gap_4();
+        let mut shelf = div().id("home-releases").test_support().flex().gap(px(12.));
         for (index, album) in releases.albums.iter().take(RELEASES_SHOWN).enumerate() {
-            let is_new = release_watch::is_new(&album.source_id, cx);
-            let artist = album
+            let mut artist = album
                 .artists
                 .iter()
                 .map(|artist| artist.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
+            if release_watch::is_new(&album.source_id, cx) {
+                artist = format!("New · {artist}");
+            }
             let target = model::AlbumRef {
                 name: album.name.clone(),
                 source_id: Some(album.source_id.clone()),
@@ -1337,7 +1031,6 @@ impl HomePage {
                     .flex_none()
                     .flex_col()
                     .items_start()
-                    .gap_1p5()
                     .child(components::artwork(
                         palette,
                         &cache,
@@ -1348,22 +1041,20 @@ impl HomePage {
                     .child(
                         div()
                             .w_full()
+                            .mt(px(8.))
                             .truncate()
+                            .text_size(px(13.5))
                             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                             .text_color(rgb(palette.text_primary))
                             .child(album.name.clone()),
                     )
                     .child(
-                        components::page_detail(
-                            palette,
-                            if is_new {
-                                format!("New · {artist}")
-                            } else {
-                                artist
-                            },
-                        )
-                        .w_full()
-                        .truncate(),
+                        div()
+                            .w_full()
+                            .truncate()
+                            .text_size(px(12.))
+                            .text_color(rgb(palette.text_muted))
+                            .child(artist),
                     )
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.emit(PageEvent::OpenAlbum(target.clone()))
@@ -1373,6 +1064,164 @@ impl HomePage {
         Some(shelf.into_any_element())
     }
 
+    /// An artist to try and the next announced release, as two short rows.
+    fn worth_a_listen(
+        &self,
+        palette: CadencePalette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let cache = services::AppServices::image_cache(cx);
+        let both = self
+            .discover
+            .as_ref()
+            .is_some_and(|discover| discover.suggestions.get(self.discover_index).is_some())
+            && self
+                .upcoming
+                .as_ref()
+                .is_some_and(|upcoming| !upcoming.releases.is_empty());
+        let card = |id: &'static str| {
+            div()
+                .id(id)
+                .test_support()
+                .flex_1()
+                .min_w(px(220.))
+                // A lone row keeps the width it would have beside another.
+                .when(!both, |card| card.max_w(px(468.)))
+                .h(px(60.))
+                .flex()
+                .items_center()
+                .rounded(px(18.))
+                .bg(rgb(palette.card))
+        };
+        let artist_row = if let Some(suggestion) = self
+            .discover
+            .as_ref()
+            .and_then(|discover| discover.suggestions.get(self.discover_index))
+        {
+            let artist = &suggestion.artist;
+            let because = match suggestion.because.as_slice() {
+                [] => "Try this next".to_owned(),
+                [first, ..] => format!("Try this next · sounds like {first}"),
+            };
+            let ready = self
+                .songs_of(&artist.source_id)
+                .is_some_and(|songs| !songs.is_empty());
+            Some(
+                card("home-discover")
+                    .child(
+                        components::button(palette, "home-discover-open")
+                            .test_support()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .justify_start()
+                            .rounded(px(18.))
+                            .hover(|style| style.bg(rgb(palette.card_hover)))
+                            .child(div().ml(px(10.)).child(components::artwork(
+                                palette,
+                                &cache,
+                                artist.artwork_url.as_deref(),
+                                tokens::ArtworkSize {
+                                    size: Rems(2.5),
+                                    radius: Rems(1.25),
+                                },
+                                CadenceIcon::Person,
+                            )))
+                            .child(row_text(palette, artist.name.clone(), because).ml(px(12.)))
+                            .on_click(cx.listener(|this, _, _, cx| this.open_suggested_artist(cx))),
+                    )
+                    .child(div().flex_none().mr(px(8.)).child(if ready {
+                        components::icon_pill(
+                            palette,
+                            "home-discover-play",
+                            CadenceIcon::Play,
+                            "Sample",
+                            true,
+                        )
+                        .test_support()
+                        .on_click(cx.listener(|this, _, _, cx| this.play_sample(0, cx)))
+                        .into_any_element()
+                    } else {
+                        components::pending_pill(palette, "home-discover-pending", "Sample")
+                            .opacity(0.35)
+                            .into_any_element()
+                    }))
+                    .child(
+                        components::icon_button_sized(
+                            palette,
+                            "home-discover-dismiss",
+                            CadenceIcon::Close,
+                            tokens::INLINE_ICON,
+                        )
+                        .test_support()
+                        .size_8()
+                        .mr(px(8.))
+                        .on_click(cx.listener(|this, _, _, cx| this.dismiss_suggestion(cx))),
+                    )
+                    .into_any_element(),
+            )
+        } else if self.discover.is_none() && self.discover_loading {
+            Some(card("home-discover-loading").into_any_element())
+        } else {
+            None
+        };
+        let release_row = self
+            .upcoming
+            .as_ref()
+            .and_then(|upcoming| upcoming.releases.first())
+            .map(|release| {
+                let when = release_label(&release.date).unwrap_or_else(|| release.date.clone());
+                card("home-upcoming")
+                    .child(
+                        div()
+                            .ml(px(10.))
+                            .flex_none()
+                            .size(px(40.))
+                            .rounded(px(9.))
+                            .bg(rgb(palette.card_hover))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(components::icon(
+                                CadenceIcon::MusicNote,
+                                Rems(1.0625),
+                                palette.text_muted,
+                            )),
+                    )
+                    .child(
+                        row_text(
+                            palette,
+                            format!("{} · new {}", release.artist, release.kind.to_lowercase()),
+                            format!("Announced for {when}"),
+                        )
+                        .ml(px(12.)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .mr(px(14.))
+                            .text_size(px(12.5))
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .text_color(rgb(palette.text_primary))
+                            .child("Coming soon"),
+                    )
+                    .into_any_element()
+            });
+        if artist_row.is_none() && release_row.is_none() {
+            return None;
+        }
+        Some(
+            div()
+                .flex()
+                .flex_wrap()
+                .gap(px(32.))
+                .children(artist_row)
+                .children(release_row)
+                .into_any_element(),
+        )
+    }
+
+    /// The time range as one button that opens a short menu.
     fn range_menu(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
         let selected = self.range;
         div().flex().child(
@@ -1484,6 +1333,17 @@ impl Render for HomePage {
                 .text_color(rgb(palette.text_primary))
                 .child(text)
         };
+        // A heading with its content beneath, as in the opening sections.
+        let section = |id, title: &str, body: AnyElement| {
+            div()
+                .flex_1()
+                .min_w(px(220.))
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(heading(id, title.to_owned().into()))
+                .child(body)
+        };
         let shortcuts: Vec<AnyElement> = self
             .shortcuts(cx)
             .into_iter()
@@ -1492,27 +1352,11 @@ impl Render for HomePage {
             .collect();
         let continue_card = self.continue_card(palette, cx);
         let shelf = self.releases_shelf(palette, cx);
-        let column = |heading_id, title: &str, body: AnyElement| {
-            div()
-                .flex_1()
-                .min_w(Rems(22.))
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(
-                    div()
-                        .h_10()
-                        .flex()
-                        .items_center()
-                        .child(heading(heading_id, title.to_owned().into())),
-                )
-                .child(body)
-        };
-        let first_row = div()
+        let worth = self.worth_a_listen(palette, cx);
+        let first = div()
             .flex()
             .flex_col()
             .gap_6()
-            .mb_6()
             .when(!shortcuts.is_empty(), |block| {
                 block.child(
                     div()
@@ -1520,7 +1364,8 @@ impl Render for HomePage {
                         .test_support()
                         .flex()
                         .flex_wrap()
-                        .gap_3()
+                        .gap_x(px(34.))
+                        .gap_y(px(12.))
                         .children(shortcuts),
                 )
             })
@@ -1529,17 +1374,27 @@ impl Render for HomePage {
                     div()
                         .flex()
                         .flex_wrap()
-                        .gap_x_10()
-                        .gap_y_6()
+                        .gap(px(32.))
                         .children(
                             continue_card
-                                .map(|card| column("home-continue-heading", "Continue", card)),
+                                .map(|card| section("home-continue-heading", "Continue", card)),
                         )
                         .children(shelf.map(|shelf| {
-                            column("home-releases-heading", "New from artists you play", shelf)
+                            section("home-releases-heading", "New from artists you play", shelf)
                         })),
                 )
+            })
+            .when_some(worth, |block, worth| {
+                block.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .child(heading("home-discover-heading", "Worth a listen".into()))
+                        .child(worth),
+                )
             });
+
         let (permission_missing, current, compare) = {
             let top = self.top.read(cx);
             (
@@ -1583,61 +1438,6 @@ impl Render for HomePage {
             self.track_list.update(cx, |list, cx| {
                 list.show(("home-tracks", self.range.index()), tracks.clone(), cx);
             });
-            let upcoming = self
-                .upcoming
-                .as_ref()
-                .map_or_else(|| Arc::from([]), |upcoming| upcoming.releases.clone());
-            let upcoming_pending = self.upcoming.is_none() && self.upcoming_loading;
-            let mut stories: Vec<AnyElement> = Vec::new();
-            for release in upcoming.iter().take(STORY_UPCOMING) {
-                let when = release_label(&release.date).unwrap_or_else(|| release.date.clone());
-                let index = stories.len();
-                stories.push(self.story_card(
-                    index,
-                    None,
-                    format!("COMING {}", when.to_uppercase()),
-                    false,
-                    release.title.clone(),
-                    format!("{} · {}", release.artist, release.kind),
-                    None,
-                    cx,
-                ));
-            }
-            if let (Some(longer_range), Some(longer)) = (self.range.longer(), compare.as_ref()) {
-                let quiet = longer
-                    .iter()
-                    .take(COME_BACK_RANK)
-                    .enumerate()
-                    .filter(|(_, artist)| {
-                        !artists
-                            .iter()
-                            .any(|current| current.source_id == artist.source_id)
-                    })
-                    .take(STORY_COME_BACK);
-                for (rank, artist) in quiet {
-                    let index = stories.len();
-                    stories.push(self.story_card(
-                        index,
-                        artist.artwork_url.as_deref(),
-                        "COME BACK TO".to_owned(),
-                        false,
-                        format!("{}, quiet lately", artist.name),
-                        format!(
-                            "#{} for {} · not in {}",
-                            rank + 1,
-                            longer_range.short_label(),
-                            self.range.short_label()
-                        ),
-                        Some(model::ArtistRef {
-                            name: artist.name.clone(),
-                            source_id: Some(artist.source_id.clone()),
-                            spotify_uri: artist.spotify_uri.clone(),
-                        }),
-                        cx,
-                    ));
-                }
-            }
-            let stories_pending = upcoming_pending && stories.is_empty();
             let shown_artists = if self.all_artists {
                 artists.len()
             } else {
@@ -1656,118 +1456,6 @@ impl Render for HomePage {
             }
             let more = artists.len() > ARTISTS_SHOWN;
             let all_artists = self.all_artists;
-            let offered = self
-                .discover
-                .as_ref()
-                .is_some_and(|discover| !discover.suggestions.is_empty());
-            let discover_pending = self.discover.is_none() && self.discover_loading;
-            let stories_empty = stories.is_empty();
-            // Stories keep the left of the top row until there is an artist to
-            // try, which takes their place and sends the stories below.
-            let stories_heading = div()
-                .h_10()
-                .flex()
-                .items_center()
-                .child(heading("home-stories-heading", "For you".into()));
-            let stories_body = div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .when(stories_pending, |column| {
-                    column.child(release_skeleton(palette))
-                })
-                .when(!stories_pending && stories_empty, |column| {
-                    column.child(components::page_detail(
-                        palette,
-                        "Nothing announced for your top artists yet. Dates come from MusicBrainz, so some may be missing.",
-                    ))
-                });
-            let left: Option<AnyElement> =
-                if offered {
-                    Some(
-                        div()
-                            .flex_1()
-                            .min_w(Rems(24.))
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(
-                                div().h_10().flex().items_center().child(heading(
-                                    "home-discover-heading",
-                                    "Try this next".into(),
-                                )),
-                            )
-                            .child(self.discover_card(palette, cx))
-                            .into_any_element(),
-                    )
-                } else if discover_pending {
-                    Some(
-                        div()
-                            .flex_1()
-                            .min_w(Rems(24.))
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(
-                                div().h_10().flex().items_center().child(heading(
-                                    "home-discover-heading",
-                                    "Try this next".into(),
-                                )),
-                            )
-                            .child(
-                                div()
-                                    .id("home-discover-loading")
-                                    .test_support()
-                                    .h(Rems(22.))
-                                    .rounded_2xl()
-                                    .bg(rgb(palette.control)),
-                            )
-                            .into_any_element(),
-                    )
-                } else {
-                    None
-                };
-            let stories_in_top = left.is_none();
-            let stories_below = !stories_in_top;
-            let top_stories = stories_in_top.then(|| {
-                div()
-                    .flex_1()
-                    .min_w(Rems(22.))
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(stories_heading)
-                    .children((stories_pending || stories_empty).then_some(stories_body))
-                    .children(std::mem::take(&mut stories))
-                    .into_any_element()
-            });
-            let below_stories = (stories_below && !stories.is_empty()).then(|| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(
-                        div()
-                            .h_10()
-                            .flex()
-                            .items_center()
-                            .child(heading("home-stories-heading", "For you".into())),
-                    )
-                    .child(
-                        div().flex().flex_wrap().gap_3().children(
-                            stories
-                                .drain(..)
-                                .map(|story| {
-                                    div()
-                                        .flex_1()
-                                        .min_w(Rems(24.))
-                                        .child(story)
-                                        .into_any_element()
-                                })
-                                .collect::<Vec<_>>(),
-                        ),
-                    )
-            });
             div()
                 .flex()
                 .flex_col()
@@ -1775,77 +1463,65 @@ impl Render for HomePage {
                 .child(
                     div()
                         .flex()
-                        .flex_wrap()
-                        .gap_x_10()
-                        .gap_y_6()
-                        .children(left)
-                        .children(top_stories)
-                        .when(!permission_missing, |row| {
-                            row.child(
-                                div()
-                                    .flex_1()
-                                    .min_w(Rems(20.))
-                                    .flex()
-                                    .flex_col()
-                                    .gap_3()
-                                    .child(
-                                        div()
-                                            .h_10()
-                                            .flex()
-                                            .items_center()
-                                            .justify_between()
-                                            .gap_3()
-                                            .child(heading(
-                                                "home-artists-heading",
-                                                if all_artists || artists.is_empty() {
-                                                    SharedString::from("Your top artists")
-                                                } else {
-                                                    SharedString::from(format!(
-                                                        "Your top {}",
-                                                        artists.len().min(ARTISTS_SHOWN)
-                                                    ))
-                                                },
-                                            ))
-                                            .child(self.range_menu(palette, cx)),
+                        .flex_col()
+                        .gap_3()
+                        .child(
+                            div()
+                                .h_10()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_3()
+                                .child(heading(
+                                    "home-artists-heading",
+                                    if all_artists || artists.is_empty() {
+                                        SharedString::from("Your top artists")
+                                    } else {
+                                        SharedString::from(format!(
+                                            "Your top {}",
+                                            artists.len().min(ARTISTS_SHOWN)
+                                        ))
+                                    },
+                                ))
+                                .child(self.range_menu(palette, cx)),
+                        )
+                        .child(artist_rows)
+                        .when(artists.is_empty(), |column| {
+                            column.child(components::page_detail(
+                                palette,
+                                "No top artists for this stretch yet.",
+                            ))
+                        })
+                        .when(more, |column| {
+                            column.child(
+                                div().flex().child(
+                                    components::pill(
+                                        palette,
+                                        "home-artists-more",
+                                        if all_artists {
+                                            "Show less".to_owned()
+                                        } else {
+                                            format!("See all {}", artists.len())
+                                        },
+                                        false,
                                     )
-                                    .child(artist_rows)
-                                    .when(artists.is_empty(), |column| {
-                                        column.child(components::page_detail(
-                                            palette,
-                                            "No top artists for this stretch yet.",
-                                        ))
-                                    })
-                                    .when(more, |column| {
-                                        column.child(
-                                            div().flex().child(
-                                                components::pill(
-                                                    palette,
-                                                    "home-artists-more",
-                                                    if all_artists {
-                                                        "Show less".to_owned()
-                                                    } else {
-                                                        format!("See all {}", artists.len())
-                                                    },
-                                                    false,
-                                                )
-                                                .test_support()
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.all_artists = !this.all_artists;
-                                                    cx.notify();
-                                                })),
-                                            ),
-                                        )
-                                    })
-                                    .when(compare.is_some() && !artists.is_empty(), |column| {
-                                        column.child(components::page_detail(
-                                            palette,
-                                            "Arrows compare with a longer stretch.",
-                                        ))
-                                    }),
+                                    .test_support()
+                                    .on_click(cx.listener(
+                                        |this, _, _, cx| {
+                                            this.all_artists = !this.all_artists;
+                                            cx.notify();
+                                        },
+                                    )),
+                                ),
                             )
+                        })
+                        .when(compare.is_some() && !artists.is_empty(), |column| {
+                            column.child(components::page_detail(
+                                palette,
+                                "Arrows compare with a longer stretch.",
+                            ))
                         }),
                 )
-                .children(below_stories)
                 .when(!tracks.is_empty(), |content| {
                     content.child(
                         div()
@@ -1881,7 +1557,7 @@ impl Render for HomePage {
                                 greeting(),
                                 "Pick up where you left off",
                             ))
-                            .child(first_row)
+                            .child(first.mb_6())
                             .when(range_alone, |page| {
                                 page.child(div().mb_5().child(self.range_menu(palette, cx)))
                             })
@@ -1891,43 +1567,38 @@ impl Render for HomePage {
     }
 }
 
-/// Placeholder rows the size of a release row, so the section does not change
-/// height when the data arrives.
-fn release_skeleton(palette: CadencePalette) -> Div {
-    div().flex().flex_col().children((0..3).map(|_| {
-        div()
-            .p_1p5()
-            .flex()
-            .items_center()
-            .gap_3()
-            .child(
-                div()
-                    .size(Rems(3.))
-                    .rounded(Rems(0.5))
-                    .bg(rgb(palette.control)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .h_3()
-                            .w(relative(0.6))
-                            .rounded_md()
-                            .bg(rgb(palette.control)),
-                    )
-                    .child(
-                        div()
-                            .h_2()
-                            .w(relative(0.4))
-                            .rounded_md()
-                            .bg(rgb(palette.control)),
-                    ),
-            )
-    }))
+/// Two lines of text for a row: a title and a quieter detail beneath it.
+fn row_text(
+    palette: CadencePalette,
+    title: impl Into<SharedString>,
+    detail: impl Into<SharedString>,
+) -> Div {
+    div()
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .items_start()
+        .child(
+            div()
+                .max_w_full()
+                .truncate()
+                .text_size(px(15.5))
+                .line_height(px(21.))
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(rgb(palette.text_primary))
+                .child(title.into()),
+        )
+        .child(
+            div()
+                .max_w_full()
+                .truncate()
+                .mt(px(1.))
+                .text_size(px(13.5))
+                .line_height(px(19.))
+                .text_color(rgb(palette.text_muted))
+                .child(detail.into()),
+        )
 }
 
 fn release_label(date: &str) -> Option<String> {

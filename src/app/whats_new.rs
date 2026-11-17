@@ -43,6 +43,22 @@ const MONTHS: &[Month] = &[
             Day {
                 date: "Nov 17, 2026",
                 releases: &[Release {
+                    version: "0.8.55",
+                    notes: &[
+                        Note(
+                            Better,
+                            "Home's opening rows now follow the new design closely: tiles with the cover flush to the edge, a play button that appears on hover for Liked Songs, Recently played and Local Files, a Continue card with a progress bar, and larger new-release covers.",
+                        ),
+                        Note(
+                            Better,
+                            "The artist to try is now a short row with a Sample button and a close button for Not for me. The announced release sits beside it.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
+                date: "Nov 17, 2026",
+                releases: &[Release {
                     version: "0.8.54",
                     notes: &[
                         Note(
