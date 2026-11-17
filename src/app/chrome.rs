@@ -909,6 +909,13 @@ impl Render for Toolbar {
                             })),
                     )
                     .when(self.whats_new_unseen, |anchor| {
+                        // Reduced motion, and tests, skip the jump: it runs on the
+                        // wall clock, so it would keep frames coming for 650ms.
+                        let dot_jump = if cx.reduce_motion() || cfg!(test) {
+                            Duration::from_millis(1)
+                        } else {
+                            Duration::from_millis(650)
+                        };
                         anchor.child(
                             // Not a control: a press lands on the avatar beneath,
                             // which opens the account menu.
@@ -921,7 +928,7 @@ impl Render for Toolbar {
                                 .bg(rgb(0xF04452))
                                 .with_animation(
                                     "whats-new-dot",
-                                    Animation::new(Duration::from_millis(650)),
+                                    Animation::new(dot_jump),
                                     |badge, progress| {
                                         // One short jump on arrival, then a static dot. No repeating timer.
                                         let jump =

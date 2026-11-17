@@ -43,6 +43,16 @@ const MONTHS: &[Month] = &[
             Day {
                 date: "Nov 17, 2026",
                 releases: &[Release {
+                    version: "0.8.53",
+                    notes: &[Note(
+                        Fixed,
+                        "The red dot on your avatar now holds still when reduced motion is on.",
+                    )],
+                }],
+            },
+            Day {
+                date: "Nov 17, 2026",
+                releases: &[Release {
                     version: "0.8.52",
                     notes: &[
                         Note(
