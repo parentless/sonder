@@ -16,6 +16,7 @@ enum Scene {
     TrackCredits,
     PinnedPlaylist,
     TrackMenu,
+    Credits,
     AlbumTint,
     AlbumReview,
     PlaylistTail,
@@ -90,6 +91,7 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("track-credits", Scene::TrackCredits),
         ("playlist-pinned", Scene::PinnedPlaylist),
         ("track-menu", Scene::TrackMenu),
+        ("credits", Scene::Credits),
         ("album-tint", Scene::AlbumTint),
         ("album-review", Scene::AlbumReview),
         ("playlist-tail", Scene::PlaylistTail),
@@ -765,6 +767,72 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             settle(&mut cx, handle.into());
             cx.update_window(handle.into(), |_, window, cx| window.hover("account", cx))
                 .unwrap();
+            settle(&mut cx, handle.into());
+        }
+        Scene::Credits => {
+            cx.update_window(handle.into(), |_, window, cx| {
+                let position = window.find(("spotify-track", 1usize)).bounds().center();
+                window.dispatch_event(
+                    MouseDownEvent {
+                        button: MouseButton::Right,
+                        position,
+                        modifiers: Default::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+            })
+            .unwrap();
+            settle(&mut cx, handle.into());
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click(("track-menu-credits", 1usize), cx)
+            })
+            .unwrap();
+            settle(&mut cx, handle.into());
+            // Invented names, in the order the dialog lists roles.
+            let person = |name: &str, detail: Option<&str>| crate::credits::Person {
+                name: name.to_owned(),
+                detail: detail.map(str::to_owned),
+            };
+            let role = |label: &str, people: Vec<crate::credits::Person>| crate::credits::Role {
+                label: label.to_owned(),
+                people,
+            };
+            let credits = crate::credits::Credits {
+                roles: vec![
+                    role(
+                        "Written by",
+                        vec![person("Ana Lind", None), person("Jonas Weir", None)],
+                    ),
+                    role("Produced by", vec![person("Mara Quinn", None)]),
+                    role("Mixed by", vec![person("Theo Park", None)]),
+                    role("Mastered by", vec![person("Ines Alder", None)]),
+                    role(
+                        "Vocals",
+                        vec![person("Ana Lind", Some("lead vocals, background vocals"))],
+                    ),
+                    role(
+                        "Performed by",
+                        vec![
+                            person("Jonas Weir", Some("guitar, piano")),
+                            person("Sol Marek", Some("drums (drum set)")),
+                        ],
+                    ),
+                ],
+            };
+            let mut answered = false;
+            while let Ok(command) = backend.commands.try_recv() {
+                match command {
+                    BackendCommand::LoadCredits { respond, .. } => {
+                        respond.send(Ok(credits.clone())).unwrap();
+                        answered = true;
+                    }
+                    other => held_commands.push(other),
+                }
+            }
+            assert!(answered, "opening the credits asks for them");
             settle(&mut cx, handle.into());
         }
         Scene::TrackMenu => {

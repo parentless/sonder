@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "cadence"
-version = "0.8.53"
+version = "0.8.54"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -976,6 +976,7 @@ dependencies = [
  "gpui-pre-reqwest",
  "image",
  "keyring",
+ "libc",
  "librespot",
  "log",
  "md-5",

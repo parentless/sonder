@@ -32,6 +32,8 @@ const NEW_RELEASES_CACHE_SECONDS: u64 = 12 * 60 * 60;
 const HOME_CACHE_SECONDS: u64 = 6 * 60 * 60;
 /// Announced releases change daily at most.
 const UPCOMING_CACHE_SECONDS: u64 = 24 * 60 * 60;
+/// Credits change when a volunteer adds them, which is rare.
+const CREDITS_CACHE_SECONDS: u64 = 7 * 24 * 60 * 60;
 /// Who sounds like whom changes slowly, and each answer costs a few dozen requests.
 const DISCOVER_CACHE_SECONDS: u64 = 3 * 24 * 60 * 60;
 /// How many "not for me" answers are remembered.
@@ -406,6 +408,11 @@ pub enum BackendCommand {
     LoadLyrics {
         query: crate::lyrics::Query,
         respond: Reply<crate::lyrics::Lyrics>,
+    },
+    /// Who made a song, found by its ISRC. Only sent when the credits open.
+    LoadCredits {
+        isrc: String,
+        respond: Reply<crate::credits::Credits>,
     },
     StartRadio {
         request_id: u64,
@@ -1432,6 +1439,25 @@ impl Worker {
                             let _ = respond.send(result);
                         }
                         () = respond.closed() => {}
+                    }
+                });
+                Ok(())
+            }
+            BackendCommand::LoadCredits { isrc, mut respond } => {
+                let store = self.store.clone();
+                // Closing the dialog drops the receiver, which ends the request.
+                tokio::spawn(async move {
+                    tokio::select! {
+                        biased;
+                        () = respond.closed() => {}
+                        result = run_with_timeout(30, "credits", saved_or_fetch(
+                            &store,
+                            format!("credits:{}", isrc.trim().to_uppercase()),
+                            CREDITS_CACHE_SECONDS,
+                            crate::credits::fetch(&isrc),
+                        )) => {
+                            let _ = respond.send(result);
+                        }
                     }
                 });
                 Ok(())

@@ -43,6 +43,22 @@ const MONTHS: &[Month] = &[
             Day {
                 date: "Nov 17, 2026",
                 releases: &[Release {
+                    version: "0.8.54",
+                    notes: &[
+                        Note(
+                            New,
+                            "Home starts with a greeting and shortcuts back to your Liked Songs, what you played lately, your latest album, a playlist and your top artist, then the song to carry on with and new albums from artists you play.",
+                        ),
+                        Note(
+                            New,
+                            "Right-click a song and choose Credits to see who wrote, produced, mixed and played on it. Credits come from MusicBrainz, so newer songs may not have any yet.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
+                date: "Nov 17, 2026",
+                releases: &[Release {
                     version: "0.8.53",
                     notes: &[Note(
                         Fixed,

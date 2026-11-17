@@ -13,7 +13,11 @@ pub(super) enum PageEvent {
     OpenPlaylist(model::Playlist),
     OpenArtist(model::ArtistRef),
     OpenAlbum(model::AlbumRef),
+    /// A library page, from a Home shortcut.
+    Navigate(Route),
     StartRadio(model::Track),
+    /// Who made this song.
+    ShowCredits(model::Track),
     /// Settings, at the folders Local Files reads.
     OpenLocalFilesSettings,
 }

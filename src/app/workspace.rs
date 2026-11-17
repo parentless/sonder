@@ -34,9 +34,19 @@ pub(super) struct Workspace {
     pub(super) focus_handle: FocusHandle,
     /// The first-launch intro, while it plays over the window.
     pub(super) intro: Option<Entity<launch_intro::LaunchIntro>>,
+    /// Who made a song, while that dialog is open.
+    pub(super) credits: Option<CreditsOpen>,
+    /// Counts openings of the credits, so each plays its own entrance.
+    pub(super) credits_opened: u32,
     wheel_scroll: Rc<std::cell::RefCell<smooth_scroll::WheelScroll>>,
     wheel_route: Option<Route>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The open credits dialog and the subscription that closes it.
+pub(super) struct CreditsOpen {
+    pub(super) dialog: Entity<credits_dialog::CreditsDialog>,
+    pub(super) _subscription: Subscription,
 }
 
 impl Workspace {
@@ -328,6 +338,8 @@ impl Workspace {
         Self {
             router: Router::new(),
             intro,
+            credits: None,
+            credits_opened: 0,
             last_error: None,
             action_notice: None,
             radio_request_id: 0,
@@ -498,6 +510,22 @@ impl Workspace {
         )
     }
 
+    /// The credits dialog: the window dims and the card sits in its middle.
+    fn credits_layer(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let open = self.credits.as_ref()?;
+        Some(components::dialog_layer(
+            "credits-scrim",
+            ("credits-card", "credits-dim"),
+            self.credits_opened,
+            window,
+            cx,
+            open.dialog.clone(),
+            cx.listener(|this, _, _, cx| {
+                this.close_credits(cx);
+            }),
+        ))
+    }
+
     /// A playback problem only the listener can act on, while signed in.
     fn playback_help(
         &self,
@@ -665,6 +693,9 @@ impl Render for Workspace {
             .when_some(self.intro.clone(), |root, intro| root.child(intro))
             .when_some(scrim, |root, scrim| root.child(deferred(scrim)))
             .when_some(action_notice, |root, notice| root.child(notice))
+            .when_some(self.credits_layer(window, cx), |root, layer| {
+                root.child(layer)
+            })
             .when_some(playback_help, |root, dialog| root.child(deferred(dialog)))
             .when(app_change_open, |root| {
                 root.child(deferred(self.app_change_confirmation(palette, cx)))

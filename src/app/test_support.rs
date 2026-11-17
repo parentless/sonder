@@ -35,7 +35,7 @@ pub(super) fn track(index: usize) -> model::Track {
         provider: model::Provider::Spotify,
         source_id: format!("track-{index}"),
         spotify_uri: Some(format!("spotify:track:track-{index}")),
-        isrc: None,
+        isrc: Some(format!("USTEST{index:06}")),
         title: format!("Song {}", index + 1).into(),
         artist: "Sonder Ensemble".into(),
         artists: Vec::new(),

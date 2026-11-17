@@ -2,6 +2,7 @@ mod app;
 mod audio_output;
 pub mod backend;
 mod credential_worker;
+mod credits;
 #[cfg(target_os = "windows")]
 mod diagnostics;
 pub(crate) mod discord;
@@ -9,6 +10,7 @@ pub(crate) mod lastfm;
 pub mod lifecycle;
 mod link_download;
 pub mod local_files;
+mod local_time;
 pub mod lyrics;
 mod memory;
 pub mod model;

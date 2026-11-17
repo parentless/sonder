@@ -1,6 +1,6 @@
 [package]
 name = "cadence"
-version = "0.8.53"
+version = "0.8.54"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/parentless/sonder"
@@ -50,8 +50,11 @@ log = "0.4.33"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
 
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 embed-resource = "3"

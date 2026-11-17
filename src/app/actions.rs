@@ -48,6 +48,9 @@ impl Workspace {
         if self.intro.is_some() {
             return;
         }
+        if self.close_credits(cx) {
+            return;
+        }
         // An in-flight scrub is the most immediate thing Escape can undo, so it
         // takes precedence over closing whatever is open behind it.
         if self.player_bar.update(cx, |bar, cx| bar.cancel_scrub(cx)) {
@@ -256,6 +259,32 @@ impl Workspace {
         self.album.update(cx, |page, cx| page.close_menus(cx));
     }
 
+    /// Opens who made `track`, from any page.
+    pub(super) fn show_credits(&mut self, track: model::Track, cx: &mut Context<Self>) {
+        self.close_track_menus(cx);
+        let backend = services::AppServices::backend(cx);
+        let dialog = cx.new(|cx| credits_dialog::CreditsDialog::new(track, backend, cx));
+        let subscription =
+            cx.subscribe(&dialog, |this, _, _: &credits_dialog::CreditsEvent, cx| {
+                this.close_credits(cx);
+            });
+        self.credits_opened += 1;
+        self.credits = Some(workspace::CreditsOpen {
+            dialog,
+            _subscription: subscription,
+        });
+        cx.notify();
+    }
+
+    /// Closes the credits, returning whether they were open.
+    pub(super) fn close_credits(&mut self, cx: &mut Context<Self>) -> bool {
+        let was_open = self.credits.take().is_some();
+        if was_open {
+            cx.notify();
+        }
+        was_open
+    }
+
     pub(super) fn close_account_menu(&mut self, cx: &mut Context<Self>) {
         self.toolbar
             .update(cx, |toolbar, cx| toolbar.close_menu(cx));
@@ -360,8 +389,10 @@ impl Workspace {
                 self.open_playlist(origin, cx);
             }
             page::PageEvent::OpenArtist(artist) => self.open_artist(artist.clone(), origin, cx),
+            page::PageEvent::Navigate(route) => self.navigate(*route, cx),
             page::PageEvent::OpenAlbum(album) => self.open_album(album.clone(), origin, cx),
             page::PageEvent::StartRadio(track) => self.start_track_radio(track.clone(), cx),
+            page::PageEvent::ShowCredits(track) => self.show_credits(track.clone(), cx),
             page::PageEvent::OpenLocalFilesSettings => {
                 self.settings
                     .update(cx, |settings, cx| settings.show_local_files(cx));

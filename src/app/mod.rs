@@ -363,6 +363,7 @@ mod cached_search;
 mod catalog;
 mod chrome;
 mod components;
+mod credits_dialog;
 mod events;
 mod fonts;
 mod icons;

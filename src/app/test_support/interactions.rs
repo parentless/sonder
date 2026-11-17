@@ -3672,6 +3672,25 @@ fn open_discography(fixture: &mut Fixture, id: &str, page: model::ArtistAlbumPag
     fixture.update(|_, _| {});
 }
 
+/// Wheels Home down by `distance` logical pixels.
+fn scroll_home(fixture: &mut Fixture, distance: f32) {
+    fixture.update(|window, cx| {
+        window.dispatch_event(
+            gpui_kit::ScrollWheelEvent {
+                position: point(px(700.), px(400.)),
+                delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-distance))),
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+    });
+    for _ in 0..30 {
+        fixture.update(|_, _| {});
+        fixture.cx.advance_clock(Duration::from_millis(16));
+    }
+}
+
 fn scroll_discography(fixture: &mut Fixture) {
     for _ in 0..4 {
         fixture.update(|window, cx| {
@@ -4058,19 +4077,59 @@ fn home_lists_new_releases_from_top_artists_and_opens_one() {
     // While the releases and the artist to try load, the page holds its place.
     fixture.update(|_, _| {});
     fixture.update(|window, _| {
+        assert!(window.try_find("home-releases-loading").is_some());
         assert!(window.try_find("home-discover-loading").is_some());
-        assert!(window.try_find(("home-story", 0usize)).is_none());
+        assert!(window.try_find(("home-release", 0usize)).is_none());
     });
     answer_new_releases(&mut fixture, Ok(vec![release_album()]));
     fixture.update(|_, _| {});
     fixture.update(|window, _| {
+        assert!(window.try_find("home-releases-loading").is_none());
+        assert!(window.try_find("home-releases-heading").is_some());
+        assert!(window.try_find(("home-release", 0usize)).is_some());
+        // The announced release is a story, below the artist to try.
         assert!(window.try_find("home-stories-heading").is_some());
         assert!(window.try_find(("home-story", 0usize)).is_some());
-        // The announced release follows the new one.
-        assert!(window.try_find(("home-story", 1usize)).is_some());
     });
-    fixture.update(|window, cx| window.click(("home-story", 0usize), cx));
+    fixture.update(|window, cx| window.click(("home-release", 0usize), cx));
     assert_eq!(fixture.route(), Route::Album);
+}
+
+#[test]
+fn home_opens_with_shortcuts_back_into_the_library_and_the_song_to_carry_on_with() {
+    let mut fixture = Fixture::new(false);
+    fixture.play(track(0));
+    fixture.update(|window, cx| window.click("nav-home", cx));
+    let BackendCommand::LoadHome { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a Home request")
+    };
+    respond.send(Ok(model::HomeData::default())).unwrap();
+    fixture.update(|_, _| {});
+    fixture.update(|window, _| {
+        assert!(window.try_find("home-shortcuts").is_some());
+        // Liked Songs and Recently played always lead.
+        assert!(window.try_find(("home-shortcut", 0usize)).is_some());
+        assert!(window.try_find(("home-shortcut", 1usize)).is_some());
+        // The song that was playing waits, paused, with where it stopped.
+        assert!(window.try_find("home-continue").is_some());
+        assert!(window.try_find("home-continue-progress").is_some());
+    });
+
+    fixture.update(|window, cx| window.click(("home-shortcut", 0usize), cx));
+    assert_eq!(fixture.route(), Route::LikedSongs);
+    fixture.update(|window, cx| window.click("nav-home", cx));
+    fixture.update(|window, cx| window.click(("home-shortcut", 1usize), cx));
+    assert_eq!(fixture.route(), Route::Recent);
+
+    // Carrying on resumes the paused song rather than starting another.
+    fixture.update(|window, cx| window.click("nav-home", cx));
+    while fixture.backend.commands.try_recv().is_ok() {}
+    fixture.update(|window, cx| window.click("home-continue-play", cx));
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::Resume)
+    ));
 }
 
 /// Opens the range menu and picks a range.
@@ -4218,6 +4277,7 @@ fn local_files_join_the_sidebar_once_a_folder_is_added_and_play_from_disk() {
         assert!(window.try_find(("track-menu-reveal", 1usize)).is_some());
         for spotify_only in [
             "track-menu-radio",
+            "track-menu-credits",
             "track-menu-copy-link",
             "track-menu-spotify",
             "track-menu-spotify-like",
@@ -5221,6 +5281,111 @@ fn deleting_a_local_song_removes_its_row_at_once_and_a_failure_brings_it_back() 
     assert_eq!(library(&mut fixture), 1);
 }
 
+type Players<'a> = &'a [(&'a str, Option<&'a str>)];
+
+fn credits(roles: &[(&str, Players)]) -> crate::credits::Credits {
+    crate::credits::Credits {
+        roles: roles
+            .iter()
+            .map(|(label, people)| crate::credits::Role {
+                label: (*label).to_owned(),
+                people: people
+                    .iter()
+                    .map(|(name, detail)| crate::credits::Person {
+                        name: (*name).to_owned(),
+                        detail: detail.map(str::to_owned),
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+fn open_credits(
+    fixture: &mut Fixture,
+    index: usize,
+) -> (
+    String,
+    tokio::sync::oneshot::Sender<anyhow::Result<crate::credits::Credits>>,
+) {
+    fixture.right_click_track(index);
+    fixture.update(|window, cx| window.click(("track-menu-credits", index), cx));
+    let BackendCommand::LoadCredits { isrc, respond } =
+        fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a credits lookup")
+    };
+    (isrc, respond)
+}
+
+#[test]
+fn credits_open_from_a_songs_menu_show_who_made_it_and_close_with_escape() {
+    let mut fixture = Fixture::new(false);
+    let (isrc, respond) = open_credits(&mut fixture, 1);
+    assert_eq!(isrc, track(1).isrc.unwrap(), "asked by the song's ISRC");
+    fixture.update(|window, _| {
+        assert!(window.try_find("credits-dialog").is_some());
+        assert!(window.try_find("credits-loading").is_some());
+    });
+    respond
+        .send(Ok(credits(&[
+            ("Written by", &[("Thom Yorke", None)]),
+            (
+                "Performed by",
+                &[("Jonny Greenwood", Some("guitar, piano"))],
+            ),
+        ])))
+        .unwrap();
+    fixture.cx.run_until_parked();
+    fixture.update(|window, _| {
+        assert!(window.try_find("credits-loading").is_none());
+        assert!(window.try_find(("credits-role", 0usize)).is_some());
+        assert!(window.try_find(("credits-role", 1usize)).is_some());
+        assert!(window.try_find(("credits-role", 2usize)).is_none());
+    });
+    fixture.update(|window, cx| window.press("escape", cx));
+    fixture.update(|window, _| assert!(window.try_find("credits-dialog").is_none()));
+    fixture.no_commands();
+}
+
+#[test]
+fn credits_say_so_when_nothing_is_listed_and_retry_after_a_failure() {
+    let mut fixture = Fixture::new(false);
+    let (_, respond) = open_credits(&mut fixture, 0);
+    respond.send(Err(anyhow::anyhow!("offline"))).unwrap();
+    fixture.cx.run_until_parked();
+    fixture.update(|window, cx| {
+        assert!(window.try_find("credits-retry").is_some());
+        window.click("credits-retry", cx);
+    });
+    let BackendCommand::LoadCredits { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("retry asks again")
+    };
+    respond
+        .send(Ok(crate::credits::Credits::default()))
+        .unwrap();
+    fixture.cx.run_until_parked();
+    fixture.update(|window, _| {
+        assert!(window.try_find("credits-empty").is_some());
+        assert!(window.try_find("credits-retry").is_none());
+    });
+    // Closing from the button leaves nothing asked.
+    fixture.update(|window, cx| window.click("credits-close", cx));
+    fixture.update(|window, _| assert!(window.try_find("credits-dialog").is_none()));
+}
+
+#[test]
+fn pressing_the_dim_area_closes_the_credits() {
+    let mut fixture = Fixture::new(false);
+    let _pending = open_credits(&mut fixture, 0);
+    fixture.update(|window, cx| {
+        assert!(window.try_find("credits-dialog").is_some());
+        window.click_at("credits-scrim", point(px(4.), px(4.)), cx);
+    });
+    fixture.update(|window, _| assert!(window.try_find("credits-dialog").is_none()));
+}
+
 fn suggestion(name: &str, id: &str, percent: u8) -> model::ArtistSuggestion {
     model::ArtistSuggestion {
         artist: model::Artist {
@@ -5342,6 +5507,8 @@ fn home_offers_an_artist_to_try_plays_a_sample_and_steps_on_when_dismissed() {
         assert!(window.try_find(("home-discover-next", 1usize)).is_some());
     });
 
+    // The artist to try sits below the shortcuts and what is new.
+    scroll_home(&mut fixture, 420.);
     // Playing the sample hands the artist's songs to the player.
     fixture.update(|window, cx| window.click("home-discover-play", cx));
     let BackendCommand::PlayContext { tracks, index } = fixture

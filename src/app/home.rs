@@ -1,6 +1,8 @@
-//! The Home page: one artist to try next, found because they sound like ones
-//! you play, beside your top artists; then story cards for what is new, what is
-//! coming and who to come back to; then your top tracks.
+//! The Home page. It starts with a greeting and shortcuts back into the
+//! library, then what you were playing and what is new from artists you play.
+//! Below that: one artist to try next, found because they sound like ones you
+//! play, beside your top artists; story cards for what is coming and who to come
+//! back to; then your top tracks.
 //!
 //! Who sounds like whom comes from ListenBrainz (see `similar.rs`), looked up
 //! once every few days and kept on disk. Two small Spotify requests per time range, made only when the page is opened
@@ -11,7 +13,7 @@ use super::page::PageEvent;
 use super::top_listening::{TopEvent, TopListening};
 use super::*;
 use gpui_kit::TestSupportExt as _;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 /// New releases move more slowly, and finding them costs a request per artist.
 /// Announced dates change slowly, and each lookup costs MusicBrainz about 20 requests.
@@ -25,8 +27,9 @@ const DISCOVER_SONGS: usize = 3;
 const DISCOVER_SONGS_KEPT: usize = 8;
 /// Other artists shown under the one on offer.
 const DISCOVER_NEXT_SHOWN: usize = 4;
+/// New albums shown under Home's first heading.
+const RELEASES_SHOWN: usize = 3;
 /// How many stories of each kind the briefing shows.
-const STORY_RELEASES: usize = 3;
 const STORY_UPCOMING: usize = 2;
 const STORY_COME_BACK: usize = 2;
 /// A rising or falling artist is marked green or red.
@@ -36,9 +39,32 @@ const ARTISTS_SHOWN: usize = 5;
 /// An artist is "come back to" when they rank this high on the longer chart.
 const COME_BACK_RANK: usize = 5;
 
-enum StoryTarget {
-    Album(model::AlbumRef),
-    Artist(model::ArtistRef),
+/// One way back into the library, drawn as a tile at the top of Home.
+struct Shortcut {
+    url: Option<String>,
+    icon: CadenceIcon,
+    round: bool,
+    title: SharedString,
+    detail: String,
+    event: PageEvent,
+}
+
+/// What the greeting says at this hour of the day.
+fn greeting_for(hour: u32) -> &'static str {
+    match hour {
+        5..=11 => "Good morning",
+        12..=16 => "Good afternoon",
+        17..=21 => "Good evening",
+        _ => "Late night",
+    }
+}
+
+/// Tests and screenshots always read the same words, whatever time it is.
+fn greeting() -> &'static str {
+    if cfg!(test) {
+        return greeting_for(18);
+    }
+    greeting_for(crate::local_time::hour())
 }
 
 struct Upcoming {
@@ -100,6 +126,10 @@ impl HomePage {
                 this.handle_top_event(event, cx)
             }),
             cx.observe(&top, |_, _, cx| cx.notify()),
+            // The shortcuts and the song to continue follow the library and
+            // the player.
+            cx.observe(&services::AppServices::library(cx), |_, _, cx| cx.notify()),
+            cx.observe(&services::AppServices::player(cx), |_, _, cx| cx.notify()),
         ];
         Self {
             backend,
@@ -502,7 +532,7 @@ impl HomePage {
         accent: bool,
         title: String,
         detail: String,
-        target: Option<StoryTarget>,
+        target: Option<model::ArtistRef>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let palette = appearance::Appearance::palette(cx);
@@ -597,10 +627,9 @@ impl HomePage {
             .hover(|style| style.bg(rgb(palette.surface_hover)))
             .child(cover)
             .child(body)
-            .on_click(cx.listener(move |_, _, _, cx| match &target {
-                StoryTarget::Album(album) => cx.emit(PageEvent::OpenAlbum(album.clone())),
-                StoryTarget::Artist(artist) => cx.emit(PageEvent::OpenArtist(artist.clone())),
-            }))
+            .on_click(
+                cx.listener(move |_, _, _, cx| cx.emit(PageEvent::OpenArtist(target.clone()))),
+            )
             .into_any_element()
     }
 
@@ -955,6 +984,395 @@ impl HomePage {
     }
 
     /// The time range as one button that opens a short menu.
+    /// The ways back into the library, in the order they are shown. A tile is
+    /// left out when there is nothing behind it yet.
+    fn shortcuts(&self, cx: &App) -> Vec<Shortcut> {
+        let library = services::AppServices::library(cx);
+        let library = library.read(cx);
+        let mut tiles = Vec::new();
+        tiles.push(Shortcut {
+            url: None,
+            icon: CadenceIcon::HeartFilled,
+            round: false,
+            title: "Liked Songs".into(),
+            detail: if library.loaded() {
+                format!("{} songs", library.liked_tracks().len())
+            } else {
+                "Songs you liked".to_owned()
+            },
+            event: PageEvent::Navigate(Route::LikedSongs),
+        });
+        tiles.push(Shortcut {
+            url: None,
+            icon: CadenceIcon::ClockFilled,
+            round: false,
+            title: "Recently played".into(),
+            detail: "What you played lately".to_owned(),
+            event: PageEvent::Navigate(Route::Recent),
+        });
+        // The album behind the latest song, when Spotify named one.
+        if let Some((track, album)) = library.recently_played().iter().find_map(|track| {
+            let album = track.album_ref.as_ref()?;
+            album.source_id.as_ref()?;
+            Some((track, album))
+        }) {
+            tiles.push(Shortcut {
+                url: album
+                    .artwork_url
+                    .clone()
+                    .or_else(|| track.artwork_url.clone()),
+                icon: CadenceIcon::MusicNote,
+                round: false,
+                title: album.name.clone(),
+                detail: format!("Album · {}", track.artist),
+                event: PageEvent::OpenAlbum(album.clone()),
+            });
+        }
+        if let Some(playlist) = library
+            .pinned_playlists()
+            .first()
+            .or_else(|| library.playlists().first())
+        {
+            tiles.push(Shortcut {
+                url: playlist.artwork_url.clone(),
+                icon: CadenceIcon::Playlist,
+                round: false,
+                title: playlist.name.clone(),
+                detail: "Playlist".to_owned(),
+                event: PageEvent::OpenPlaylist(playlist.clone()),
+            });
+        }
+        if let Some(artist) = self
+            .top
+            .read(cx)
+            .data(self.range)
+            .and_then(|data| data.artists.first())
+        {
+            tiles.push(Shortcut {
+                url: artist.artwork_url.clone(),
+                icon: CadenceIcon::Person,
+                round: true,
+                title: artist.name.clone(),
+                detail: "Artist · your most played".to_owned(),
+                event: PageEvent::OpenArtist(model::ArtistRef {
+                    name: artist.name.clone(),
+                    source_id: Some(artist.source_id.clone()),
+                    spotify_uri: artist.spotify_uri.clone(),
+                }),
+            });
+        }
+        tiles.push(if library.has_local_files() {
+            Shortcut {
+                url: None,
+                icon: CadenceIcon::FolderFilled,
+                round: false,
+                title: "Local Files".into(),
+                detail: format!("{} songs", library.local_tracks().len()),
+                event: PageEvent::Navigate(Route::LocalFiles),
+            }
+        } else {
+            Shortcut {
+                url: None,
+                icon: CadenceIcon::PlaylistFilled,
+                round: false,
+                title: "Playlists".into(),
+                detail: "All your playlists".to_owned(),
+                event: PageEvent::Navigate(Route::Playlists),
+            }
+        });
+        tiles
+    }
+
+    fn shortcut_tile(
+        &self,
+        index: usize,
+        shortcut: Shortcut,
+        palette: CadencePalette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let cache = services::AppServices::image_cache(cx);
+        let art = components::artwork(
+            palette,
+            &cache,
+            shortcut.url.as_deref(),
+            tokens::ArtworkSize {
+                size: Rems(3.5),
+                radius: if shortcut.round {
+                    Rems(1.75)
+                } else {
+                    Rems(0.625)
+                },
+            },
+            shortcut.icon,
+        );
+        let event = shortcut.event;
+        components::button(palette, ("home-shortcut", index))
+            .test_support()
+            .w(Rems(18.))
+            .flex_none()
+            .p_2()
+            .gap_3()
+            .items_center()
+            .justify_start()
+            .rounded_2xl()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .hover(|style| style.bg(rgb(palette.surface_hover)))
+            .child(art)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .child(
+                        div()
+                            .max_w_full()
+                            .truncate()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .text_color(rgb(palette.text_primary))
+                            .child(shortcut.title),
+                    )
+                    .child(
+                        components::page_detail(palette, shortcut.detail)
+                            .max_w_full()
+                            .truncate(),
+                    ),
+            )
+            .on_click(cx.listener(move |_, _, _, cx| cx.emit(event.clone())))
+            .into_any_element()
+    }
+
+    /// The song to carry on with: the one that is playing or paused, or else
+    /// the latest in Recently played.
+    fn continue_card(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let player = services::AppServices::player(cx);
+        let library = services::AppServices::library(cx);
+        let (current, playing, position) = {
+            let player = player.read(cx);
+            (
+                player.now_playing().cloned(),
+                player.playing(),
+                player.position_ms(Instant::now()),
+            )
+        };
+        let resuming = current.is_some();
+        let track = match current {
+            Some(track) => track,
+            None => library.read(cx).recently_played().first().cloned()?,
+        };
+        let cache = services::AppServices::image_cache(cx);
+        let art = components::artwork(
+            palette,
+            &cache,
+            track.artwork_url.as_deref(),
+            tokens::ArtworkSize {
+                size: Rems(7.),
+                radius: Rems(0.875),
+            },
+            CadenceIcon::MusicNote,
+        );
+        let (label, icon) = if !resuming {
+            ("Play", CadenceIcon::Play)
+        } else if playing {
+            ("Pause", CadenceIcon::Pause)
+        } else {
+            ("Resume", CadenceIcon::Play)
+        };
+        // A running song would need a timer to keep its bar honest, so the bar
+        // shows only while paused, when it cannot move.
+        let progress = (resuming && !playing && track.duration_ms > 0).then(|| {
+            let position = position.min(track.duration_ms);
+            (
+                position as f32 / track.duration_ms as f32,
+                format!(
+                    "{} / {}",
+                    format_duration(position),
+                    format_duration(track.duration_ms)
+                ),
+            )
+        });
+        Some(
+            div()
+                .id("home-continue")
+                .test_support()
+                .w_full()
+                .p_4()
+                .flex()
+                .gap_4()
+                .rounded_2xl()
+                .border_1()
+                .border_color(rgb(palette.border))
+                .child(art)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .justify_between()
+                        .gap_2()
+                        .child(
+                            div()
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_lg()
+                                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                        .text_color(rgb(palette.text_primary))
+                                        .child(track.title.clone()),
+                                )
+                                .child(
+                                    components::page_detail(palette, track.artist.to_string())
+                                        .truncate(),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_start()
+                                .gap_2()
+                                .when_some(progress, |column, (fraction, text)| {
+                                    column
+                                        .w_full()
+                                        .child(
+                                            div()
+                                                .id("home-continue-progress")
+                                                .test_support()
+                                                .w_full()
+                                                .h(px(4.))
+                                                .rounded_full()
+                                                .bg(rgb(palette.control))
+                                                .child(
+                                                    div()
+                                                        .h_full()
+                                                        .w(relative(fraction))
+                                                        .rounded_full()
+                                                        .bg(rgb(palette.text_primary)),
+                                                ),
+                                        )
+                                        .child(components::page_detail(palette, text))
+                                })
+                                .child(
+                                    components::icon_pill(
+                                        palette,
+                                        "home-continue-play",
+                                        icon,
+                                        label,
+                                        true,
+                                    )
+                                    .test_support()
+                                    .on_click(cx.listener(
+                                        move |_, _, _, cx| {
+                                            if resuming {
+                                                player.update(cx, |player, cx| player.toggle(cx));
+                                            } else {
+                                                let list =
+                                                    library.read(cx).recently_played().clone();
+                                                player.update(cx, |player, cx| {
+                                                    player.play_context(list, 0, cx);
+                                                });
+                                            }
+                                        },
+                                    )),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The newest albums from artists you play, as covers.
+    fn releases_shelf(
+        &self,
+        palette: CadencePalette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let cache = services::AppServices::image_cache(cx);
+        let size = tokens::ArtworkSize {
+            size: Rems(8.),
+            radius: Rems(0.875),
+        };
+        let Some(releases) = self.releases.as_ref() else {
+            // Placeholders hold the shelf's height while Spotify answers.
+            return self.releases_loading.then(|| {
+                div()
+                    .id("home-releases-loading")
+                    .test_support()
+                    .flex()
+                    .gap_4()
+                    .children((0..RELEASES_SHOWN).map(|_| {
+                        div()
+                            .size(size.size)
+                            .rounded(size.radius)
+                            .bg(rgb(palette.control))
+                    }))
+                    .into_any_element()
+            });
+        };
+        if releases.albums.is_empty() {
+            return None;
+        }
+        let mut shelf = div().id("home-releases").test_support().flex().gap_4();
+        for (index, album) in releases.albums.iter().take(RELEASES_SHOWN).enumerate() {
+            let is_new = release_watch::is_new(&album.source_id, cx);
+            let artist = album
+                .artists
+                .iter()
+                .map(|artist| artist.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let target = model::AlbumRef {
+                name: album.name.clone(),
+                source_id: Some(album.source_id.clone()),
+                spotify_uri: album.spotify_uri.clone(),
+                artwork_url: album.artwork_url.clone(),
+            };
+            shelf = shelf.child(
+                components::button(palette, ("home-release", index))
+                    .test_support()
+                    .w(size.size)
+                    .flex_none()
+                    .flex_col()
+                    .items_start()
+                    .gap_1p5()
+                    .child(components::artwork(
+                        palette,
+                        &cache,
+                        album.artwork_url.as_deref(),
+                        size,
+                        CadenceIcon::MusicNote,
+                    ))
+                    .child(
+                        div()
+                            .w_full()
+                            .truncate()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .text_color(rgb(palette.text_primary))
+                            .child(album.name.clone()),
+                    )
+                    .child(
+                        components::page_detail(
+                            palette,
+                            if is_new {
+                                format!("New · {artist}")
+                            } else {
+                                artist
+                            },
+                        )
+                        .w_full()
+                        .truncate(),
+                    )
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cx.emit(PageEvent::OpenAlbum(target.clone()))
+                    })),
+            );
+        }
+        Some(shelf.into_any_element())
+    }
+
     fn range_menu(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
         let selected = self.range;
         div().flex().child(
@@ -1066,6 +1484,62 @@ impl Render for HomePage {
                 .text_color(rgb(palette.text_primary))
                 .child(text)
         };
+        let shortcuts: Vec<AnyElement> = self
+            .shortcuts(cx)
+            .into_iter()
+            .enumerate()
+            .map(|(index, shortcut)| self.shortcut_tile(index, shortcut, palette, cx))
+            .collect();
+        let continue_card = self.continue_card(palette, cx);
+        let shelf = self.releases_shelf(palette, cx);
+        let column = |heading_id, title: &str, body: AnyElement| {
+            div()
+                .flex_1()
+                .min_w(Rems(22.))
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(
+                    div()
+                        .h_10()
+                        .flex()
+                        .items_center()
+                        .child(heading(heading_id, title.to_owned().into())),
+                )
+                .child(body)
+        };
+        let first_row = div()
+            .flex()
+            .flex_col()
+            .gap_6()
+            .mb_6()
+            .when(!shortcuts.is_empty(), |block| {
+                block.child(
+                    div()
+                        .id("home-shortcuts")
+                        .test_support()
+                        .flex()
+                        .flex_wrap()
+                        .gap_3()
+                        .children(shortcuts),
+                )
+            })
+            .when(continue_card.is_some() || shelf.is_some(), |block| {
+                block.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap_x_10()
+                        .gap_y_6()
+                        .children(
+                            continue_card
+                                .map(|card| column("home-continue-heading", "Continue", card)),
+                        )
+                        .children(shelf.map(|shelf| {
+                            column("home-releases-heading", "New from artists you play", shelf)
+                        })),
+                )
+            });
         let (permission_missing, current, compare) = {
             let top = self.top.read(cx);
             (
@@ -1109,50 +1583,12 @@ impl Render for HomePage {
             self.track_list.update(cx, |list, cx| {
                 list.show(("home-tracks", self.range.index()), tracks.clone(), cx);
             });
-            let releases: Arc<[model::Album]> = self
-                .releases
-                .as_ref()
-                .map(|releases| releases.albums.clone())
-                .unwrap_or_default();
             let upcoming = self
                 .upcoming
                 .as_ref()
                 .map_or_else(|| Arc::from([]), |upcoming| upcoming.releases.clone());
-            let releases_pending = self.releases.is_none() && self.releases_loading;
             let upcoming_pending = self.upcoming.is_none() && self.upcoming_loading;
             let mut stories: Vec<AnyElement> = Vec::new();
-            for album in releases.iter().take(STORY_RELEASES) {
-                let is_new = release_watch::is_new(&album.source_id, cx);
-                let mut detail = album
-                    .artists
-                    .iter()
-                    .map(|artist| artist.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                if let Some(date) = album.release_date.as_deref().and_then(release_label) {
-                    if !detail.is_empty() {
-                        detail.push_str(" · ");
-                    }
-                    detail.push_str(&date);
-                }
-                let target = StoryTarget::Album(model::AlbumRef {
-                    name: album.name.clone(),
-                    source_id: Some(album.source_id.clone()),
-                    spotify_uri: album.spotify_uri.clone(),
-                    artwork_url: album.artwork_url.clone(),
-                });
-                let index = stories.len();
-                stories.push(self.story_card(
-                    index,
-                    album.artwork_url.as_deref(),
-                    if is_new { "NEW RELEASE" } else { "RECENT" }.to_owned(),
-                    is_new,
-                    album.name.to_string(),
-                    detail,
-                    Some(target),
-                    cx,
-                ));
-            }
             for release in upcoming.iter().take(STORY_UPCOMING) {
                 let when = release_label(&release.date).unwrap_or_else(|| release.date.clone());
                 let index = stories.len();
@@ -1192,16 +1628,16 @@ impl Render for HomePage {
                             longer_range.short_label(),
                             self.range.short_label()
                         ),
-                        Some(StoryTarget::Artist(model::ArtistRef {
+                        Some(model::ArtistRef {
                             name: artist.name.clone(),
                             source_id: Some(artist.source_id.clone()),
                             spotify_uri: artist.spotify_uri.clone(),
-                        })),
+                        }),
                         cx,
                     ));
                 }
             }
-            let stories_pending = (releases_pending || upcoming_pending) && stories.is_empty();
+            let stories_pending = upcoming_pending && stories.is_empty();
             let shown_artists = if self.all_artists {
                 artists.len()
             } else {
@@ -1243,7 +1679,7 @@ impl Render for HomePage {
                 .when(!stories_pending && stories_empty, |column| {
                     column.child(components::page_detail(
                         palette,
-                        "Nothing new or announced for your top artists yet. Dates come from MusicBrainz, so some may be missing.",
+                        "Nothing announced for your top artists yet. Dates come from MusicBrainz, so some may be missing.",
                     ))
                 });
             let left: Option<AnyElement> =
@@ -1442,9 +1878,10 @@ impl Render for HomePage {
                             .w_full()
                             .child(components::page_heading(
                                 palette,
-                                "Home",
-                                "Based on what you play most",
+                                greeting(),
+                                "Pick up where you left off",
                             ))
+                            .child(first_row)
                             .when(range_alone, |page| {
                                 page.child(div().mb_5().child(self.range_menu(palette, cx)))
                             })
@@ -1506,7 +1943,20 @@ fn release_label(date: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::release_label;
+    use super::{greeting_for, release_label};
+
+    #[test]
+    fn the_greeting_follows_the_hour() {
+        assert_eq!(greeting_for(5), "Good morning");
+        assert_eq!(greeting_for(11), "Good morning");
+        assert_eq!(greeting_for(12), "Good afternoon");
+        assert_eq!(greeting_for(16), "Good afternoon");
+        assert_eq!(greeting_for(17), "Good evening");
+        assert_eq!(greeting_for(21), "Good evening");
+        assert_eq!(greeting_for(22), "Late night");
+        assert_eq!(greeting_for(0), "Late night");
+        assert_eq!(greeting_for(4), "Late night");
+    }
 
     #[test]
     fn release_dates_read_as_month_and_day() {

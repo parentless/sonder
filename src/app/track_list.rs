@@ -376,6 +376,11 @@ impl TrackList {
         let next_track = track.clone();
         let queue_track = track.clone();
         let radio_track = track.clone();
+        let credits_track = track.clone();
+        let has_credits = track
+            .isrc
+            .as_deref()
+            .is_some_and(|isrc| !isrc.trim().is_empty());
         let spotify_track = track.clone();
         let spotify_liked = self.library.read(cx).is_spotify_liked(track);
         let spotify_like_busy = self.library.read(cx).spotify_like_busy();
@@ -509,6 +514,17 @@ impl TrackList {
                         cx.emit(PageEvent::StartRadio(radio_track.clone()));
                         cx.notify();
                     })),
+                )
+            })
+            .when(has_credits, |menu| {
+                menu.child(
+                    components::text_menu_item(palette, ("track-menu-credits", index), "Credits")
+                        .test_support()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.menu_open = None;
+                            cx.emit(PageEvent::ShowCredits(credits_track.clone()));
+                            cx.notify();
+                        })),
                 )
             })
             .child(separator())

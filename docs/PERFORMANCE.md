@@ -413,6 +413,10 @@ closes. The panel redraws only when the seconds left change.
 
 Nothing runs until the dialog is used. Lookups and downloads each get their own short-lived thread and a child process, so the UI thread only receives progress messages, at most one per 120 ms per download. No timers are left running, and the lists drop to the last six finished downloads. A closed dialog holds no state beyond its field.
 
+## Credits and Home shortcuts
+
+The Credits dialog asks MusicBrainz for one ISRC lookup and up to three recording lookups (spaced 1.1 seconds apart), only when it is opened, on a short-lived backend task with a 30-second limit that is dropped if the dialog closes. The merged answer is kept on disk for a week. Home's shortcuts, Continue card and new-release shelf are drawn from data already in memory (the library, the player and the releases Home already fetched), so they add no request. The Continue card shows a progress bar only while paused, so nothing needs a timer to keep it honest.
+
 ## Artists to try
 
 Home asks for them once when it opens, and the backend keeps the answer for three days. A fresh lookup is about three MusicBrainz searches (spaced a second apart, for your top three artists), three ListenBrainz requests and up to sixteen Spotify searches, all on the backend's own tasks with a 90-second limit; it is dropped if you leave. The songs on offer come from the artist page request, kept for the last eight artists only. Nothing runs in the background.

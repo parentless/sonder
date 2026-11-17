@@ -6,6 +6,57 @@
 
 use super::*;
 
+/// A centred dialog over a dimmed window. Pressing the dim area calls `close`.
+///
+/// The dim fades in while the card settles up from just below, so the dialog
+/// arrives where the eye already is. Opening is occasional, so the motion is
+/// short and never repeats; `opened` counts openings so each plays its own.
+pub(super) fn dialog_layer(
+    scrim_id: &'static str,
+    animation_ids: (&'static str, &'static str),
+    opened: u32,
+    window: &Window,
+    cx: &App,
+    card: impl IntoElement,
+    close: impl Fn(&gpui_kit::MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    use gpui_kit::TestSupportExt as _;
+    let size = window.viewport_size();
+    let scrim = appearance::Appearance::palette(cx).scrim;
+    let dialog = div()
+        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+            cx.stop_propagation()
+        })
+        .child(card);
+    let backdrop = div()
+        .id(scrim_id)
+        .test_support()
+        .w(size.width)
+        .h(size.height)
+        .occlude()
+        .flex()
+        .items_center()
+        .justify_center()
+        .on_mouse_down(gpui_kit::MouseButton::Left, close);
+    let content: AnyElement = if cx.reduce_motion() {
+        backdrop.bg(scrim).child(dialog).into_any_element()
+    } else {
+        backdrop
+            .child(dialog.with_animation(
+                (animation_ids.0, opened),
+                Animation::new(Duration::from_millis(220)).with_easing(ease_out_quint()),
+                |card, progress| card.opacity(progress).mt(px((1. - progress) * 14.)),
+            ))
+            .with_animation(
+                (animation_ids.1, opened),
+                Animation::new(Duration::from_millis(180)).with_easing(ease_out_quint()),
+                move |backdrop, progress| backdrop.bg(scrim.opacity(progress)),
+            )
+            .into_any_element()
+    };
+    deferred(anchored().position(point(px(0.), px(0.))).child(content)).into_any_element()
+}
+
 /// The keyboard focus ring's stroke, the same physical width as `border_2`.
 const FOCUS_RING_WIDTH: Pixels = px(2.);
 
