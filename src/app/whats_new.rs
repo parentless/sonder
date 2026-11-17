@@ -41,6 +41,16 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 17, 2026",
+                releases: &[Release {
+                    version: "0.8.50",
+                    notes: &[Note(
+                        Better,
+                        "From link now opens as a dialog in the middle of the window, with the page dimmed behind it. Close it with the × button, Escape, or a click outside.",
+                    )],
+                }],
+            },
+            Day {
                 date: "Nov 16, 2026",
                 releases: &[Release {
                     version: "0.8.49",

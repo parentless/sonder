@@ -8,11 +8,13 @@ use std::{collections::HashSet, path::PathBuf};
 /// How long typing pauses before the links in the field are looked up, so a
 /// half-typed address is not.
 const LOOKUP_DELAY: Duration = Duration::from_millis(450);
-const POPOVER_WIDTH: Rems = Rems(25.);
+const DIALOG_WIDTH: Rems = Rems(30.);
 
 pub(super) enum LinkPopoverEvent {
     /// There is no folder yet; take them to where one is added.
     OpenFolders,
+    /// The close button was pressed.
+    Close,
 }
 
 impl EventEmitter<LinkPopoverEvent> for LinkPopover {}
@@ -739,19 +741,80 @@ impl Render for LinkPopover {
                 .into_any_element()
         };
 
+        let header = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .size_10()
+                    .rounded_xl()
+                    .bg(rgb(palette.surface_hover))
+                    .child(components::icon(
+                        CadenceIcon::Link,
+                        tokens::FIELD_ICON,
+                        palette.text_primary,
+                    )),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .text_color(rgb(palette.text_primary))
+                            .child("Add from a link"),
+                    )
+                    .child(
+                        div()
+                            .text_size(tokens::CAPTION_TEXT)
+                            .text_color(rgb(palette.text_muted))
+                            .child("Saved into your Local Files, ready to play"),
+                    ),
+            )
+            .child(
+                components::icon_button_sized(
+                    palette,
+                    "link-close",
+                    CadenceIcon::Close,
+                    tokens::INLINE_ICON,
+                )
+                .test_support()
+                .size_8()
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(LinkPopoverEvent::Close))),
+            );
+
         div()
             .id("link-popover")
             .test_support()
             .occlude()
-            .w(POPOVER_WIDTH)
-            .p_4()
+            .w(DIALOG_WIDTH)
+            .max_h(window.viewport_size().height * 0.86)
+            .flex()
+            .flex_col()
+            .gap_4()
+            .p_5()
             .rounded_2xl()
             .border_1()
             .border_color(rgb(palette.border))
-            .bg(rgb(palette.surface_raised))
+            .bg(rgb(palette.surface))
             .shadow_lg()
             .text_color(rgb(palette.text))
             .text_size(tokens::BODY_TEXT)
-            .child(body)
+            .child(header)
+            .child(
+                div()
+                    .id("link-body")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(body),
+            )
     }
 }

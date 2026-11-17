@@ -1,6 +1,6 @@
 # Saving songs from links
 
-Local Files has a **From link** button. It saves the audio behind a link into one of the Local Files folders, where the folder watcher picks it up and it plays like any other file.
+Local Files has a **From link** button that opens a dialog (close it with ×, Escape or a click outside). It saves the audio behind a link into one of the Local Files folders, where the folder watcher picks it up and it plays like any other file.
 
 ## What works
 
@@ -11,7 +11,7 @@ Local Files has a **From link** button. It saves the audio behind a link into on
 | A playlist link | Offered as **All N** or **First song**; at most 100 songs. |
 | Several links pasted together | Looked up three at a time and saved two at a time; at most 25 links. |
 
-Spotify, Apple Music, Tidal, Amazon Music, Deezer and Qobuz links are turned down with a reason: that audio is copy-protected. Anything that needs a sign-in or is DRM-protected fails with a plain sentence, not a stack trace. The popover reminds the listener to save only audio they have the right to use.
+Spotify, Apple Music, Tidal, Amazon Music, Deezer and Qobuz links are turned down with a reason: that audio is copy-protected. Anything that needs a sign-in or is DRM-protected fails with a plain sentence, not a stack trace. The dialog reminds the listener to save only audio they have the right to use.
 
 ## Formats
 
@@ -37,6 +37,6 @@ They live in `%LOCALAPPDATA%\twoducks\cadence\data\tools`. A Sonder-managed yt-d
 
 ## Where the work happens
 
-`src/link_download.rs` has no UI: it parses links, looks them up, fetches tools and saves files, blocking, on its own threads. `src/app/link_downloads.rs` keeps the list of lookups and downloads that outlives the popover and tells the library when a file landed. `src/app/link_popover.rs` is the view. Progress reaches the screen at most every 120 ms.
+`src/link_download.rs` has no UI: it parses links, looks them up, fetches tools and saves files, blocking, on its own threads. `src/app/link_downloads.rs` keeps the list of lookups and downloads that outlives the popover and tells the library when a file landed. `src/app/link_popover.rs` is the dialog view. Progress reaches the screen at most every 120 ms.
 
 `cargo test real_links -- --ignored --nocapture` with `SONDER_TEST_URL` (and optionally `SONDER_TEST_FORMATS=best,mp3,flac`) saves a real link in each format.

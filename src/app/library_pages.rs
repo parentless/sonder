@@ -191,7 +191,6 @@ pub(super) struct LibraryTracksPage {
     link: Option<LinkPopoverState>,
     /// Where the "From link" button is, so a press on it is not also a press
     /// outside the popover.
-    link_button_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     _tracks_subscription: Subscription,
 }
 
@@ -220,7 +219,6 @@ impl LibraryTracksPage {
             tracks,
             search: None,
             link: None,
-            link_button_bounds: Rc::default(),
         }
     }
 
@@ -241,6 +239,9 @@ impl LibraryTracksPage {
                 page.close_link_popover(cx);
                 cx.emit(PageEvent::OpenLocalFilesSettings);
             }
+            link_popover::LinkPopoverEvent::Close => {
+                page.close_link_popover(cx);
+            }
         });
         popover.update(cx, |popover, cx| popover.focus(window, cx));
         self.link = Some(LinkPopoverState {
@@ -252,7 +253,6 @@ impl LibraryTracksPage {
     }
 
     fn link_button(&self, palette: CadencePalette, cx: &mut Context<Self>) -> impl IntoElement {
-        let bounds = self.link_button_bounds.clone();
         components::icon_pill(
             palette,
             "local-files-link",
@@ -263,35 +263,40 @@ impl LibraryTracksPage {
         .test_support()
         .flex_none()
         .on_click(cx.listener(|this, _, window, cx| this.toggle_link_popover(window, cx)))
-        .child(
-            gpui_kit::canvas(move |rect, _, _| bounds.set(Some(rect)), |_, _, _, _| {})
-                .absolute()
-                .inset_0(),
-        )
     }
 
-    /// The open popover, hung below the page's buttons.
-    fn link_layer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The open dialog: the whole window dims and the card sits in its middle.
+    /// Pressing the dim area closes it.
+    fn link_layer(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let state = self.link.as_ref().filter(|state| state.open)?;
-        let button = self.link_button_bounds.clone();
+        let size = window.viewport_size();
         Some(
             deferred(
-                div()
-                    .absolute()
-                    .top(Rems(3.25))
-                    .right_0()
-                    .on_mouse_down_out(cx.listener(
-                        move |this, event: &gpui_kit::MouseDownEvent, _, cx| {
-                            // The button toggles on its own click.
-                            if !button
-                                .get()
-                                .is_some_and(|bounds| bounds.contains(&event.position))
-                            {
+                anchored().position(point(px(0.), px(0.))).child(
+                    div()
+                        .id("link-scrim")
+                        .test_support()
+                        .w(size.width)
+                        .h(size.height)
+                        .occlude()
+                        .bg(appearance::Appearance::palette(cx).scrim)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .on_mouse_down(
+                            gpui_kit::MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
                                 this.close_link_popover(cx);
-                            }
-                        },
-                    ))
-                    .child(state.popover.clone()),
+                            }),
+                        )
+                        .child(
+                            div()
+                                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation()
+                                })
+                                .child(state.popover.clone()),
+                        ),
+                ),
             )
             .into_any_element(),
         )
@@ -494,7 +499,7 @@ impl Render for LibraryTracksPage {
                         .gap_2()
                         .children(search)
                         .child(self.link_button(palette, cx))
-                        .children(self.link_layer(cx))
+                        .children(self.link_layer(window, cx))
                         .child(
                             components::settings_button(palette, "local-files-folders", "Folders")
                                 .test_support()

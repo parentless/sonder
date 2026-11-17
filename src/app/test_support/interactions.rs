@@ -4321,7 +4321,8 @@ fn on_local_files() -> Fixture {
 }
 
 #[test]
-fn the_link_popover_opens_from_its_button_and_closes_on_escape_a_second_press_or_a_click_away() {
+fn the_link_dialog_opens_from_its_button_and_closes_on_escape_its_close_button_or_the_dimmed_area()
+{
     let mut fixture = on_local_files();
     fixture.update(|window, _| assert!(window.try_find("link-popover").is_none()));
 
@@ -4332,15 +4333,15 @@ fn the_link_popover_opens_from_its_button_and_closes_on_escape_a_second_press_or
     fixture.update(|window, _| assert!(window.try_find("link-popover").is_none()));
     assert_eq!(fixture.route(), Route::LocalFiles);
 
-    // The button that opened it closes it, once.
+    // Its close button closes it.
     fixture.update(|window, cx| window.click("local-files-link", cx));
     fixture.update(|window, _| assert!(window.try_find("link-popover").is_some()));
-    fixture.update(|window, cx| window.click("local-files-link", cx));
+    fixture.update(|window, cx| window.click("link-close", cx));
     fixture.update(|window, _| assert!(window.try_find("link-popover").is_none()));
 
-    // A press elsewhere on the page closes it too.
+    // So does a press on the dimmed area around it.
     fixture.update(|window, cx| window.click("local-files-link", cx));
-    fixture.update(|window, cx| window.click("page-search-input", cx));
+    fixture.update(|window, cx| window.click_at("link-scrim", point(px(12.), px(12.)), cx));
     fixture.update(|window, _| assert!(window.try_find("link-popover").is_none()));
     // Opening and closing never asked the backend for anything.
     fixture.no_commands();
