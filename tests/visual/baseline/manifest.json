@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.53",
+    "cadence": "0.8.54",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "b2ddb31450e7b707628d28e20833b9c93ca49aa8",
-    "lockfile_sha256": "3784b1bd36fd635f5579bf587186daf3d4ac5bef17baf472aabe20f7eedc027c"
+    "revision": "a502fb1772eb18424c088e5e734784a6932cb6b1",
+    "lockfile_sha256": "3419a256c0da29c3a57311652275af53c610197e826f9a92abd2461a4d50c4f3"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/44045972665",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/44182469285",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.53",
+      "cadence": "0.8.54",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "b2ddb31450e7b707628d28e20833b9c93ca49aa8",
-      "lockfile_sha256": "3784b1bd36fd635f5579bf587186daf3d4ac5bef17baf472aabe20f7eedc027c"
+      "revision": "a502fb1772eb18424c088e5e734784a6932cb6b1",
+      "lockfile_sha256": "3419a256c0da29c3a57311652275af53c610197e826f9a92abd2461a4d50c4f3"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/44045972665"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/44182469285"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -105,6 +105,7 @@
     "0.8.50: From link opens as a centred dialog over a dimmed window instead of a popover, so the twelve local-files-link references change (header, close button, dimming); Settings shows version 0.8.50; What's new lists the new release",
     "0.8.51: the From link dialog keeps its Download button pinned below a scrolling body, so the twelve local-files-link references change; Settings shows version 0.8.51; What's new lists the new release",
     "0.8.52: Home leads with Try this next, an artist to try with their top songs and an Up next row, beside Your top artists, which now holds the time range; the home, home-range-menu and launch-intro references change (the intro sits over Home); Settings shows version 0.8.52; What's new lists the new release",
-    "0.8.53: only Settings (the version) and the What's new list changed"
+    "0.8.53: only Settings (the version) and the What's new list changed",
+    "0.8.54: Home opens with a greeting, shortcut tiles, a Continue card and a New from artists you play shelf above the artist to try, so home, home-permission, home-range-menu and launch-intro change; the track menu gains Credits (track-menu) and the new credits dialog scene is added; Settings shows version 0.8.54; What's new lists the new release"
   ]
 }
