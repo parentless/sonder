@@ -423,6 +423,38 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             artwork_url: None,
                         }).collect();
                         crate::app::top_listening::TopListening::existing(cx).update(cx, |top, cx| top.seed(model::HomeRange::AllTime, all_time, Vec::new(), cx));
+                        let suggestion = |name: &str, id: &str, percent: u8, because: &[&str]| model::ArtistSuggestion {
+                            artist: model::Artist {
+                                provider: model::Provider::Spotify,
+                                source_id: id.into(),
+                                spotify_uri: None,
+                                name: name.to_owned().into(),
+                                artwork_url: None,
+                            },
+                            match_percent: percent,
+                            because: because.iter().map(|name| (*name).to_owned()).collect(),
+                        };
+                        let offered = vec![
+                            suggestion("Ericdoa", "sug-1", 94, &["glaive", "Glasser"]),
+                            suggestion("Brakence", "sug-2", 91, &["glaive"]),
+                            suggestion("Jane Remover", "sug-3", 88, &["glaive"]),
+                            suggestion("Alt-J", "sug-4", 86, &["Glass Animals"]),
+                            suggestion("Julia Holter", "sug-5", 84, &["Glasser"]),
+                        ];
+                        workspace.home.update(cx, |home, cx| {
+                            home.fixture_discover(
+                                offered.clone(),
+                                super::gallery_results().tracks.into_iter().take(3).collect(),
+                                cx,
+                            )
+                        });
+                        // Home's request for artists to try gets the same answer;
+                        // nothing else is asked for while a scene is photographed.
+                        while let Ok(command) = backend.commands.try_recv() {
+                            if let BackendCommand::LoadDiscover { respond } = command {
+                                respond.send(Ok(offered.clone())).unwrap();
+                            }
+                        }
                         if matches!(scene, Scene::HomeMenu) {
                             workspace.home.update(cx, |home, cx| home.open_range_menu(cx));
                         }

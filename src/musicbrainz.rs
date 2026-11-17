@@ -9,8 +9,8 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::time::Duration;
 
-const API: &str = "https://musicbrainz.org/ws/2";
-const SPACING: Duration = Duration::from_millis(1100);
+pub(crate) const API: &str = "https://musicbrainz.org/ws/2";
+pub(crate) const SPACING: Duration = Duration::from_millis(1100);
 /// How far ahead a date is still believable.
 const HORIZON_YEARS: i64 = 2;
 
@@ -46,7 +46,7 @@ struct CreditedArtist {
     name: String,
 }
 
-fn client() -> Result<reqwest::Client> {
+pub(crate) fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .use_rustls_tls()
         .user_agent(concat!("Sonder/", env!("CARGO_PKG_VERSION")))
@@ -56,7 +56,11 @@ fn client() -> Result<reqwest::Client> {
         .map_err(Into::into)
 }
 
-async fn get(client: &reqwest::Client, url: &str, query: &[(&str, &str)]) -> Result<Vec<u8>> {
+pub(crate) async fn get(
+    client: &reqwest::Client,
+    url: &str,
+    query: &[(&str, &str)],
+) -> Result<Vec<u8>> {
     // MusicBrainz answers 503 when it is busy; one patient retry is polite.
     for attempt in 0..2 {
         let response = client

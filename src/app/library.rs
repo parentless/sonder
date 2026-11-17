@@ -62,8 +62,14 @@ struct LocalFiles {
 /// Raised when fresh contents arrived, so stale failures can be cleared.
 pub(super) struct LibraryLoaded;
 
-pub(super) struct SpotifyLikeNotice(pub SharedString);
-impl EventEmitter<SpotifyLikeNotice> for Library {}
+/// Where a deleted song goes, in the listener's words for their system.
+#[cfg(target_os = "macos")]
+const BIN_NAME: &str = "Trash";
+#[cfg(not(target_os = "macos"))]
+const BIN_NAME: &str = "Recycle Bin";
+
+pub(super) struct LibraryNotice(pub SharedString);
+impl EventEmitter<LibraryNotice> for Library {}
 
 impl EventEmitter<LibraryLoaded> for Library {}
 
@@ -386,6 +392,55 @@ impl Library {
         cx.notify();
     }
 
+    /// Moves a Local Files song to the Recycle Bin or Trash. The row leaves the
+    /// list at once; a failure puts it back with the reason. Only a file the
+    /// list shows, inside a folder the listener added, is ever touched.
+    pub(super) fn delete_local_track(&mut self, track: &model::Track, cx: &mut Context<Self>) {
+        let path = PathBuf::from(&track.source_id);
+        let listed = self
+            .local
+            .tracks
+            .iter()
+            .any(|candidate| candidate.source_id == track.source_id);
+        let inside = self
+            .local
+            .folders
+            .iter()
+            .any(|folder| path.starts_with(folder));
+        if !track.is_local() || !listed || !inside {
+            return;
+        }
+        self.local.tracks = self
+            .local
+            .tracks
+            .iter()
+            .filter(|candidate| candidate.source_id != track.source_id)
+            .cloned()
+            .collect();
+        cx.notify();
+        let title = track.title.clone();
+        let deleting = cx
+            .background_executor()
+            .spawn(async move { crate::trash::move_to_trash(&path) });
+        cx.spawn(async move |this, cx| {
+            let result = deleting.await;
+            let _ = this.update(cx, |library, cx| {
+                match result {
+                    Ok(()) => cx.emit(LibraryNotice(
+                        format!("Moved “{title}” to the {BIN_NAME}").into(),
+                    )),
+                    Err(error) => cx.emit(LibraryNotice(
+                        format!("Could not delete “{title}”: {error:#}").into(),
+                    )),
+                }
+                // The scan is the truth: it drops the file when it is gone and
+                // brings the row back when it is not.
+                library.rescan_after_change(cx);
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn is_playlist_pinned(&self, playlist: &model::Playlist) -> bool {
         self.pinned_playlists.iter().any(|candidate| {
             candidate.provider == playlist.provider && candidate.source_id == playlist.source_id
@@ -425,7 +480,7 @@ impl Library {
             liked,
             respond,
         }) {
-            cx.emit(SpotifyLikeNotice(BACKEND_UNAVAILABLE.into()));
+            cx.emit(LibraryNotice(BACKEND_UNAVAILABLE.into()));
             return;
         }
         self.spotify_like_request = Some(cx.spawn(async move |this, cx| {
@@ -441,8 +496,8 @@ impl Library {
                         library.refreshed_at = Some(SystemTime::now());
                         cx.emit(LibraryLoaded);
                     }
-                    Ok(Err(error)) => cx.emit(SpotifyLikeNotice(format!("Spotify Liked Songs: {error:#}").into())),
-                    Err(_) => cx.emit(SpotifyLikeNotice("Spotify library update did not finish. Check your connection and try again.".into())),
+                    Ok(Err(error)) => cx.emit(LibraryNotice(format!("Spotify Liked Songs: {error:#}").into())),
+                    Err(_) => cx.emit(LibraryNotice("Spotify library update did not finish. Check your connection and try again.".into())),
                 }
                 cx.notify();
             });

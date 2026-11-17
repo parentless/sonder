@@ -216,6 +216,22 @@ pub const UPCOMING_ARTISTS: usize = 10;
 /// Home shows at most this many announced releases.
 pub const UPCOMING_LIMIT: usize = 8;
 
+/// Discovery starts from this many of the listener's top artists.
+pub const DISCOVER_SEEDS: usize = 3;
+/// Home offers at most this many artists to try.
+pub const DISCOVER_LIMIT: usize = 8;
+
+/// An artist the listener does not play yet, found because they sound like
+/// ones they do.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct ArtistSuggestion {
+    pub artist: Artist,
+    /// 1 to 100: how close they are to the artist that led to them.
+    pub match_percent: u8,
+    /// The top artists they sound like.
+    pub because: Vec<String>,
+}
+
 /// A release that is announced but not out yet.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct UpcomingRelease {

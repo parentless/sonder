@@ -49,6 +49,8 @@ needed. See [Windows setup](docs/WINDOWS.md) and [releasing](docs/RELEASING.md).
 - Play music locally with queue, history, favorites, and radio
 - Play your own MP3, FLAC, Ogg, M4A, and WAV files under Local Files once you add their folders in Settings; nothing is scanned until you do. The list follows changes to those folders and can be searched
 - Save songs from a link into a Local Files folder with the **From link** button: paste one link, many, or a playlist, and pick Best, MP3, FLAC, M4A, Ogg or WAV. Direct audio links need no extra tools; other pages use yt-dlp and ffmpeg, which Sonder fetches once, checks against their published checksums and keeps current. See [docs/DOWNLOADS.md](docs/DOWNLOADS.md).
+- Delete a Local Files song from the right-click menu. It moves to the Recycle Bin (Trash on macOS), so it can be restored, and needs no permission prompt.
+- Home suggests an artist to try next, found because they sound like ones you play (from ListenBrainz, no account or key needed), with their top songs to play right there. “Not for me” is remembered.
 - Follow lyrics as a song plays, in a side panel, over the page or as one line above the player, once you turn them on in Settings (lyrics come from LRCLIB, so a song's title, artist and length are sent there while lyrics are open)
 - Browse native artist and album pages
 - Browse playlists in an expanded or compact icon sidebar, with tooltips, active-playlist selection, and recently opened playlists moving to the top

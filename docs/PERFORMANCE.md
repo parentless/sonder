@@ -412,3 +412,7 @@ closes. The panel redraws only when the seconds left change.
 ## Saving from links
 
 Nothing runs until the dialog is used. Lookups and downloads each get their own short-lived thread and a child process, so the UI thread only receives progress messages, at most one per 120 ms per download. No timers are left running, and the lists drop to the last six finished downloads. A closed dialog holds no state beyond its field.
+
+## Artists to try
+
+Home asks for them once when it opens, and the backend keeps the answer for three days. A fresh lookup is about three MusicBrainz searches (spaced a second apart, for your top three artists), three ListenBrainz requests and up to sixteen Spotify searches, all on the backend's own tasks with a 90-second limit; it is dropped if you leave. The songs on offer come from the artist page request, kept for the last eight artists only. Nothing runs in the background.

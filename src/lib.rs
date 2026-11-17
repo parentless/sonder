@@ -18,8 +18,10 @@ mod oauth_page;
 pub mod playback;
 #[cfg(any(target_os = "windows", test))]
 mod rotating_log;
+mod similar;
 pub mod spotify;
 pub mod storage;
+mod trash;
 
 pub use app::run;
 

@@ -1,8 +1,9 @@
-//! The Home page, a briefing for you: story cards for what is new, what is
-//! coming and who to come back to, beside your top artists, then your top
-//! tracks.
+//! The Home page: one artist to try next, found because they sound like ones
+//! you play, beside your top artists; then story cards for what is new, what is
+//! coming and who to come back to; then your top tracks.
 //!
-//! Two small Spotify requests per time range, made only when the page is opened
+//! Who sounds like whom comes from ListenBrainz (see `similar.rs`), looked up
+//! once every few days and kept on disk. Two small Spotify requests per time range, made only when the page is opened
 //! and its data is more than half an hour old. The range on screen is compared
 //! with the next longer one, so one more pair of requests shows what is rising
 //! and who has gone quiet. Nothing runs in the background.
@@ -16,6 +17,14 @@ use std::time::SystemTime;
 /// Announced dates change slowly, and each lookup costs MusicBrainz about 20 requests.
 const UPCOMING_STALE_TIME: Duration = Duration::from_secs(24 * 60 * 60);
 const RELEASES_STALE_TIME: Duration = Duration::from_secs(6 * 60 * 60);
+/// The backend keeps its own answer for days; this only avoids asking it on every visit.
+const DISCOVER_STALE_TIME: Duration = Duration::from_secs(6 * 60 * 60);
+/// Songs shown for the artist on offer.
+const DISCOVER_SONGS: usize = 3;
+/// Artists whose songs are kept, so stepping back and forth asks for nothing.
+const DISCOVER_SONGS_KEPT: usize = 8;
+/// Other artists shown under the one on offer.
+const DISCOVER_NEXT_SHOWN: usize = 4;
 /// How many stories of each kind the briefing shows.
 const STORY_RELEASES: usize = 3;
 const STORY_UPCOMING: usize = 2;
@@ -34,6 +43,11 @@ enum StoryTarget {
 
 struct Upcoming {
     releases: Arc<[model::UpcomingRelease]>,
+    loaded_at: SystemTime,
+}
+
+struct Discover {
+    suggestions: Arc<[model::ArtistSuggestion]>,
     loaded_at: SystemTime,
 }
 
@@ -56,6 +70,14 @@ pub(super) struct HomePage {
     upcoming: Option<Upcoming>,
     upcoming_loading: bool,
     upcoming_request: Option<gpui_kit::Task<()>>,
+    discover: Option<Discover>,
+    discover_loading: bool,
+    discover_request: Option<gpui_kit::Task<()>>,
+    /// Which suggestion is on offer.
+    discover_index: usize,
+    /// The songs of artists on offer, by Spotify id.
+    discover_songs: Vec<(String, Arc<[model::Track]>)>,
+    discover_songs_request: Option<gpui_kit::Task<()>>,
     error: Option<SharedString>,
     visible: bool,
     scroll: gpui_kit::ScrollHandle,
@@ -93,6 +115,12 @@ impl HomePage {
             upcoming: None,
             upcoming_loading: false,
             upcoming_request: None,
+            discover: None,
+            discover_loading: false,
+            discover_request: None,
+            discover_index: 0,
+            discover_songs: Vec::new(),
+            discover_songs_request: None,
             error: None,
             visible: false,
             scroll: gpui_kit::ScrollHandle::new(),
@@ -111,6 +139,7 @@ impl HomePage {
                 if self.visible {
                     self.load_if_needed(cx);
                     self.load_releases_if_needed(cx);
+                    self.load_discover_if_needed(cx);
                 }
             }
             _ => {}
@@ -146,6 +175,12 @@ impl HomePage {
         self.upcoming = None;
         self.upcoming_loading = false;
         self.upcoming_request = None;
+        self.discover = None;
+        self.discover_loading = false;
+        self.discover_request = None;
+        self.discover_index = 0;
+        self.discover_songs.clear();
+        self.discover_songs_request = None;
         self.error = None;
         self.range_menu_open = false;
         self.track_list.update(cx, |list, cx| list.clear(cx));
@@ -167,6 +202,7 @@ impl HomePage {
         }
         self.load_if_needed(cx);
         self.load_releases_if_needed(cx);
+        self.load_discover_if_needed(cx);
     }
 
     fn load_if_needed(&mut self, cx: &mut Context<Self>) {
@@ -252,6 +288,178 @@ impl HomePage {
                 cx.notify();
             });
         }));
+    }
+
+    /// Artists that sound like the listener's top ones. Asked for once the
+    /// page's own data is on its way; a failure leaves the page as it was.
+    fn load_discover_if_needed(&mut self, cx: &mut Context<Self>) {
+        let fresh = self.discover.as_ref().is_some_and(|discover| {
+            discover
+                .loaded_at
+                .elapsed()
+                .is_ok_and(|elapsed| elapsed < DISCOVER_STALE_TIME)
+        });
+        if fresh || self.discover_loading || self.top.read(cx).permission_missing() || !self.visible
+        {
+            return;
+        }
+        self.discover_loading = true;
+        let reply = catalog::request(&self.backend, |respond| BackendCommand::LoadDiscover {
+            respond,
+        });
+        self.discover_request = Some(cx.spawn(async move |this, cx| {
+            let result = reply.await;
+            let _ = this.update(cx, |page, cx| {
+                page.discover_request = None;
+                page.discover_loading = false;
+                let suggestions = match result {
+                    Ok(suggestions) => suggestions,
+                    Err(error) => {
+                        log::debug!("home: could not find artists to discover: {error}");
+                        Vec::new()
+                    }
+                };
+                page.discover_index = 0;
+                page.discover = Some(Discover {
+                    suggestions: suggestions.into(),
+                    loaded_at: SystemTime::now(),
+                });
+                page.load_discover_songs(cx);
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Puts suggestions and their songs on the page without asking, for
+    /// screenshots.
+    #[cfg(test)]
+    pub(super) fn fixture_discover(
+        &mut self,
+        suggestions: Vec<model::ArtistSuggestion>,
+        songs: Vec<model::Track>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(first) = suggestions.first() {
+            self.discover_songs
+                .push((first.artist.source_id.clone(), songs.into()));
+        }
+        self.discover = Some(Discover {
+            suggestions: suggestions.into(),
+            loaded_at: SystemTime::now(),
+        });
+        self.discover_loading = false;
+        cx.notify();
+    }
+
+    fn suggestion(&self) -> Option<&model::ArtistSuggestion> {
+        self.discover
+            .as_ref()
+            .and_then(|discover| discover.suggestions.get(self.discover_index))
+    }
+
+    fn songs_of(&self, source_id: &str) -> Option<&Arc<[model::Track]>> {
+        self.discover_songs
+            .iter()
+            .find(|(id, _)| id == source_id)
+            .map(|(_, songs)| songs)
+    }
+
+    /// The songs to hear from the artist on offer, from their artist page.
+    fn load_discover_songs(&mut self, cx: &mut Context<Self>) {
+        let Some(source_id) = self
+            .suggestion()
+            .map(|suggestion| suggestion.artist.source_id.clone())
+        else {
+            return;
+        };
+        if self.songs_of(&source_id).is_some() {
+            return;
+        }
+        let reply = catalog::request(&self.backend, {
+            let source_id = source_id.clone();
+            |respond| BackendCommand::LoadArtist { source_id, respond }
+        });
+        self.discover_songs_request = Some(cx.spawn(async move |this, cx| {
+            let result = reply.await;
+            let _ = this.update(cx, |page, cx| {
+                page.discover_songs_request = None;
+                let songs: Arc<[model::Track]> = match result {
+                    Ok((_, tracks, _)) => tracks.into_iter().take(DISCOVER_SONGS).collect(),
+                    Err(error) => {
+                        log::debug!("home: could not load songs to sample: {error}");
+                        Arc::from([])
+                    }
+                };
+                page.discover_songs.push((source_id, songs));
+                if page.discover_songs.len() > DISCOVER_SONGS_KEPT {
+                    page.discover_songs.remove(0);
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn show_suggestion(&mut self, index: usize, cx: &mut Context<Self>) {
+        let count = self
+            .discover
+            .as_ref()
+            .map_or(0, |discover| discover.suggestions.len());
+        if index < count && index != self.discover_index {
+            self.discover_index = index;
+            self.load_discover_songs(cx);
+            cx.notify();
+        }
+    }
+
+    /// "Not for me": remembered for good, and the next artist takes the place.
+    fn dismiss_suggestion(&mut self, cx: &mut Context<Self>) {
+        let Some(discover) = self.discover.as_mut() else {
+            return;
+        };
+        let index = self.discover_index;
+        let Some(gone) = discover.suggestions.get(index).cloned() else {
+            return;
+        };
+        self.backend.send(BackendCommand::DismissSuggestion {
+            source_id: gone.artist.source_id.clone(),
+        });
+        discover.suggestions = discover
+            .suggestions
+            .iter()
+            .filter(|suggestion| suggestion.artist.source_id != gone.artist.source_id)
+            .cloned()
+            .collect();
+        self.discover_index = index.min(discover.suggestions.len().saturating_sub(1));
+        self.load_discover_songs(cx);
+        cx.notify();
+    }
+
+    /// Plays the artist's songs from `first`, so the listener hears them
+    /// without leaving Home.
+    fn play_sample(&mut self, first: usize, cx: &mut Context<Self>) {
+        let Some(songs) = self
+            .suggestion()
+            .and_then(|suggestion| self.songs_of(&suggestion.artist.source_id))
+            .cloned()
+        else {
+            return;
+        };
+        if songs.is_empty() {
+            return;
+        }
+        let player = services::AppServices::player(cx);
+        player.update(cx, |player, cx| player.play_context(songs, first, cx));
+    }
+
+    fn open_suggested_artist(&mut self, cx: &mut Context<Self>) {
+        if let Some(suggestion) = self.suggestion() {
+            let artist = &suggestion.artist;
+            cx.emit(PageEvent::OpenArtist(model::ArtistRef {
+                name: artist.name.clone(),
+                source_id: Some(artist.source_id.clone()),
+                spotify_uri: artist.spotify_uri.clone(),
+            }));
+        }
     }
 
     fn select_range(&mut self, range: model::HomeRange, cx: &mut Context<Self>) {
@@ -490,6 +698,262 @@ impl HomePage {
             .into_any_element()
     }
 
+    /// The artist on offer: why they were picked, who they are, songs to hear
+    /// right here, and the few after them.
+    fn discover_card(&self, palette: CadencePalette, cx: &mut Context<Self>) -> AnyElement {
+        let Some(discover) = self.discover.as_ref() else {
+            return div().into_any_element();
+        };
+        let Some(suggestion) = discover.suggestions.get(self.discover_index) else {
+            return div().into_any_element();
+        };
+        let cache = services::AppServices::image_cache(cx);
+        let artist = &suggestion.artist;
+        let songs = self.songs_of(&artist.source_id).cloned();
+        let because = match suggestion.because.as_slice() {
+            [] => String::new(),
+            [only] => only.clone(),
+            [first, second] => format!("{first} and {second}"),
+            [first, second, rest @ ..] => format!("{first}, {second} and {} more", rest.len()),
+        };
+        let faint = |text: &'static str| {
+            div()
+                .text_xs()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(rgb(palette.text_muted))
+                .child(text)
+        };
+
+        let header = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .flex_none()
+                    .px_1p5()
+                    .rounded_md()
+                    .text_xs()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .bg(rgb(palette.link))
+                    .text_color(rgb(palette.on_accent))
+                    .child("BECAUSE YOU PLAY"),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_sm()
+                    .text_color(rgb(palette.text_muted))
+                    .child(because),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_sm()
+                    .text_color(rgb(palette.text_muted))
+                    .child(format!(
+                        "{} of {}",
+                        self.discover_index + 1,
+                        discover.suggestions.len()
+                    )),
+            );
+
+        let play = match songs.as_deref() {
+            None => Some(
+                components::pending_pill(palette, "home-discover-play-pending", "Play sample")
+                    .opacity(0.5)
+                    .into_any_element(),
+            ),
+            Some([]) => None,
+            Some(_) => Some(
+                components::pill(palette, "home-discover-play", "Play sample", true)
+                    .test_support()
+                    .on_click(cx.listener(|this, _, _, cx| this.play_sample(0, cx)))
+                    .into_any_element(),
+            ),
+        };
+        let buttons = div()
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .children(play)
+            .child(
+                components::pill(palette, "home-discover-open", "Open artist", false)
+                    .test_support()
+                    .on_click(cx.listener(|this, _, _, cx| this.open_suggested_artist(cx))),
+            )
+            .child(
+                components::pill(palette, "home-discover-dismiss", "Not for me", false)
+                    .test_support()
+                    .on_click(cx.listener(|this, _, _, cx| this.dismiss_suggestion(cx))),
+            );
+        let identity = div()
+            .flex()
+            .items_center()
+            .gap_4()
+            .child(components::rectangular_artwork(
+                palette,
+                &cache,
+                artist.artwork_url.as_deref(),
+                tokens::ArtworkSize {
+                    size: Rems(7.),
+                    radius: Rems(3.5),
+                },
+                Rems(7.),
+                CadenceIcon::Person,
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_1()
+                    .child(
+                        div()
+                            .id("home-discover-name")
+                            .test_support()
+                            .max_w_full()
+                            .truncate()
+                            .text_2xl()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .text_color(rgb(palette.text_primary))
+                            .child(artist.name.clone()),
+                    )
+                    .child(components::page_detail(
+                        palette,
+                        format!("{}% match", suggestion.match_percent),
+                    )),
+            );
+
+        let song_rows: Vec<AnyElement> = songs
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+            .map(|(index, track)| {
+                components::button(palette, ("home-discover-song", index))
+                    .test_support()
+                    .w_full()
+                    .min_w_0()
+                    .p_1p5()
+                    .gap_3()
+                    .items_center()
+                    .justify_start()
+                    .rounded_xl()
+                    .hover(|style| style.bg(rgb(palette.surface_hover)))
+                    .child(components::artwork(
+                        palette,
+                        &cache,
+                        track.artwork_url.as_deref(),
+                        tokens::ArtworkSize {
+                            size: Rems(2.5),
+                            radius: Rems(0.5),
+                        },
+                        CadenceIcon::MusicNote,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .child(track.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_sm()
+                            .text_color(rgb(palette.text_muted))
+                            .child(format_duration(track.duration_ms)),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.play_sample(index, cx)))
+                    .into_any_element()
+            })
+            .collect();
+
+        let next: Vec<AnyElement> = discover
+            .suggestions
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != self.discover_index)
+            .take(DISCOVER_NEXT_SHOWN)
+            .map(|(index, other)| {
+                components::button(palette, ("home-discover-next", index))
+                    .test_support()
+                    .w(Rems(5.5))
+                    .flex_none()
+                    .flex_col()
+                    .items_center()
+                    .gap_1p5()
+                    .p_1p5()
+                    .rounded_xl()
+                    .hover(|style| style.bg(rgb(palette.surface_hover)))
+                    .child(components::rectangular_artwork(
+                        palette,
+                        &cache,
+                        other.artist.artwork_url.as_deref(),
+                        tokens::ArtworkSize {
+                            size: Rems(3.25),
+                            radius: Rems(1.625),
+                        },
+                        Rems(3.25),
+                        CadenceIcon::Person,
+                    ))
+                    .child(
+                        div()
+                            .max_w_full()
+                            .truncate()
+                            .text_xs()
+                            .text_color(rgb(palette.text))
+                            .child(other.artist.name.clone()),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.show_suggestion(index, cx)))
+                    .into_any_element()
+            })
+            .collect();
+
+        div()
+            .id("home-discover")
+            .test_support()
+            .w_full()
+            .min_w_0()
+            .p_4()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .rounded_2xl()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .child(header)
+            .child(identity)
+            .child(buttons)
+            .when(!song_rows.is_empty(), |card| {
+                card.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(faint("THEIR TOP SONGS"))
+                        .children(song_rows),
+                )
+            })
+            .when(!next.is_empty(), |card| {
+                card.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(faint("UP NEXT"))
+                        .child(div().flex().flex_wrap().gap_1().children(next)),
+                )
+            })
+            .into_any_element()
+    }
+
     /// The time range as one button that opens a short menu.
     fn range_menu(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
         let selected = self.range;
@@ -524,7 +988,7 @@ impl HomePage {
                             )
                             .absolute()
                             .top(Rems(2.75))
-                            .left_0()
+                            .right_0()
                             .w(Rems(13.))
                             .children(model::HomeRange::ALL.into_iter().map(|range| {
                                 let chosen = range == selected;
@@ -616,6 +1080,10 @@ impl Render for HomePage {
         };
         let loaded = current.is_some();
         let (artists, tracks) = current.unwrap_or_default();
+        // The range lives beside the top artists; until there is a page to
+        // hold it, and when there is nothing to list, it stands alone.
+        let range_alone =
+            !permission_missing && !(loaded && !(artists.is_empty() && tracks.is_empty()));
         let content = if permission_missing {
             self.permission_prompt(palette, cx)
         } else if self.error.is_some() && !loaded {
@@ -752,6 +1220,118 @@ impl Render for HomePage {
             }
             let more = artists.len() > ARTISTS_SHOWN;
             let all_artists = self.all_artists;
+            let offered = self
+                .discover
+                .as_ref()
+                .is_some_and(|discover| !discover.suggestions.is_empty());
+            let discover_pending = self.discover.is_none() && self.discover_loading;
+            let stories_empty = stories.is_empty();
+            // Stories keep the left of the top row until there is an artist to
+            // try, which takes their place and sends the stories below.
+            let stories_heading = div()
+                .h_10()
+                .flex()
+                .items_center()
+                .child(heading("home-stories-heading", "For you".into()));
+            let stories_body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .when(stories_pending, |column| {
+                    column.child(release_skeleton(palette))
+                })
+                .when(!stories_pending && stories_empty, |column| {
+                    column.child(components::page_detail(
+                        palette,
+                        "Nothing new or announced for your top artists yet. Dates come from MusicBrainz, so some may be missing.",
+                    ))
+                });
+            let left: Option<AnyElement> =
+                if offered {
+                    Some(
+                        div()
+                            .flex_1()
+                            .min_w(Rems(24.))
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(
+                                div().h_10().flex().items_center().child(heading(
+                                    "home-discover-heading",
+                                    "Try this next".into(),
+                                )),
+                            )
+                            .child(self.discover_card(palette, cx))
+                            .into_any_element(),
+                    )
+                } else if discover_pending {
+                    Some(
+                        div()
+                            .flex_1()
+                            .min_w(Rems(24.))
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(
+                                div().h_10().flex().items_center().child(heading(
+                                    "home-discover-heading",
+                                    "Try this next".into(),
+                                )),
+                            )
+                            .child(
+                                div()
+                                    .id("home-discover-loading")
+                                    .test_support()
+                                    .h(Rems(22.))
+                                    .rounded_2xl()
+                                    .bg(rgb(palette.control)),
+                            )
+                            .into_any_element(),
+                    )
+                } else {
+                    None
+                };
+            let stories_in_top = left.is_none();
+            let stories_below = !stories_in_top;
+            let top_stories = stories_in_top.then(|| {
+                div()
+                    .flex_1()
+                    .min_w(Rems(22.))
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(stories_heading)
+                    .children((stories_pending || stories_empty).then_some(stories_body))
+                    .children(std::mem::take(&mut stories))
+                    .into_any_element()
+            });
+            let below_stories = (stories_below && !stories.is_empty()).then(|| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(
+                        div()
+                            .h_10()
+                            .flex()
+                            .items_center()
+                            .child(heading("home-stories-heading", "For you".into())),
+                    )
+                    .child(
+                        div().flex().flex_wrap().gap_3().children(
+                            stories
+                                .drain(..)
+                                .map(|story| {
+                                    div()
+                                        .flex_1()
+                                        .min_w(Rems(24.))
+                                        .child(story)
+                                        .into_any_element()
+                                })
+                                .collect::<Vec<_>>(),
+                        ),
+                    )
+            });
             div()
                 .flex()
                 .flex_col()
@@ -762,32 +1342,9 @@ impl Render for HomePage {
                         .flex_wrap()
                         .gap_x_10()
                         .gap_y_6()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(Rems(22.))
-                                .flex()
-                                .flex_col()
-                                .gap_3()
-                                .child(
-                                    div()
-                                        .h_10()
-                                        .flex()
-                                        .items_center()
-                                        .child(heading("home-stories-heading", "For you".into())),
-                                )
-                                .when(stories_pending, |column| {
-                                    column.child(release_skeleton(palette))
-                                })
-                                .when(!stories_pending && stories.is_empty(), |column| {
-                                    column.child(components::page_detail(
-                                        palette,
-                                        "Nothing new or announced for your top artists yet. Dates come from MusicBrainz, so some may be missing.",
-                                    ))
-                                })
-                                .children(stories),
-                        )
-                        .when(!artists.is_empty(), |row| {
+                        .children(left)
+                        .children(top_stories)
+                        .when(!permission_missing, |row| {
                             row.child(
                                 div()
                                     .flex_1()
@@ -797,12 +1354,14 @@ impl Render for HomePage {
                                     .gap_3()
                                     .child(
                                         div()
+                                            .h_10()
                                             .flex()
                                             .items_center()
                                             .justify_between()
+                                            .gap_3()
                                             .child(heading(
                                                 "home-artists-heading",
-                                                if all_artists {
+                                                if all_artists || artists.is_empty() {
                                                     SharedString::from("Your top artists")
                                                 } else {
                                                     SharedString::from(format!(
@@ -811,28 +1370,37 @@ impl Render for HomePage {
                                                     ))
                                                 },
                                             ))
-                                            .when(more, |head| {
-                                                head.child(
-                                                    components::pill(
-                                                        palette,
-                                                        "home-artists-more",
-                                                        if all_artists {
-                                                            "Show less".to_owned()
-                                                        } else {
-                                                            format!("See all {}", artists.len())
-                                                        },
-                                                        false,
-                                                    )
-                                                    .test_support()
-                                                    .on_click(cx.listener(|this, _, _, cx| {
-                                                        this.all_artists = !this.all_artists;
-                                                        cx.notify();
-                                                    })),
-                                                )
-                                            }),
+                                            .child(self.range_menu(palette, cx)),
                                     )
                                     .child(artist_rows)
-                                    .when(compare.is_some(), |column| {
+                                    .when(artists.is_empty(), |column| {
+                                        column.child(components::page_detail(
+                                            palette,
+                                            "No top artists for this stretch yet.",
+                                        ))
+                                    })
+                                    .when(more, |column| {
+                                        column.child(
+                                            div().flex().child(
+                                                components::pill(
+                                                    palette,
+                                                    "home-artists-more",
+                                                    if all_artists {
+                                                        "Show less".to_owned()
+                                                    } else {
+                                                        format!("See all {}", artists.len())
+                                                    },
+                                                    false,
+                                                )
+                                                .test_support()
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.all_artists = !this.all_artists;
+                                                    cx.notify();
+                                                })),
+                                            ),
+                                        )
+                                    })
+                                    .when(compare.is_some() && !artists.is_empty(), |column| {
                                         column.child(components::page_detail(
                                             palette,
                                             "Arrows compare with a longer stretch.",
@@ -841,6 +1409,7 @@ impl Render for HomePage {
                             )
                         }),
                 )
+                .children(below_stories)
                 .when(!tracks.is_empty(), |content| {
                     content.child(
                         div()
@@ -876,10 +1445,10 @@ impl Render for HomePage {
                                 "Home",
                                 "Based on what you play most",
                             ))
-                            .when(!permission_missing, |page| {
-                                page.child(self.range_menu(palette, cx))
+                            .when(range_alone, |page| {
+                                page.child(div().mb_5().child(self.range_menu(palette, cx)))
                             })
-                            .child(div().mt_5().child(content)),
+                            .child(content),
                     ),
             )
     }

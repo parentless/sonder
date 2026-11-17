@@ -32,6 +32,11 @@ const NEW_RELEASES_CACHE_SECONDS: u64 = 12 * 60 * 60;
 const HOME_CACHE_SECONDS: u64 = 6 * 60 * 60;
 /// Announced releases change daily at most.
 const UPCOMING_CACHE_SECONDS: u64 = 24 * 60 * 60;
+/// Who sounds like whom changes slowly, and each answer costs a few dozen requests.
+const DISCOVER_CACHE_SECONDS: u64 = 3 * 24 * 60 * 60;
+/// How many "not for me" answers are remembered.
+const DISMISSED_KEPT: usize = 200;
+const DISMISSED_KEY: &str = "discover-dismissed";
 const LIBRARY_TIMEOUT_SECONDS: u64 = 60;
 const COMMAND_CAPACITY: usize = 256;
 const CONTROL_CAPACITY: usize = 8;
@@ -357,6 +362,15 @@ pub enum BackendCommand {
     LoadUpcoming {
         respond: Reply<Vec<crate::model::UpcomingRelease>>,
     },
+    /// Artists that sound like the listener's top ones, minus any they said
+    /// were not for them.
+    LoadDiscover {
+        respond: Reply<Vec<crate::model::ArtistSuggestion>>,
+    },
+    /// "Not for me": never suggest this artist again.
+    DismissSuggestion {
+        source_id: String,
+    },
     SearchCatalog {
         query: String,
         respond: Reply<crate::model::CatalogSearchResults>,
@@ -397,8 +411,10 @@ pub enum BackendCommand {
         request_id: u64,
         seed: Track,
     },
+    /// Shared, not copied: starting a song from a long list must not clone
+    /// the list on the interface thread.
     PlayContext {
-        tracks: Vec<Track>,
+        tracks: Arc<[Track]>,
         index: usize,
     },
     /// Answers with the saved Local Files index; with `rescan`, first walks
@@ -1368,6 +1384,15 @@ impl Worker {
                     .upcoming(self.spotify.clone(), self.store.clone(), respond);
                 Ok(())
             }
+            BackendCommand::LoadDiscover { respond } => {
+                self.catalog
+                    .discover(self.spotify.clone(), self.store.clone(), respond);
+                Ok(())
+            }
+            BackendCommand::DismissSuggestion { source_id } => {
+                dismiss_suggestion(&self.store, source_id).await;
+                Ok(())
+            }
             BackendCommand::SearchCatalog { query, respond } => {
                 self.catalog.search(self.spotify.clone(), query, respond);
                 Ok(())
@@ -1435,7 +1460,7 @@ impl Worker {
             }
             BackendCommand::PlayContext { tracks, index } => {
                 self.prepare_playlist_context(None);
-                self.play_context(tracks, index).await
+                self.play_context(tracks.to_vec(), index).await
             }
             BackendCommand::PlayQueueItem { offset } => {
                 let index = self.queue.index.and_then(|index| index.checked_add(offset));
@@ -2821,6 +2846,7 @@ struct CatalogFetches {
     home: Option<tokio::task::JoinHandle<()>>,
     new_releases: Option<tokio::task::JoinHandle<()>>,
     upcoming: Option<tokio::task::JoinHandle<()>>,
+    discover: Option<tokio::task::JoinHandle<()>>,
     playlist: Option<tokio::task::JoinHandle<()>>,
     artist: Option<tokio::task::JoinHandle<()>>,
     artist_albums: Option<tokio::task::JoinHandle<()>>,
@@ -2943,6 +2969,38 @@ impl CatalogFetches {
         }));
     }
 
+    fn discover(
+        &mut self,
+        spotify: Spotify,
+        store: BlockingStore,
+        respond: Reply<Vec<crate::model::ArtistSuggestion>>,
+    ) {
+        // Several polite requests to MusicBrainz and a Spotify search each, so
+        // like the announced-releases sweep it outlasts the catalog timeout.
+        abort_task(&mut self.discover);
+        let mut respond = respond;
+        self.discover = Some(tokio::spawn(async move {
+            tokio::select! {
+                biased;
+                _ = respond.closed() => {}
+                result = run_with_timeout(90, "artists to discover", async move {
+                    let mut found = saved_or_fetch(
+                        &store,
+                        "discover".to_owned(),
+                        DISCOVER_CACHE_SECONDS,
+                        spotify.discover_from_top_artists(),
+                    )
+                    .await?;
+                    let dismissed = dismissed_suggestions(&store).await;
+                    found.retain(|suggestion| !dismissed.contains(&suggestion.artist.source_id));
+                    Ok(found)
+                }) => {
+                    let _ = respond.send(result);
+                }
+            }
+        }));
+    }
+
     fn search(
         &mut self,
         spotify: Spotify,
@@ -3035,6 +3093,7 @@ impl CatalogFetches {
         abort_task(&mut self.home);
         abort_task(&mut self.new_releases);
         abort_task(&mut self.upcoming);
+        abort_task(&mut self.discover);
         abort_task(&mut self.playlist);
         abort_task(&mut self.artist);
         abort_task(&mut self.artist_albums);
@@ -3215,6 +3274,33 @@ async fn receive_shutdown_acknowledgment(
 /// Answers from the saved copy while it is fresh, otherwise asks and saves.
 /// When asking fails (rate limited, offline) an older saved copy still beats an
 /// error, except a missing permission, which the page must be told about.
+/// The artists the listener said were not for them.
+async fn dismissed_suggestions(store: &BlockingStore) -> Vec<String> {
+    store
+        .cached_json(DISMISSED_KEY.to_owned())
+        .await
+        .ok()
+        .flatten()
+        .and_then(|(_, json)| serde_json::from_str(&json).ok())
+        .unwrap_or_default()
+}
+
+async fn dismiss_suggestion(store: &BlockingStore, source_id: String) {
+    let mut dismissed = dismissed_suggestions(store).await;
+    if dismissed.contains(&source_id) {
+        return;
+    }
+    dismissed.push(source_id);
+    if dismissed.len() > DISMISSED_KEPT {
+        dismissed.drain(..dismissed.len() - DISMISSED_KEPT);
+    }
+    if let Ok(json) = serde_json::to_string(&dismissed)
+        && let Err(error) = store.set_cached_json(DISMISSED_KEY.to_owned(), json).await
+    {
+        log::warn!("could not remember a dismissed suggestion: {error:#}");
+    }
+}
+
 async fn saved_or_fetch<T>(
     store: &BlockingStore,
     key: String,

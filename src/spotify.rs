@@ -826,6 +826,61 @@ impl Spotify {
         Ok(upcoming)
     }
 
+    /// Artists that sound like the listener's top ones and that they do not
+    /// already play, found on Spotify so they can be opened and played.
+    pub async fn discover_from_top_artists(&self) -> Result<Vec<crate::model::ArtistSuggestion>> {
+        let top: Vec<String> = self
+            .gated(async {
+                self.require_top_read().await?;
+                let artists = self.top_artists().await?;
+                Ok(artists.iter().map(|artist| artist.name.clone()).collect())
+            })
+            .await?;
+        let seeds: Vec<String> = top
+            .iter()
+            .take(crate::model::DISCOVER_SEEDS)
+            .cloned()
+            .collect();
+        let known: std::collections::HashSet<String> = top
+            .iter()
+            .map(|name| crate::similar::normalise(name))
+            .collect();
+        let similar = crate::similar::like(&seeds).await?;
+        let mut found = Vec::new();
+        // A few more candidates than are shown: some will not be on Spotify.
+        for candidate in similar
+            .into_iter()
+            .filter(|candidate| !known.contains(&crate::similar::normalise(&candidate.name)))
+            .take(crate::model::DISCOVER_LIMIT * 2)
+        {
+            if found.len() >= crate::model::DISCOVER_LIMIT {
+                break;
+            }
+            let wanted = crate::similar::normalise(&candidate.name);
+            let Ok(results) = self.search_catalog(&candidate.name).await else {
+                continue;
+            };
+            let Some(artist) = results
+                .artists
+                .into_iter()
+                .find(|artist| crate::similar::normalise(&artist.name) == wanted)
+            else {
+                continue;
+            };
+            if found.iter().any(|seen: &crate::model::ArtistSuggestion| {
+                seen.artist.source_id == artist.source_id
+            }) {
+                continue;
+            }
+            found.push(crate::model::ArtistSuggestion {
+                artist,
+                match_percent: candidate.match_percent,
+                because: candidate.because,
+            });
+        }
+        Ok(found)
+    }
+
     pub async fn search_tracks(&self, query: &str) -> Result<Vec<Track>> {
         if query.trim().is_empty() {
             return Ok(Vec::new());

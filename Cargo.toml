@@ -1,6 +1,6 @@
 [package]
 name = "cadence"
-version = "0.8.51"
+version = "0.8.52"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/parentless/sonder"
@@ -76,7 +76,10 @@ opt-level = 2
 [profile.release]
 lto = "thin"
 codegen-units = 1
-debug = "line-tables-only"
+# A smaller executable downloads, installs and pages in faster. Panics still
+# report where they happened through the app's own hook.
+debug = false
+strip = "symbols"
 
 # Keep Windows development executables independent of the build machine's files.
 [patch.crates-io]

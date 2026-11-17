@@ -42,6 +42,26 @@ const MONTHS: &[Month] = &[
         days: &[
             Day {
                 date: "Nov 17, 2026",
+                releases: &[Release {
+                    version: "0.8.52",
+                    notes: &[
+                        Note(
+                            New,
+                            "Home suggests an artist to try next, found because they sound like ones you play. Hear their top songs right there, open them, or tap Not for me and they never come back.",
+                        ),
+                        Note(
+                            New,
+                            "Delete a Local Files song from its right-click menu. It goes to the Recycle Bin, so you can get it back.",
+                        ),
+                        Note(
+                            Better,
+                            "The time range now sits beside Your top artists, which is what it changes. Starting a song from a long list is lighter, and the app file is smaller.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
+                date: "Nov 17, 2026",
                 releases: &[
                     Release {
                         version: "0.8.51",

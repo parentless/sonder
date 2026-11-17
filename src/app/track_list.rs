@@ -327,6 +327,23 @@ impl TrackList {
         let _ = loading;
     }
 
+    /// Deletes a local song. One that is playing is skipped past first, so its
+    /// file is not still being read when it goes.
+    fn delete_local(&mut self, track: &model::Track, cx: &mut Context<Self>) {
+        let playing_it = self.player.read(cx).is_current_track(track);
+        if playing_it {
+            self.player.update(cx, |player, cx| {
+                if player.context().len() > 1 {
+                    player.next(cx);
+                } else if player.playing() {
+                    player.toggle(cx);
+                }
+            });
+        }
+        self.library
+            .update(cx, |library, cx| library.delete_local_track(track, cx));
+    }
+
     fn play_from(&mut self, index: usize, cx: &mut Context<Self>) {
         if self.queue_mode {
             self.player
@@ -341,7 +358,7 @@ impl TrackList {
                 });
             }
         } else {
-            let tracks = self.tracks.to_vec();
+            let tracks = self.tracks.clone();
             self.player
                 .update(cx, |player, cx| player.play_context(tracks, index, cx));
         }
@@ -497,6 +514,7 @@ impl TrackList {
             .child(separator())
             .when(local, |menu| {
                 let path = std::path::PathBuf::from(&track.source_id);
+                let doomed = track.clone();
                 menu.child(
                     components::text_menu_item(
                         palette,
@@ -509,6 +527,14 @@ impl TrackList {
                         cx.reveal_path(&path);
                         cx.notify();
                     })),
+                )
+                .child(
+                    components::text_menu_item(palette, ("track-menu-delete", index), MOVE_TO_BIN)
+                        .test_support()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.menu_open = None;
+                            this.delete_local(&doomed, cx);
+                        })),
                 )
             })
             .when(track.provider == model::Provider::Spotify, |menu| {
@@ -610,6 +636,12 @@ impl TrackList {
         }
     }
 }
+
+/// Moves a local track's file to the system's bin.
+#[cfg(target_os = "macos")]
+const MOVE_TO_BIN: &str = "Move to Trash";
+#[cfg(not(target_os = "macos"))]
+const MOVE_TO_BIN: &str = "Move to Recycle Bin";
 
 /// Opens the system file browser at a local track's file.
 #[cfg(target_os = "macos")]

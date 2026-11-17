@@ -276,10 +276,11 @@ impl Player {
 
     pub(super) fn play_context(
         &mut self,
-        tracks: Vec<model::Track>,
+        tracks: impl Into<Arc<[model::Track]>>,
         index: usize,
         cx: &mut Context<Self>,
     ) -> bool {
+        let tracks = tracks.into();
         let started = self.send(BackendCommand::PlayContext { tracks, index }, cx);
         if started {
             self.clock.reset(0, cx.background_executor().now());

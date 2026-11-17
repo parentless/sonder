@@ -84,7 +84,7 @@ impl Workspace {
         );
         subscriptions.push(cx.subscribe(
             &library,
-            |this, _, notice: &library::SpotifyLikeNotice, cx| {
+            |this, _, notice: &library::LibraryNotice, cx| {
                 this.action_notice = Some(notice.0.clone());
                 cx.notify();
             },
