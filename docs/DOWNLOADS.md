@@ -37,6 +37,6 @@ They live in `%LOCALAPPDATA%\twoducks\cadence\data\tools`. A Sonder-managed yt-d
 
 ## Where the work happens
 
-`src/link_download.rs` has no UI: it parses links, looks them up, fetches tools and saves files, blocking, on its own threads. `src/app/link_downloads.rs` keeps the list of lookups and downloads that outlives the popover and tells the library when a file landed. `src/app/link_popover.rs` is the dialog view. Progress reaches the screen at most every 120 ms.
+`src/link_download.rs` has no UI: it parses links, looks them up, fetches tools and saves files, blocking, on its own threads. `src/app/link_downloads.rs` keeps the list of lookups and downloads that outlives the dialog and tells the library when a file landed. `src/app/link_popover.rs` is the dialog view. Progress reaches the screen at most every 120 ms.
 
 `cargo test real_links -- --ignored --nocapture` with `SONDER_TEST_URL` (and optionally `SONDER_TEST_FORMATS=best,mp3,flac`) saves a real link in each format.
