@@ -516,6 +516,13 @@ impl Library {
             .send(BackendCommand::SetPlaylistPinned { playlist, pinned })
     }
 
+    /// A playlist was just made: look again now rather than after the
+    /// usual wait, so it shows on the Playlists page.
+    pub(super) fn playlist_created(&mut self, cx: &mut Context<Self>) {
+        self.refreshed_at = None;
+        self.revalidate(cx);
+    }
+
     /// Forgets the account's catalog. Locally-owned state stays: it is not tied
     /// to the Spotify account and the backend re-sends it regardless.
     pub(super) fn clear(&mut self, cx: &mut Context<Self>) {

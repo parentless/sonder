@@ -1,14 +1,12 @@
 //! The Home page. It starts with a greeting and shortcuts back into the
 //! library, then what you were playing and what is new from artists you play.
-//! Below that: one artist to try next, found because they sound like ones you
-//! play, beside your top artists; story cards for what is coming and who to come
-//! back to; then your top tracks.
+//! Below that: two short rows (an artist to try next, found because they sound
+//! like ones you play, and the next announced release), then your top tracks.
 //!
 //! Who sounds like whom comes from ListenBrainz (see `similar.rs`), looked up
-//! once every few days and kept on disk. Two small Spotify requests per time range, made only when the page is opened
-//! and its data is more than half an hour old. The range on screen is compared
-//! with the next longer one, so one more pair of requests shows what is rising
-//! and who has gone quiet. Nothing runs in the background.
+//! once every few days and kept on disk. Two small Spotify requests per time
+//! range, made only when the page is opened and its data is more than half an
+//! hour old. Nothing runs in the background.
 use super::page::PageEvent;
 use super::top_listening::{TopEvent, TopListening};
 use super::*;
@@ -29,10 +27,6 @@ const DISCOVER_SONGS_KEPT: usize = 8;
 const RELEASES_SHOWN: usize = 3;
 /// The hue of the Liked Songs tile.
 const LIKED_HUE: f32 = 340.;
-/// A rising or falling artist is marked green or red.
-const RISING: u32 = 0x2E9E63;
-/// Artists listed before "See all".
-const ARTISTS_SHOWN: usize = 5;
 
 /// One way back into the library, drawn as a tile at the top of Home.
 struct Shortcut {
@@ -88,7 +82,6 @@ pub(super) struct HomePage {
     track_list: Entity<track_list::TrackList>,
     range: model::HomeRange,
     range_menu_open: bool,
-    all_artists: bool,
     releases: Option<Releases>,
     releases_loading: bool,
     releases_request: Option<gpui_kit::Task<()>>,
@@ -137,7 +130,6 @@ impl HomePage {
             track_list,
             range: model::HomeRange::default(),
             range_menu_open: false,
-            all_artists: false,
             releases: None,
             releases_loading: false,
             releases_request: None,
@@ -180,13 +172,6 @@ impl HomePage {
             TopEvent::Loaded(range) if *range == self.range => {
                 self.error = None;
                 cx.emit(PageEvent::Loaded);
-                // The next longer range shows what is rising. It is the page's
-                // second request pair, made once the first is on screen.
-                if self.visible
-                    && let Some(longer) = range.longer()
-                {
-                    self.top.update(cx, |top, cx| top.ensure(longer, cx));
-                }
             }
             TopEvent::Failed(range, error) if *range == self.range => {
                 self.error = Some(error.clone());
@@ -238,13 +223,6 @@ impl HomePage {
         let range = self.range;
         self.error = None;
         self.top.update(cx, |top, cx| top.ensure(range, cx));
-        // Returning to a fresh range still compares it with the longer one.
-        if let Some(longer) = range.longer() {
-            let loaded = self.top.read(cx).data(range).is_some();
-            if loaded && self.visible {
-                self.top.update(cx, |top, cx| top.ensure(longer, cx));
-            }
-        }
     }
 
     fn load_releases_if_needed(&mut self, cx: &mut Context<Self>) {
@@ -508,100 +486,6 @@ impl HomePage {
         self.close_range_menu(cx);
     }
 
-    /// One artist in the list: rank, face, name, and the way their rank moved
-    /// against the longer chart.
-    fn artist_row(
-        &self,
-        artist: &model::Artist,
-        index: usize,
-        change: Option<i32>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let palette = appearance::Appearance::palette(cx);
-        let cache = services::AppServices::image_cache(cx);
-        let artwork = components::rectangular_artwork(
-            palette,
-            &cache,
-            artist.artwork_url.as_deref(),
-            tokens::ArtworkSize {
-                size: Rems(2.75),
-                radius: Rems(1.375),
-            },
-            Rems(2.75),
-            CadenceIcon::Person,
-        );
-        components::button(palette, ("home-artist", index))
-            .test_support()
-            .w_full()
-            .min_w_0()
-            .p_1p5()
-            .gap_3()
-            .items_center()
-            .justify_start()
-            .rounded_xl()
-            .hover(|style| style.bg(rgb(palette.surface_hover)))
-            .child(
-                div()
-                    .flex_none()
-                    .w(Rems(1.25))
-                    .text_color(rgb(palette.text_muted))
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                    .child((index + 1).to_string()),
-            )
-            .child(artwork)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .font_weight(gpui_kit::FontWeight::MEDIUM)
-                    .child(artist.name.clone()),
-            )
-            .when_some(change, |row, change| {
-                let (glyph, color) = if change > 0 {
-                    (CadenceIcon::ChevronUp, RISING)
-                } else {
-                    (CadenceIcon::ChevronDown, palette.danger)
-                };
-                row.child(
-                    div()
-                        .id(("home-artist-change", index))
-                        .test_support()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap_0p5()
-                        .pl_1()
-                        .pr_1p5()
-                        .rounded_full()
-                        .bg(rgb(palette.surface_raised))
-                        .border_1()
-                        .border_color(rgb(palette.border))
-                        .text_xs()
-                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .text_color(rgb(color))
-                        .child(components::icon(glyph, Rems(0.625), color))
-                        .child(change.unsigned_abs().to_string()),
-                )
-            })
-            // Capture just the index, resolving the current data on activation.
-            .on_click(cx.listener(move |this, _, _, cx| {
-                let artist = this
-                    .top
-                    .read(cx)
-                    .data(this.range)
-                    .and_then(|data| data.artists.get(index).cloned());
-                if let Some(artist) = artist {
-                    cx.emit(PageEvent::OpenArtist(model::ArtistRef {
-                        name: artist.name.clone(),
-                        source_id: Some(artist.source_id.clone()),
-                        spotify_uri: artist.spotify_uri.clone(),
-                    }));
-                }
-            }))
-            .into_any_element()
-    }
-
     /// The ways back into the library, in the order they are shown. A tile is
     /// left out when there is nothing behind it yet.
     fn shortcuts(&self, cx: &App) -> Vec<Shortcut> {
@@ -734,8 +618,8 @@ impl HomePage {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded_tl(px(14.))
-                .rounded_bl(px(14.))
+                .rounded_tl(rem(TILE_RADIUS))
+                .rounded_bl(rem(TILE_RADIUS))
                 .bg(gpui_kit::Hsla {
                     h: hue / 360.,
                     s: if dark { 0.18 } else { 0.30 },
@@ -770,7 +654,7 @@ impl HomePage {
                 shortcut.url.as_deref(),
                 tokens::ArtworkSize {
                     size: Rems(4.),
-                    radius: Rems(0.875),
+                    radius: Rems(TILE_RADIUS / 16.),
                 },
                 shortcut.icon,
             ),
@@ -782,9 +666,9 @@ impl HomePage {
             components::button(palette, ("home-shortcut-play", index))
                 .test_support()
                 .absolute()
-                .right(px(12.))
-                .top(px(16.))
-                .size(px(32.))
+                .right(rem(12.))
+                .top(rem(16.))
+                .size(rem(32.))
                 .rounded_full()
                 .bg(rgb(palette.text_primary))
                 .invisible()
@@ -807,19 +691,19 @@ impl HomePage {
             .test_support()
             .group(group)
             .relative()
-            .w(px(300.))
-            .flex_none()
-            .h(px(64.))
+            .w_full()
+            .min_w_0()
+            .h(rem(64.))
             .justify_start()
             .overflow_hidden()
-            .rounded(px(18.))
+            .rounded(rem(TILE_RADIUS))
             .bg(rgb(palette.card))
             .hover(|style| style.bg(rgb(palette.card_hover)))
-            .child(div().size(px(64.)).flex_none().child(cover))
+            .child(div().size(rem(64.)).flex_none().child(cover))
             .child(
                 row_text(palette, shortcut.title, shortcut.detail)
-                    .ml(px(12.))
-                    .when(playable, |text| text.pr(px(52.))),
+                    .ml(rem(12.))
+                    .when(playable, |text| text.pr(rem(52.))),
             )
             .children(play)
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(event.clone())))
@@ -851,7 +735,7 @@ impl HomePage {
             track.artwork_url.as_deref(),
             tokens::ArtworkSize {
                 size: Rems(7.625),
-                radius: Rems(0.875),
+                radius: Rems((CARD_RADIUS - CARD_PADDING) / 16.),
             },
             CadenceIcon::MusicNote,
         );
@@ -874,8 +758,8 @@ impl HomePage {
         });
         let muted = |text: String, size: f32| {
             div()
-                .text_size(px(size))
-                .line_height(px(size * 1.4))
+                .text_size(rem(size))
+                .line_height(rem(size * 1.4))
                 .text_color(rgb(palette.text_muted))
                 .child(text)
         };
@@ -884,10 +768,10 @@ impl HomePage {
                 .id("home-continue")
                 .test_support()
                 .w_full()
-                .p(px(14.))
+                .p(rem(CARD_PADDING))
                 .flex()
-                .gap(px(16.))
-                .rounded(px(18.))
+                .gap(rem(16.))
+                .rounded(rem(CARD_RADIUS))
                 .bg(rgb(palette.card))
                 .child(art)
                 .child(
@@ -902,8 +786,8 @@ impl HomePage {
                                 .child(
                                     div()
                                         .truncate()
-                                        .text_size(px(20.))
-                                        .line_height(px(28.))
+                                        .text_size(rem(20.))
+                                        .line_height(rem(28.))
                                         .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                         .text_color(rgb(palette.text_primary))
                                         .child(track.title.clone()),
@@ -931,8 +815,8 @@ impl HomePage {
                                                 .id("home-continue-progress")
                                                 .test_support()
                                                 .w_full()
-                                                .h(px(5.))
-                                                .my(px(4.))
+                                                .h(rem(5.))
+                                                .my(rem(4.))
                                                 .rounded_full()
                                                 .bg(rgb(palette.card_hover))
                                                 .child(
@@ -993,8 +877,9 @@ impl HomePage {
                 div()
                     .id("home-releases-loading")
                     .test_support()
+                    .w_full()
                     .flex()
-                    .gap(px(12.))
+                    .justify_between()
                     .children((0..RELEASES_SHOWN).map(|_| {
                         div()
                             .size(size.size)
@@ -1007,7 +892,12 @@ impl HomePage {
         if releases.albums.is_empty() {
             return None;
         }
-        let mut shelf = div().id("home-releases").test_support().flex().gap(px(12.));
+        let mut shelf = div()
+            .id("home-releases")
+            .test_support()
+            .w_full()
+            .flex()
+            .justify_between();
         for (index, album) in releases.albums.iter().take(RELEASES_SHOWN).enumerate() {
             let mut artist = album
                 .artists
@@ -1041,9 +931,9 @@ impl HomePage {
                     .child(
                         div()
                             .w_full()
-                            .mt(px(8.))
+                            .mt(rem(8.))
                             .truncate()
-                            .text_size(px(13.5))
+                            .text_size(rem(13.5))
                             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                             .text_color(rgb(palette.text_primary))
                             .child(album.name.clone()),
@@ -1052,7 +942,7 @@ impl HomePage {
                         div()
                             .w_full()
                             .truncate()
-                            .text_size(px(12.))
+                            .text_size(rem(12.))
                             .text_color(rgb(palette.text_muted))
                             .child(artist),
                     )
@@ -1068,29 +958,22 @@ impl HomePage {
     fn worth_a_listen(
         &self,
         palette: CadencePalette,
+        columns: u16,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let cache = services::AppServices::image_cache(cx);
-        let both = self
-            .discover
-            .as_ref()
-            .is_some_and(|discover| discover.suggestions.get(self.discover_index).is_some())
-            && self
-                .upcoming
-                .as_ref()
-                .is_some_and(|upcoming| !upcoming.releases.is_empty());
+        // A row fills its grid column, so it ends where the Continue card and
+        // the shelf above it end; a lone row keeps the left column's width.
         let card = |id: &'static str| {
             div()
                 .id(id)
                 .test_support()
-                .flex_1()
-                .min_w(px(220.))
-                // A lone row keeps the width it would have beside another.
-                .when(!both, |card| card.max_w(px(468.)))
-                .h(px(60.))
+                .w_full()
+                .min_w_0()
+                .h(rem(60.))
                 .flex()
                 .items_center()
-                .rounded(px(18.))
+                .rounded(rem(TILE_RADIUS))
                 .bg(rgb(palette.card))
         };
         let artist_row = if let Some(suggestion) = self
@@ -1115,9 +998,9 @@ impl HomePage {
                             .min_w_0()
                             .h_full()
                             .justify_start()
-                            .rounded(px(18.))
+                            .rounded(rem(TILE_RADIUS))
                             .hover(|style| style.bg(rgb(palette.card_hover)))
-                            .child(div().ml(px(10.)).child(components::artwork(
+                            .child(div().ml(rem(10.)).child(components::artwork(
                                 palette,
                                 &cache,
                                 artist.artwork_url.as_deref(),
@@ -1127,10 +1010,10 @@ impl HomePage {
                                 },
                                 CadenceIcon::Person,
                             )))
-                            .child(row_text(palette, artist.name.clone(), because).ml(px(12.)))
+                            .child(row_text(palette, artist.name.clone(), because).ml(rem(12.)))
                             .on_click(cx.listener(|this, _, _, cx| this.open_suggested_artist(cx))),
                     )
-                    .child(div().flex_none().mr(px(8.)).child(if ready {
+                    .child(div().flex_none().mr(rem(8.)).child(if ready {
                         components::icon_pill(
                             palette,
                             "home-discover-play",
@@ -1155,7 +1038,7 @@ impl HomePage {
                         )
                         .test_support()
                         .size_8()
-                        .mr(px(8.))
+                        .mr(rem(8.))
                         .on_click(cx.listener(|this, _, _, cx| this.dismiss_suggestion(cx))),
                     )
                     .into_any_element(),
@@ -1174,10 +1057,10 @@ impl HomePage {
                 card("home-upcoming")
                     .child(
                         div()
-                            .ml(px(10.))
+                            .ml(rem(10.))
                             .flex_none()
-                            .size(px(40.))
-                            .rounded(px(9.))
+                            .size(rem(40.))
+                            .rounded(rem(TILE_RADIUS - 10.))
                             .bg(rgb(palette.card_hover))
                             .flex()
                             .items_center()
@@ -1194,13 +1077,13 @@ impl HomePage {
                             format!("{} · new {}", release.artist, release.kind.to_lowercase()),
                             format!("Announced for {when}"),
                         )
-                        .ml(px(12.)),
+                        .ml(rem(12.)),
                     )
                     .child(
                         div()
                             .flex_none()
-                            .mr(px(14.))
-                            .text_size(px(12.5))
+                            .mr(rem(14.))
+                            .text_size(rem(12.5))
                             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                             .text_color(rgb(palette.text_primary))
                             .child("Coming soon"),
@@ -1212,9 +1095,9 @@ impl HomePage {
         }
         Some(
             div()
-                .flex()
-                .flex_wrap()
-                .gap(px(32.))
+                .grid()
+                .grid_cols(columns)
+                .gap(rem(GRID_GAP))
                 .children(artist_row)
                 .children(release_row)
                 .into_any_element(),
@@ -1322,8 +1205,19 @@ impl HomePage {
 }
 
 impl Render for HomePage {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
+        // Room for the page in the pixels it comes to at 100% zoom: the window
+        // less the sidebar and the page's own margins.
+        let room = window.viewport_size().width / window.rem_size() * 16. - PAGE_CHROME;
+        let tile_columns: u16 = if room >= 1000. {
+            3
+        } else if room >= 620. {
+            2
+        } else {
+            1
+        };
+        let pair_columns: u16 = if room >= 860. { 2 } else { 1 };
         let heading = |id, text: SharedString| {
             div()
                 .id(id)
@@ -1336,8 +1230,7 @@ impl Render for HomePage {
         // A heading with its content beneath, as in the opening sections.
         let section = |id, title: &str, body: AnyElement| {
             div()
-                .flex_1()
-                .min_w(px(220.))
+                .min_w_0()
                 .flex()
                 .flex_col()
                 .gap_3()
@@ -1352,7 +1245,7 @@ impl Render for HomePage {
             .collect();
         let continue_card = self.continue_card(palette, cx);
         let shelf = self.releases_shelf(palette, cx);
-        let worth = self.worth_a_listen(palette, cx);
+        let worth = self.worth_a_listen(palette, pair_columns, cx);
         let first = div()
             .flex()
             .flex_col()
@@ -1362,19 +1255,18 @@ impl Render for HomePage {
                     div()
                         .id("home-shortcuts")
                         .test_support()
-                        .flex()
-                        .flex_wrap()
-                        .gap_x(px(34.))
-                        .gap_y(px(12.))
+                        .grid()
+                        .grid_cols(tile_columns)
+                        .gap(rem(GRID_GAP))
                         .children(shortcuts),
                 )
             })
             .when(continue_card.is_some() || shelf.is_some(), |block| {
                 block.child(
                     div()
-                        .flex()
-                        .flex_wrap()
-                        .gap(px(32.))
+                        .grid()
+                        .grid_cols(pair_columns)
+                        .gap(rem(GRID_GAP))
                         .children(
                             continue_card
                                 .map(|card| section("home-continue-heading", "Continue", card)),
@@ -1395,143 +1287,81 @@ impl Render for HomePage {
                 )
             });
 
-        let (permission_missing, current, compare) = {
+        let (permission_missing, current) = {
             let top = self.top.read(cx);
             (
                 top.permission_missing(),
-                top.data(self.range)
-                    .map(|data| (data.artists.clone(), data.tracks.clone())),
-                self.range
-                    .longer()
-                    .and_then(|longer| top.data(longer))
-                    .map(|data| data.artists.clone()),
+                top.data(self.range).map(|data| data.tracks.clone()),
             )
         };
         let loaded = current.is_some();
-        let (artists, tracks) = current.unwrap_or_default();
-        // The range lives beside the top artists; until there is a page to
-        // hold it, and when there is nothing to list, it stands alone.
-        let range_alone =
-            !permission_missing && !(loaded && !(artists.is_empty() && tracks.is_empty()));
+        let tracks = current.unwrap_or_default();
+        // The range lives beside the top tracks; until there is a list to hold
+        // it, and when there is nothing to list, it stands alone.
+        let range_alone = !permission_missing && !(loaded && !tracks.is_empty());
         let content = if permission_missing {
             self.permission_prompt(palette, cx)
         } else if self.error.is_some() && !loaded {
             div().child(components::empty_state(
                 palette,
                 CadenceIcon::MusicNote,
-                "Couldn’t load your top artists and tracks",
+                "Couldn’t load your top tracks",
                 Some("Spotify didn’t answer. Try again in a moment.".into()),
             ))
         } else if !loaded {
             div().child(components::list_skeleton_rows(palette, 4))
-        } else if artists.is_empty() && tracks.is_empty() {
+        } else if tracks.is_empty() {
             div().child(components::empty_state(
                 palette,
                 CadenceIcon::MusicNote,
                 "Nothing here yet",
-                Some(
-                    "Listen to more music and your top artists and tracks will show up here."
-                        .into(),
-                ),
+                Some("Listen to more music and your top tracks will show up here.".into()),
             ))
         } else {
             self.track_list.update(cx, |list, cx| {
                 list.show(("home-tracks", self.range.index()), tracks.clone(), cx);
             });
-            let shown_artists = if self.all_artists {
-                artists.len()
-            } else {
-                artists.len().min(ARTISTS_SHOWN)
-            };
-            let mut artist_rows = div().flex().flex_col();
-            for (index, artist) in artists.iter().take(shown_artists).enumerate() {
-                let change = compare.as_ref().and_then(|longer| {
-                    let before = longer
-                        .iter()
-                        .position(|other| other.source_id == artist.source_id)?;
-                    let change = before as i32 - index as i32;
-                    (change != 0).then_some(change)
-                });
-                artist_rows = artist_rows.child(self.artist_row(artist, index, change, cx));
-            }
-            let more = artists.len() > ARTISTS_SHOWN;
-            let all_artists = self.all_artists;
             div()
                 .flex()
                 .flex_col()
-                .gap_6()
+                .gap_3()
                 .child(
                     div()
+                        .h_10()
                         .flex()
-                        .flex_col()
+                        .items_center()
+                        .justify_between()
                         .gap_3()
+                        .child(heading("home-tracks-heading", "Your top tracks".into()))
                         .child(
                             div()
-                                .h_10()
                                 .flex()
                                 .items_center()
-                                .justify_between()
-                                .gap_3()
-                                .child(heading(
-                                    "home-artists-heading",
-                                    if all_artists || artists.is_empty() {
-                                        SharedString::from("Your top artists")
-                                    } else {
-                                        SharedString::from(format!(
-                                            "Your top {}",
-                                            artists.len().min(ARTISTS_SHOWN)
-                                        ))
-                                    },
-                                ))
-                                .child(self.range_menu(palette, cx)),
-                        )
-                        .child(artist_rows)
-                        .when(artists.is_empty(), |column| {
-                            column.child(components::page_detail(
-                                palette,
-                                "No top artists for this stretch yet.",
-                            ))
-                        })
-                        .when(more, |column| {
-                            column.child(
-                                div().flex().child(
+                                .gap_2()
+                                .child(
                                     components::pill(
                                         palette,
-                                        "home-artists-more",
-                                        if all_artists {
-                                            "Show less".to_owned()
-                                        } else {
-                                            format!("See all {}", artists.len())
-                                        },
+                                        "home-save-playlist",
+                                        "Save as playlist",
                                         false,
                                     )
                                     .test_support()
-                                    .on_click(cx.listener(
-                                        |this, _, _, cx| {
-                                            this.all_artists = !this.all_artists;
-                                            cx.notify();
-                                        },
-                                    )),
-                                ),
-                            )
-                        })
-                        .when(compare.is_some() && !artists.is_empty(), |column| {
-                            column.child(components::page_detail(
-                                palette,
-                                "Arrows compare with a longer stretch.",
-                            ))
-                        }),
+                                    .on_click(cx.listener({
+                                        let tracks = tracks.clone();
+                                        let name =
+                                            format!("Your top tracks · {}", self.range.label());
+                                        move |_, _, _, cx| {
+                                            cx.emit(PageEvent::SavePlaylist {
+                                                name: name.clone().into(),
+                                                tracks: tracks.clone(),
+                                            });
+                                        }
+                                    })),
+                                )
+                                .child(self.range_menu(palette, cx)),
+                        ),
                 )
-                .when(!tracks.is_empty(), |content| {
-                    content.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(heading("home-tracks-heading", "Your top tracks".into()))
-                            .child(self.track_list.clone()),
-                    )
-                })
+                .child(self.track_list.clone())
         };
         div()
             .id("home-page")
@@ -1567,6 +1397,24 @@ impl Render for HomePage {
     }
 }
 
+/// The sidebar and the page's margins, in pixels at 100% zoom.
+const PAGE_CHROME: f32 = 330.;
+/// The space between neighbours in every grid, so edges line up.
+const GRID_GAP: f32 = 16.;
+/// Corner radius of the shortcut tiles and the Worth a listen rows.
+const TILE_RADIUS: f32 = 18.;
+/// The Continue card: its cover's radius is the card's less the padding, so
+/// the corners run parallel.
+const CARD_RADIUS: f32 = 24.;
+const CARD_PADDING: f32 = 14.;
+
+/// A length that follows the interface zoom, written in the pixels it comes to
+/// at 100%. Everything on this page is sized this way so covers, cards and
+/// text keep their proportions when the zoom changes.
+fn rem(pixels: f32) -> Rems {
+    Rems(pixels / 16.)
+}
+
 /// Two lines of text for a row: a title and a quieter detail beneath it.
 fn row_text(
     palette: CadencePalette,
@@ -1583,8 +1431,8 @@ fn row_text(
             div()
                 .max_w_full()
                 .truncate()
-                .text_size(px(15.5))
-                .line_height(px(21.))
+                .text_size(rem(15.5))
+                .line_height(rem(21.))
                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                 .text_color(rgb(palette.text_primary))
                 .child(title.into()),
@@ -1593,9 +1441,9 @@ fn row_text(
             div()
                 .max_w_full()
                 .truncate()
-                .mt(px(1.))
-                .text_size(px(13.5))
-                .line_height(px(19.))
+                .mt(rem(1.))
+                .text_size(rem(13.5))
+                .line_height(rem(19.))
                 .text_color(rgb(palette.text_muted))
                 .child(detail.into()),
         )

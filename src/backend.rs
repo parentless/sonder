@@ -448,6 +448,12 @@ pub enum BackendCommand {
         playlist: Playlist,
         pinned: bool,
     },
+    /// Makes a private Spotify playlist from songs, given by Spotify URI.
+    CreatePlaylist {
+        name: String,
+        uris: Vec<String>,
+        respond: Reply<()>,
+    },
     Resume,
     Pause,
     /// Connects playback again with the saved sign-in.
@@ -1586,6 +1592,20 @@ impl Worker {
                         Ok(())
                     },
                 );
+                Ok(())
+            }
+            BackendCommand::CreatePlaylist {
+                name,
+                uris,
+                respond,
+            } => {
+                let spotify = self.spotify.clone();
+                tokio::spawn(async move {
+                    let result =
+                        run_with_timeout(60, "playlist", spotify.create_playlist(&name, &uris))
+                            .await;
+                    let _ = respond.send(result);
+                });
                 Ok(())
             }
             BackendCommand::SetPlaylistPinned { playlist, pinned } => {

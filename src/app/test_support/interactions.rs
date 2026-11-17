@@ -4030,7 +4030,7 @@ fn answer_new_releases(fixture: &mut Fixture, result: anyhow::Result<Vec<model::
 }
 
 #[test]
-fn home_loads_top_items_once_when_opened_and_opens_an_artist() {
+fn home_loads_top_items_once_when_opened_and_lists_no_top_artists() {
     let mut fixture = Fixture::new(false);
     fixture.no_commands();
     fixture.update(|window, cx| window.click("nav-home", cx));
@@ -4056,10 +4056,107 @@ fn home_loads_top_items_once_when_opened_and_opens_an_artist() {
     fixture.update(|window, cx| window.click("nav-recent", cx));
     fixture.update(|window, cx| window.click("nav-home", cx));
     fixture.no_commands();
-    // The top artists sit below the opening rows.
+    // Home lists top tracks only; the artists it knows feed the rows above.
+    fixture.update(|window, _| {
+        assert!(window.try_find("home-artists-heading").is_none());
+        assert!(window.try_find(("home-artist", 0usize)).is_none());
+        assert!(window.try_find("home-tracks-heading").is_some());
+    });
+}
+
+fn notice(fixture: &mut Fixture) -> String {
+    let workspace = fixture.workspace.clone().unwrap();
+    fixture.update(|_, cx| {
+        workspace
+            .upgrade()
+            .unwrap()
+            .read(cx)
+            .action_notice
+            .clone()
+            .map(|notice| notice.to_string())
+            .unwrap_or_default()
+    })
+}
+
+#[test]
+fn home_saves_its_top_tracks_as_a_private_playlist_and_says_how_it_went() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|window, cx| window.click("nav-home", cx));
+    let BackendCommand::LoadHome { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a Home request")
+    };
+    respond
+        .send(Ok(model::HomeData {
+            artists: vec![],
+            tracks: vec![track(0), track(1)],
+        }))
+        .unwrap();
+    answer_new_releases(&mut fixture, Ok(vec![release_album()]));
+    fixture.update(|_, _| {});
     scroll_home(&mut fixture, 700.);
-    fixture.update(|window, cx| window.click(("home-artist", 0usize), cx));
-    assert_eq!(fixture.route(), Route::Artist);
+
+    fixture.update(|window, cx| window.click("home-save-playlist", cx));
+    let BackendCommand::CreatePlaylist {
+        name,
+        uris,
+        respond,
+    } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a playlist request")
+    };
+    assert!(name.starts_with("Your top tracks"), "{name}");
+    assert_eq!(uris, ["spotify:track:track-0", "spotify:track:track-1"]);
+    assert!(notice(&mut fixture).starts_with("Saving"));
+    // A second press while one is running makes nothing new.
+    fixture.update(|window, cx| window.click("home-save-playlist", cx));
+    fixture.no_commands();
+
+    respond.send(Ok(())).unwrap();
+    fixture.update(|_, _| {});
+    assert!(notice(&mut fixture).starts_with("Saved"));
+}
+
+#[test]
+fn an_album_saves_as_a_playlist_and_a_refusal_reaches_the_notice_bar() {
+    let mut fixture = Fixture::new(false);
+    fixture.play(credited_track());
+    fixture.no_commands();
+    fixture.update(|window, cx| window.click("player-artwork", cx));
+    let BackendCommand::LoadAlbum { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected an album request")
+    };
+    let album = crate::app::test_support::gallery_results().albums.remove(0);
+    respond
+        .send(Ok((album.clone(), vec![track(0), track(1), track(2)])))
+        .unwrap();
+    fixture.update(|_, _| {});
+
+    fixture.update(|window, cx| window.click("album-save-playlist", cx));
+    let BackendCommand::CreatePlaylist {
+        name,
+        uris,
+        respond,
+    } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a playlist request")
+    };
+    assert_eq!(name, album.name.to_string());
+    assert_eq!(uris.len(), 3);
+    respond
+        .send(Err(anyhow::anyhow!(
+            "To create playlists, sign out of Sonder and sign in again"
+        )))
+        .unwrap();
+    fixture.update(|_, _| {});
+    assert!(notice(&mut fixture).contains("sign in again"));
+    // After a failure it can be tried again.
+    fixture.update(|window, cx| window.click("album-save-playlist", cx));
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::CreatePlaylist { .. })
+    ));
 }
 
 #[test]
@@ -5014,41 +5111,6 @@ fn the_home_range_menu_opens_picks_and_closes() {
     // Choosing closes it too.
     pick_home_range(&mut fixture, 2);
     fixture.update(|window, _| assert!(window.try_find(("home-range", 0usize)).is_none()));
-}
-
-#[test]
-fn home_marks_artists_that_moved_against_the_longer_chart() {
-    let mut fixture = Fixture::new(false);
-    fixture.update(|_, cx| {
-        let top = crate::app::top_listening::TopListening::existing(cx);
-        top.update(cx, |top, cx| {
-            top.seed(
-                model::HomeRange::Months,
-                vec![top_artist("a"), top_artist("b"), top_artist("c")],
-                Vec::new(),
-                cx,
-            );
-            // Longer chart: c was first, a was second, b was third.
-            top.seed(
-                model::HomeRange::AllTime,
-                vec![top_artist("c"), top_artist("a"), top_artist("b")],
-                Vec::new(),
-                cx,
-            );
-        });
-    });
-    fixture.update(|window, cx| window.click("nav-home", cx));
-    fixture.update(|_, _| {});
-    fixture.update(|window, _| {
-        // a rose one place, b rose one, c fell two.
-        for index in 0..3usize {
-            assert!(
-                window.try_find(("home-artist-change", index)).is_some(),
-                "artist {index} should show a move"
-            );
-        }
-        assert!(window.try_find(("home-artist-change", 3usize)).is_none());
-    });
 }
 
 #[test]

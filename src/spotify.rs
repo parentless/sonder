@@ -11,8 +11,9 @@ use rspotify::{
     AuthCodePkceSpotify, Config, Credentials, OAuth, Token,
     model::{
         AlbumId, AlbumType, ArtistId, FullAlbum, FullArtist, FullTrack, Id, Image, LibraryId,
-        Market, PlayableItem, PlaylistId, SavedTrack, SearchResult, SearchType, SimplifiedAlbum,
-        SimplifiedArtist, SimplifiedPlaylist, SimplifiedTrack, TimeRange, TrackId,
+        Market, PlayableId, PlayableItem, PlaylistId, SavedTrack, SearchResult, SearchType,
+        SimplifiedAlbum, SimplifiedArtist, SimplifiedPlaylist, SimplifiedTrack, TimeRange, TrackId,
+        UserId,
     },
     prelude::{BaseClient, OAuthClient},
     scopes,
@@ -452,6 +453,11 @@ struct TopArtist {
     name: String,
 }
 
+/// Followed artists read for the release scan; only a handful are scanned.
+const FOLLOWED_ARTISTS_READ: u32 = 30;
+/// Spotify takes at most this many songs in one add request.
+const PLAYLIST_ADD_CHUNK: usize = 100;
+
 /// How long a fetched top-artist list is reused within one run.
 const TOP_ARTISTS_REUSE: Duration = Duration::from_secs(30 * 60);
 
@@ -464,8 +470,10 @@ impl Spotify {
                 "streaming",
                 "user-library-read",
                 "user-library-modify",
+                "user-follow-read",
                 "playlist-read-private",
                 "playlist-read-collaborative",
+                "playlist-modify-private",
                 "user-read-private",
                 "user-top-read"
             ),
@@ -691,44 +699,53 @@ impl Spotify {
     pub async fn new_from_top_artists(&self) -> Result<Vec<Album>> {
         self.gated(async {
             self.require_top_read().await?;
-            let artists = self.top_artists().await?;
+            let top = self.top_artists().await?;
+            let mut artists: Vec<TopArtist> = top
+                .iter()
+                .take(crate::model::NEW_RELEASE_ARTISTS)
+                .cloned()
+                .collect();
+            // Artists followed but not played much still put out music.
+            for followed in self.followed_artists().await? {
+                if artists.len()
+                    >= crate::model::NEW_RELEASE_ARTISTS + crate::model::NEW_RELEASE_FOLLOWED
+                {
+                    break;
+                }
+                if !artists.iter().any(|known| known.id == followed.id) {
+                    artists.push(followed);
+                }
+            }
             // Once Spotify says "slow down", the remaining lookups must not go out.
             let stopped = AtomicBool::new(false);
             let stopped = &stopped;
-            let results: Vec<Result<Vec<SimplifiedAlbum>>> = futures::stream::iter(
-                artists
-                    .iter()
-                    .take(crate::model::NEW_RELEASE_ARTISTS)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .map(|artist| async move {
-                        if stopped.load(Ordering::Relaxed) {
-                            return Ok(Vec::new());
-                        }
-                        self.pace().await;
-                        let page = self
-                            .client
-                            .artist_albums_manual(
-                                artist.id,
-                                [AlbumType::Album, AlbumType::Single],
-                                None,
-                                Some(5),
-                                Some(0),
-                            )
-                            .await
-                            .context("could not load Spotify artist releases");
-                        if let Err(error) = &page
-                            && matches!(classify_error(error), ErrorKind::RateLimited { .. })
-                        {
-                            stopped.store(true, Ordering::Relaxed);
-                        }
-                        Ok(page?.items)
-                    }),
-            )
-            .buffer_unordered(2)
-            .collect()
-            .await;
+            let results: Vec<Result<Vec<SimplifiedAlbum>>> =
+                futures::stream::iter(artists.into_iter().map(|artist| async move {
+                    if stopped.load(Ordering::Relaxed) {
+                        return Ok(Vec::new());
+                    }
+                    self.pace().await;
+                    let page = self
+                        .client
+                        .artist_albums_manual(
+                            artist.id,
+                            [AlbumType::Album, AlbumType::Single],
+                            None,
+                            Some(5),
+                            Some(0),
+                        )
+                        .await
+                        .context("could not load Spotify artist releases");
+                    if let Err(error) = &page
+                        && matches!(classify_error(error), ErrorKind::RateLimited { .. })
+                    {
+                        stopped.store(true, Ordering::Relaxed);
+                    }
+                    Ok(page?.items)
+                }))
+                .buffer_unordered(2)
+                .collect()
+                .await;
             let cutoff = release_cutoff(crate::model::NEW_RELEASE_DAYS);
             let mut first_error = None;
             let mut albums: Vec<Album> = Vec::new();
@@ -771,6 +788,86 @@ impl Spotify {
             albums.retain(|album| seen.insert(album.source_id.clone()));
             albums.truncate(crate::model::NEW_RELEASE_LIMIT);
             Ok(albums)
+        })
+        .await
+    }
+
+    /// The first artists the listener follows. Sessions from before this
+    /// permission existed have none to give, and a refusal is not an error:
+    /// the releases just come from the top artists alone.
+    async fn followed_artists(&self) -> Result<Vec<TopArtist>> {
+        let authorized = self
+            .client
+            .token
+            .lock()
+            .await
+            .map_err(|_| anyhow!("could not lock Spotify token state"))?
+            .as_ref()
+            .is_some_and(|token| token.scopes.contains("user-follow-read"));
+        if !authorized {
+            return Ok(Vec::new());
+        }
+        self.pace().await;
+        match self
+            .client
+            .current_user_followed_artists(None, Some(FOLLOWED_ARTISTS_READ))
+            .await
+        {
+            Ok(page) => Ok(page
+                .items
+                .into_iter()
+                .map(|artist| TopArtist {
+                    id: artist.id,
+                    name: artist.name,
+                })
+                .collect()),
+            Err(error) => {
+                let error = anyhow::Error::from(error).context("could not load followed artists");
+                if matches!(classify_error(&error), ErrorKind::RateLimited { .. }) {
+                    return Err(error);
+                }
+                log::debug!("{error:#}");
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    /// Makes a private playlist holding `uris` (songs only, in order). Older
+    /// sessions need consent for the extra permission.
+    pub async fn create_playlist(&self, name: &str, uris: &[String]) -> Result<()> {
+        let ids: Vec<TrackId<'static>> = uris
+            .iter()
+            .filter_map(|uri| TrackId::from_uri(uri).ok())
+            .map(TrackId::into_static)
+            .collect();
+        if ids.is_empty() {
+            bail!("There are no Spotify songs here to save");
+        }
+        self.gated(async {
+            let authorized = self.client.token.lock().await
+                .map_err(|_| anyhow!("could not lock Spotify token state"))?
+                .as_ref().is_some_and(|token| token.scopes.contains("playlist-modify-private"));
+            if !authorized {
+                bail!("To create playlists, sign out of Sonder and sign in again to grant playlist editing permission");
+            }
+            let user = UserId::from_id("me")?;
+            let playlist = self
+                .client
+                .user_playlist_create(user, name, Some(false), None, None)
+                .await
+                .context("could not create the Spotify playlist")?;
+            for chunk in ids.chunks(PLAYLIST_ADD_CHUNK) {
+                self.pace().await;
+                self.client
+                    .playlist_add_items(
+                        playlist.id.as_ref(),
+                        chunk.iter().cloned().map(PlayableId::Track),
+                        None,
+                    )
+                    .await
+                    .context("could not add songs to the Spotify playlist")?;
+            }
+            Ok(())
         })
         .await
     }
@@ -1700,6 +1797,158 @@ mod tests {
             search_cache: Arc::default(),
             top_tracks_unavailable: Arc::default(),
         }
+    }
+
+    /// Serves each `(request start, body)` in turn, returning every full
+    /// request it saw (headers and body).
+    async fn serve_once_each(
+        listener: tokio::net::TcpListener,
+        answers: Vec<(&'static str, String)>,
+    ) -> Vec<String> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut seen = Vec::new();
+        for (expected, body) in answers {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0; 8192];
+            let (head_end, length) = loop {
+                let count = socket.read(&mut chunk).await.unwrap();
+                bytes.extend_from_slice(&chunk[..count]);
+                let text = String::from_utf8_lossy(&bytes).into_owned();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|value| value.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    break (end + 4, length);
+                }
+            };
+            while bytes.len() < head_end + length {
+                let count = socket.read(&mut chunk).await.unwrap();
+                bytes.extend_from_slice(&chunk[..count]);
+            }
+            let request = String::from_utf8_lossy(&bytes).into_owned();
+            assert!(request.starts_with(expected), "{request}");
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            seen.push(request);
+        }
+        seen
+    }
+
+    fn page_json(items: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"href":"","items":items,"limit":50,"next":null,"offset":0,"previous":null,"total":0})
+    }
+
+    #[tokio::test]
+    async fn playlists_need_their_permission_then_hold_every_song_in_chunks_of_a_hundred() {
+        use super::*;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let spotify = test_client(listener.local_addr().unwrap()).await;
+        let uris: Vec<String> = (0..101)
+            .map(|index| format!("spotify:track:{index:022}"))
+            .collect();
+        let error = spotify.create_playlist("Mix", &uris).await.unwrap_err();
+        assert!(error.to_string().contains("sign out"), "{error:#}");
+        assert!(
+            spotify
+                .create_playlist("Mix", &["spotify:local:a::b:1".into()])
+                .await
+                .is_err()
+        );
+        spotify
+            .client
+            .token
+            .lock()
+            .await
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .scopes
+            .insert("playlist-modify-private".into());
+        let created = serde_json::json!({
+            "collaborative": false, "description": null, "external_urls": {},
+            "followers": {"href": null, "total": 0}, "href": "", "id": "pl1",
+            "images": [], "name": "Mix",
+            "owner": {"display_name": "me", "external_urls": {}, "href": "", "id": "me", "images": []},
+            "public": false, "snapshot_id": "snap", "items": page_json(serde_json::json!([]))
+        })
+        .to_string();
+        let added = serde_json::json!({"snapshot_id": "snap"}).to_string();
+        let server = tokio::spawn(serve_once_each(
+            listener,
+            vec![
+                ("POST /v1/me/playlists", created),
+                ("POST /v1/playlists/pl1/items", added.clone()),
+                ("POST /v1/playlists/pl1/items", added),
+            ],
+        ));
+        timeout(
+            Duration::from_secs(10),
+            spotify.create_playlist("Mix", &uris),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let seen = server.await.unwrap();
+        assert!(seen[0].contains("\"public\":false"), "{}", seen[0]);
+        assert!(seen[0].contains("\"name\":\"Mix\""));
+        assert_eq!(seen[1].matches("spotify:track:").count(), 100);
+        assert_eq!(seen[2].matches("spotify:track:").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn followed_artists_are_read_only_with_their_permission_and_a_refusal_is_quiet() {
+        use super::*;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let spotify = test_client(listener.local_addr().unwrap()).await;
+        // Without the permission nothing is asked.
+        assert!(spotify.followed_artists().await.unwrap().is_empty());
+        assert!(
+            timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+        spotify
+            .client
+            .token
+            .lock()
+            .await
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .scopes
+            .insert("user-follow-read".into());
+        let artist = serde_json::json!({
+            "external_urls": {}, "href": "", "id": "4Z8W4fKeB5YxbusRsdQVPb",
+            "images": [], "name": "Radiohead", "type": "artist", "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+        });
+        let body = serde_json::json!({"artists": {
+            "href": "", "items": [artist], "limit": 30, "next": null,
+            "cursors": null, "total": 1
+        }})
+        .to_string();
+        let server = tokio::spawn(serve_once_each(
+            listener,
+            vec![("GET /v1/me/following?", body)],
+        ));
+        let followed = spotify.followed_artists().await.unwrap();
+        assert_eq!(followed.len(), 1);
+        assert_eq!(followed[0].name, "Radiohead");
+        let seen = server.await.unwrap();
+        assert!(seen[0].contains("type=artist") && seen[0].contains("limit=30"));
     }
 
     fn discography_album_json(index: usize) -> serde_json::Value {

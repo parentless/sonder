@@ -43,6 +43,26 @@ const MONTHS: &[Month] = &[
             Day {
                 date: "Nov 17, 2026",
                 releases: &[Release {
+                    version: "0.8.56",
+                    notes: &[
+                        Note(
+                            New,
+                            "Save as playlist: one button on Home's Your top tracks and on every album makes a private Spotify playlist from its songs. Spotify asks for the playlist permission once, so sign out of Sonder and sign in again the first time.",
+                        ),
+                        Note(
+                            Better,
+                            "New from artists you play now also looks at artists you follow on Spotify, not just the ones you play most. That needs the same one-time sign in again to share your follows.",
+                        ),
+                        Note(
+                            Better,
+                            "Home lines up: the shortcut tiles, the Continue card, the new albums and the Worth a listen rows share the same left and right edges, and covers fill their tiles at any zoom. Your top artists is gone; the time range now sits on Your top tracks.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
+                date: "Nov 17, 2026",
+                releases: &[Release {
                     version: "0.8.55",
                     notes: &[
                         Note(

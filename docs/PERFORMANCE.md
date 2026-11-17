@@ -397,7 +397,7 @@ closes. The panel redraws only when the seconds left change.
 
 ## Home, artist pages and saves
 
-- **Top listening** is one shared in-memory store. Home loads the range on screen, then the next longer one (to show who is rising): two request pairs per half hour at most, none while the page is closed. Artist pages only read what is already loaded, so opening a profile costs no request. Finding an artist's songs is one pass over at most 60 chart rows plus the liked list.
+- **Top listening** is one shared in-memory store. Home loads only the range on screen: one request pair per half hour at most, none while the page is closed. Artist pages only read what is already loaded, so opening a profile costs no request. Finding an artist's songs is one pass over at most 60 chart rows plus the liked list.
 - **The briefing** is at most seven story cards and ten artist rows, built from data already fetched. Covers use the same bounded image cache as everywhere else. The "come back to" cards compare the two charts already loaded, with no extra request.
 - **Album placeholders** on artist pages are static blocks in a fixed-height footer, so the list never re-measures as pages load.
 - **Queue saves:** skipping within an unchanged queue writes two tiny preference rows (index, position). The full queue is rewritten only when it changes, found by comparing one 64-bit hash per song. The 5-second position save no longer touches the queue row.
@@ -416,6 +416,10 @@ Nothing runs until the dialog is used. Lookups and downloads each get their own 
 ## Credits and Home shortcuts
 
 The Credits dialog asks MusicBrainz for one ISRC lookup and up to three recording lookups (spaced 1.1 seconds apart), only when it is opened, on a short-lived backend task with a 30-second limit that is dropped if the dialog closes. The merged answer is kept on disk for a week. Home's shortcuts, Continue card and new-release shelf are drawn from data already in memory (the library, the player and the releases Home already fetched), so they add no request. The Continue card shows a progress bar only while paused, so nothing needs a timer to keep it honest.
+
+## Playlists and followed artists
+
+Saving a playlist is one request to create it and one more per 100 songs, sent only when the button is pressed, on a backend task with a 60-second limit; only one save runs at a time, and the library is then refreshed once so the playlist shows. The release scan reads at most 30 followed artists in one request (no request without the permission) and looks at 8 of them beyond the top 10, so the sweep grows from 10 to at most 18 artist requests, still cached for the same period.
 
 ## Artists to try
 

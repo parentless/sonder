@@ -1,6 +1,6 @@
 [package]
 name = "cadence"
-version = "0.8.55"
+version = "0.8.56"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/parentless/sonder"
@@ -72,9 +72,14 @@ test = false
 
 [profile.dev]
 opt-level = 0
+# Full debug info made `target/` grow past 40 GB. Line tables keep backtraces
+# and panic locations readable at a fraction of the size.
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 2
+# Dependencies are never stepped through, so they carry no debug info.
+debug = false
 
 [profile.release]
 lto = "thin"

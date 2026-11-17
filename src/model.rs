@@ -207,6 +207,8 @@ pub const SEARCH_TRACK_LIMIT: usize = 5;
 
 /// New releases come from this many of the listener's top artists.
 pub const NEW_RELEASE_ARTISTS: usize = 10;
+/// Followed artists scanned for releases beyond the top ones.
+pub const NEW_RELEASE_FOLLOWED: usize = 8;
 /// A release counts as new for this many days.
 pub const NEW_RELEASE_DAYS: u64 = 90;
 /// Home shows at most this many new releases.
@@ -271,15 +273,6 @@ impl HomeRange {
             Self::Weeks => 0,
             Self::Months => 1,
             Self::AllTime => 2,
-        }
-    }
-
-    /// The longer range a chart is compared with, to see what is rising.
-    pub fn longer(self) -> Option<Self> {
-        match self {
-            Self::Weeks => Some(Self::Months),
-            Self::Months => Some(Self::AllTime),
-            Self::AllTime => None,
         }
     }
 
