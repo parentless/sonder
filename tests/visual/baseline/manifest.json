@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.48",
+    "cadence": "0.8.49",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "c44ea648bf1163baf39c2d02824cc92d531206d0",
-    "lockfile_sha256": "b569829fe3245cc39f5ce2c1df7991bf233f9df83a7c322b6e02576318bc0a33"
+    "revision": "66ab842f1d26af84da1bbf3336251ecb7afbe437",
+    "lockfile_sha256": "45db2f0947e77a2f2715e625cb864e82df8e4d3550f11a999e35cdc71630ad6f"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/43696099386",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/44021201213",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.48",
+      "cadence": "0.8.49",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "c44ea648bf1163baf39c2d02824cc92d531206d0",
-      "lockfile_sha256": "b569829fe3245cc39f5ce2c1df7991bf233f9df83a7c322b6e02576318bc0a33"
+      "revision": "66ab842f1d26af84da1bbf3336251ecb7afbe437",
+      "lockfile_sha256": "45db2f0947e77a2f2715e625cb864e82df8e4d3550f11a999e35cdc71630ad6f"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/43696099386"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/44021201213"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -100,6 +100,7 @@
     "0.8.45: the first-launch intro adds twelve references (launch-intro-glow, launch-intro-click, launch-intro-open) held at three moments of its 2.3 s; artist-releases-loading shows placeholders filling the partial last row; Settings shows version 0.8.45; What's new lists the new release",
     "0.8.46: only Settings (the version) and the What's new list changed",
     "0.8.47: only Settings (the version) and the What's new list changed",
-    "0.8.48: the volume slider shows only its line at rest (the dot appears on hover or drag and has no border), so the 100 full-window captures with the player bar changed only in the volume slider; Settings shows version 0.8.48; What's new lists the new release"
+    "0.8.48: the volume slider shows only its line at rest (the dot appears on hover or drag and has no border), so the 100 full-window captures with the player bar changed only in the volume slider; Settings shows version 0.8.48; What's new lists the new release",
+    "0.8.49: Local Files gains a From link button (local-files, four themes/sizes) and twelve new references of its popover (local-files-link-empty, -found, -saving); Settings shows version 0.8.49; What's new lists the new release"
   ]
 }
