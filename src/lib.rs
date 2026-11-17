@@ -7,6 +7,7 @@ mod diagnostics;
 pub(crate) mod discord;
 pub(crate) mod lastfm;
 pub mod lifecycle;
+mod link_download;
 pub mod local_files;
 pub mod lyrics;
 mod memory;

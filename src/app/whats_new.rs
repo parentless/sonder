@@ -41,6 +41,22 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 16, 2026",
+                releases: &[Release {
+                    version: "0.8.49",
+                    notes: &[
+                        Note(
+                            New,
+                            "Local Files has a From link button. Paste a link to a song and Sonder saves it into one of your folders as Best, MP3, FLAC, M4A, Ogg or WAV, with its cover and tags. Paste several links at once, or a playlist, and they save in turn.",
+                        ),
+                        Note(
+                            Better,
+                            "The first time you save from a page that isn’t a plain audio file, Sonder fetches the downloader and converter it needs and keeps them up to date. Direct links to audio files need nothing extra.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
                 date: "Nov 15, 2026",
                 releases: &[Release {
                     version: "0.8.48",

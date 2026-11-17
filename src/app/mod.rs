@@ -369,6 +369,8 @@ mod icons;
 mod launch_intro;
 mod library;
 mod library_pages;
+mod link_downloads;
+mod link_popover;
 mod lyrics_view;
 mod media_controls;
 mod onboarding;

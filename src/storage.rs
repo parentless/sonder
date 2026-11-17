@@ -719,6 +719,22 @@ impl Store {
         self.set_preference("local_folders", &serde_json::to_string(folders)?)
     }
 
+    /// The format and folder last chosen for saving a link, if any.
+    pub fn link_download_choice(&self) -> Result<(Option<String>, Option<PathBuf>)> {
+        Ok((
+            self.preference("link_download_format")?,
+            self.preference("link_download_folder")?.map(PathBuf::from),
+        ))
+    }
+
+    pub fn set_link_download_choice(&mut self, format: &str, folder: Option<&Path>) -> Result<()> {
+        self.set_preference("link_download_format", format)?;
+        if let Some(folder) = folder {
+            self.set_preference("link_download_folder", &folder.to_string_lossy())?;
+        }
+        Ok(())
+    }
+
     /// The saved Local Files index, in display order.
     pub fn local_index(&self) -> Result<Vec<IndexEntry>> {
         let mut statement = self.connection.prepare(

@@ -408,3 +408,7 @@ closes. The panel redraws only when the seconds left change.
 - **Plays once, ever.** `Store::launch_intro_pending` is true until a `launch_intro_played` setting exists, so new installs and updated ones each get it exactly once. It is recorded the moment the main window claims it, so quitting part-way never repeats it.
 - **Cheap while it runs.** It is its own view, so only about 25 plain elements are rebuilt per frame, not the workspace. Glows are box shadows, with no images or shaders added. It lasts 2.3 s.
 - **Free afterwards.** The view is dropped when it ends; nothing keeps running. It cannot be skipped, and it blocks clicks behind it for its 2.3 s. Reduced motion skips it entirely.
+
+## Saving from links
+
+Nothing runs until the popover is used. Lookups and downloads each get their own short-lived thread and a child process, so the UI thread only receives progress messages, at most one per 120 ms per download. No timers are left running, and the lists drop to the last six finished downloads. A sleeping popover holds no state beyond its field.

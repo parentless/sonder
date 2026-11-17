@@ -67,6 +67,13 @@ impl Workspace {
         if self.router.route() == Route::LocalFiles
             && self
                 .local_files
+                .update(cx, |page, cx| page.close_link_popover(cx))
+        {
+            return;
+        }
+        if self.router.route() == Route::LocalFiles
+            && self
+                .local_files
                 .update(cx, |page, cx| page.clear_search(window, cx))
         {
             return;

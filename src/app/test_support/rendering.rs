@@ -43,6 +43,9 @@ enum Scene {
     SettingsAutoplayOff,
     SettingsCache,
     LocalFiles,
+    LinkEmpty,
+    LinkFound,
+    LinkSaving,
     SettingsLocalFiles,
     Lyrics,
     Setup,
@@ -104,6 +107,9 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("settings-cache", Scene::SettingsCache),
         ("settings-autoplay-off", Scene::SettingsAutoplayOff),
         ("local-files", Scene::LocalFiles),
+        ("local-files-link-empty", Scene::LinkEmpty),
+        ("local-files-link-found", Scene::LinkFound),
+        ("local-files-link-saving", Scene::LinkSaving),
         ("settings-local-files", Scene::SettingsLocalFiles),
         ("lyrics", Scene::Lyrics),
         ("setup", Scene::Setup),
@@ -465,7 +471,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                         workspace.settings.update(cx, |_, cx| cx.notify());
                     }
                 }
-                Scene::LocalFiles | Scene::SettingsLocalFiles => {
+                Scene::LocalFiles | Scene::LinkEmpty | Scene::LinkFound | Scene::LinkSaving | Scene::SettingsLocalFiles => {
                     let tracks = super::local_library();
                     // Embedded artwork, seeded like any other cover.
                     let cover = image::RgbaImage::from_fn(64, 64, |x, y| {
@@ -482,7 +488,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     workspace.library.update(cx, |library, cx| {
                         library.open_local_files(super::local_folders(), cx)
                     });
-                    if matches!(scene, Scene::LocalFiles) {
+                    if !matches!(scene, Scene::SettingsLocalFiles) {
                         services::AppServices::player(cx).update(cx, |player, cx| {
                             player.handle_backend_event(
                                 BackendEvent::PlaybackSnapshotLoaded {
@@ -929,7 +935,11 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             assert!(answered, "the open lyrics ask for the song's words");
             settle(&mut cx, handle.into());
         }
-        Scene::LocalFiles | Scene::SettingsLocalFiles => {
+        Scene::LocalFiles
+        | Scene::LinkEmpty
+        | Scene::LinkFound
+        | Scene::LinkSaving
+        | Scene::SettingsLocalFiles => {
             // The saved index, then a rescan that finds the same files.
             let mut answered = 0;
             for _ in 0..4 {
@@ -952,6 +962,98 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 settle(&mut cx, handle.into());
             }
             assert_eq!(answered, 2, "the saved index and one rescan");
+            if matches!(
+                scene,
+                Scene::LinkEmpty | Scene::LinkFound | Scene::LinkSaving
+            ) {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    window.click("local-files-link", cx)
+                })
+                .unwrap();
+                settle(&mut cx, handle.into());
+                let workspace = main_workspace.clone().unwrap();
+                let popover = cx.update(|cx| {
+                    workspace
+                        .read(cx)
+                        .local_files
+                        .read(cx)
+                        .link_popover()
+                        .expect("the popover opened")
+                });
+                let probe = |title: &str, artist: &str| crate::link_download::Probe {
+                    title: title.into(),
+                    artist: Some(artist.into()),
+                    duration_secs: Some(221.),
+                    site: "example.com".into(),
+                    ..Default::default()
+                };
+                let folder = super::local_folders()[0].clone();
+                if matches!(scene, Scene::LinkFound) {
+                    let found = "https://example.com/ana-lind/harbour-lights-live";
+                    let refused = "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC";
+                    cx.update(|cx| {
+                        services::AppServices::link_downloads(cx).update(cx, |downloads, _| {
+                            downloads.fixture_probe(
+                                found,
+                                link_downloads::ProbeState::Found(probe(
+                                    "Harbour Lights (Live)",
+                                    "Ana Lind",
+                                )),
+                            );
+                            downloads.fixture_probe(
+                                refused,
+                                link_downloads::ProbeState::Failed(
+                                    crate::link_download::refusal(refused).unwrap(),
+                                ),
+                            );
+                        });
+                    });
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        popover.update(cx, |popover, cx| {
+                            popover.fixture_type(&format!("{found} {refused}"), window, cx)
+                        })
+                    })
+                    .unwrap();
+                }
+                if matches!(scene, Scene::LinkSaving) {
+                    cx.update(|cx| {
+                        services::AppServices::link_downloads(cx).update(cx, |downloads, _| {
+                            let url = "https://example.com/song";
+                            downloads.fixture_item(
+                                url,
+                                probe("Salt and Glass", "Ana Lind"),
+                                folder.clone(),
+                                link_downloads::Phase::Failed(
+                                    "That link isn’t available any more.".into(),
+                                ),
+                            );
+                            downloads.fixture_item(
+                                url,
+                                probe("Slow Return", "Ana Lind"),
+                                folder.clone(),
+                                link_downloads::Phase::Done(1),
+                            );
+                            downloads.fixture_item(
+                                url,
+                                probe("Night Bus (Demo)", "Ostrava Tapes"),
+                                folder.clone(),
+                                link_downloads::Phase::Converting,
+                            );
+                            downloads.fixture_item(
+                                url,
+                                probe("Harbour Lights (Live)", "Ana Lind"),
+                                folder.clone(),
+                                link_downloads::Phase::Working {
+                                    fraction: Some(0.64),
+                                    bytes_per_second: Some(1.1 * 1024. * 1024.),
+                                    item: None,
+                                },
+                            );
+                        });
+                    });
+                }
+                settle(&mut cx, handle.into());
+            }
         }
         _ => {}
     }

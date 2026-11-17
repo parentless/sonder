@@ -187,7 +187,18 @@ pub(super) struct LibraryTracksPage {
     library: Entity<library::Library>,
     tracks: Entity<track_list::TrackList>,
     search: Option<TrackSearch>,
+    /// The popover for saving songs from links, made the first time it opens.
+    link: Option<LinkPopoverState>,
+    /// Where the "From link" button is, so a press on it is not also a press
+    /// outside the popover.
+    link_button_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     _tracks_subscription: Subscription,
+}
+
+struct LinkPopoverState {
+    popover: Entity<link_popover::LinkPopover>,
+    open: bool,
+    _subscription: Subscription,
 }
 
 impl EventEmitter<PageEvent> for LibraryTracksPage {}
@@ -208,6 +219,98 @@ impl LibraryTracksPage {
             _tracks_subscription: page::forward(&tracks, cx),
             tracks,
             search: None,
+            link: None,
+            link_button_bounds: Rc::default(),
+        }
+    }
+
+    /// Opens the link popover, or closes it when it is already open.
+    fn toggle_link_popover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(state) = self.link.as_mut() {
+            state.open = !state.open;
+            if state.open {
+                let popover = state.popover.clone();
+                popover.update(cx, |popover, cx| popover.focus(window, cx));
+            }
+            cx.notify();
+            return;
+        }
+        let popover = cx.new(|cx| link_popover::LinkPopover::new(window, cx));
+        let subscription = cx.subscribe(&popover, |page, _, event, cx| match event {
+            link_popover::LinkPopoverEvent::OpenFolders => {
+                page.close_link_popover(cx);
+                cx.emit(PageEvent::OpenLocalFilesSettings);
+            }
+        });
+        popover.update(cx, |popover, cx| popover.focus(window, cx));
+        self.link = Some(LinkPopoverState {
+            popover,
+            open: true,
+            _subscription: subscription,
+        });
+        cx.notify();
+    }
+
+    fn link_button(&self, palette: CadencePalette, cx: &mut Context<Self>) -> impl IntoElement {
+        let bounds = self.link_button_bounds.clone();
+        components::icon_pill(
+            palette,
+            "local-files-link",
+            CadenceIcon::Link,
+            "From link",
+            true,
+        )
+        .test_support()
+        .flex_none()
+        .on_click(cx.listener(|this, _, window, cx| this.toggle_link_popover(window, cx)))
+        .child(
+            gpui_kit::canvas(move |rect, _, _| bounds.set(Some(rect)), |_, _, _, _| {})
+                .absolute()
+                .inset_0(),
+        )
+    }
+
+    /// The open popover, hung below the page's buttons.
+    fn link_layer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let state = self.link.as_ref().filter(|state| state.open)?;
+        let button = self.link_button_bounds.clone();
+        Some(
+            deferred(
+                div()
+                    .absolute()
+                    .top(Rems(3.25))
+                    .right_0()
+                    .on_mouse_down_out(cx.listener(
+                        move |this, event: &gpui_kit::MouseDownEvent, _, cx| {
+                            // The button toggles on its own click.
+                            if !button
+                                .get()
+                                .is_some_and(|bounds| bounds.contains(&event.position))
+                            {
+                                this.close_link_popover(cx);
+                            }
+                        },
+                    ))
+                    .child(state.popover.clone()),
+            )
+            .into_any_element(),
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn link_popover(&self) -> Option<Entity<link_popover::LinkPopover>> {
+        self.link.as_ref().map(|state| state.popover.clone())
+    }
+
+    /// Closes the link popover, returning whether it was open.
+    pub(super) fn close_link_popover(&mut self, cx: &mut Context<Self>) -> bool {
+        match self.link.as_mut() {
+            Some(state) if state.open => {
+                state.open = false;
+                cx.notify();
+                true
+            }
+            _ => false,
         }
     }
 
@@ -384,11 +487,14 @@ impl Render for LibraryTracksPage {
             |heading| {
                 heading.child(
                     div()
+                        .relative()
                         .flex()
                         .flex_none()
                         .items_center()
                         .gap_2()
                         .children(search)
+                        .child(self.link_button(palette, cx))
+                        .children(self.link_layer(cx))
                         .child(
                             components::settings_button(palette, "local-files-folders", "Folders")
                                 .test_support()

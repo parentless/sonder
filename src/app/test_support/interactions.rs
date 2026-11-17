@@ -4305,6 +4305,114 @@ fn local_files_search_narrows_the_list_and_escape_clears_it() {
     fixture.no_commands();
 }
 
+/// A fixture sitting on the Local Files page, with one song and a folder.
+fn on_local_files() -> Fixture {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|_, cx| {
+        services::AppServices::library(cx).update(cx, |library, cx| {
+            library.open_local_files(vec!["C:/Music".into()], cx)
+        });
+    });
+    answer_local_files(&mut fixture, vec![local_track("Harbour")]);
+    answer_local_files(&mut fixture, vec![local_track("Harbour")]);
+    fixture.update(|window, cx| window.click("nav-local-files", cx));
+    fixture.no_commands();
+    fixture
+}
+
+#[test]
+fn the_link_popover_opens_from_its_button_and_closes_on_escape_a_second_press_or_a_click_away() {
+    let mut fixture = on_local_files();
+    fixture.update(|window, _| assert!(window.try_find("link-popover").is_none()));
+
+    fixture.update(|window, cx| window.click("local-files-link", cx));
+    fixture.update(|window, _| assert!(window.try_find("link-popover").is_some()));
+    // Escape closes it and nothing else: the page stays.
+    fixture.update(|window, cx| window.press("escape", cx));
+    fixture.update(|window, _| assert!(window.try_find("link-popover").is_none()));
+    assert_eq!(fixture.route(), Route::LocalFiles);
+
+    // The button that opened it closes it, once.
+    fixture.update(|window, cx| window.click("local-files-link", cx));
+    fixture.update(|window, _| assert!(window.try_find("link-popover").is_some()));
+    fixture.update(|window, cx| window.click("local-files-link", cx));
+    fixture.update(|window, _| assert!(window.try_find("link-popover").is_none()));
+
+    // A press elsewhere on the page closes it too.
+    fixture.update(|window, cx| window.click("local-files-link", cx));
+    fixture.update(|window, cx| window.click("page-search-input", cx));
+    fixture.update(|window, _| assert!(window.try_find("link-popover").is_none()));
+    // Opening and closing never asked the backend for anything.
+    fixture.no_commands();
+}
+
+#[test]
+fn a_looked_up_link_offers_formats_and_a_download_and_text_without_a_link_does_not() {
+    let mut fixture = on_local_files();
+    fixture.update(|window, cx| window.click("local-files-link", cx));
+    let url = "https://example.com/ana-lind/harbour-lights-live";
+    fixture.update(|_, cx| {
+        services::AppServices::link_downloads(cx).update(cx, |downloads, _| {
+            downloads.fixture_probe(
+                url,
+                crate::app::link_downloads::ProbeState::Found(crate::link_download::Probe {
+                    title: "Harbour Lights (Live)".into(),
+                    artist: Some("Ana Lind".into()),
+                    duration_secs: Some(221.),
+                    site: "example.com".into(),
+                    ..Default::default()
+                }),
+            )
+        });
+    });
+    let workspace = fixture.workspace.clone().expect("workspace fixture");
+    let popover = fixture.update(|_, cx| {
+        workspace
+            .upgrade()
+            .expect("workspace")
+            .read(cx)
+            .local_files
+            .read(cx)
+            .link_popover()
+            .expect("open")
+    });
+
+    // Words that are not a link find nothing to save.
+    fixture.update(|window, cx| {
+        popover.update(cx, |popover, cx| {
+            popover.fixture_type("harbour lights", window, cx)
+        })
+    });
+    fixture.update(|window, _| {
+        assert!(window.try_find("link-save").is_none());
+        assert!(window.try_find("link-save-disabled").is_some());
+        assert!(window.try_find(("link-format", 0usize)).is_none());
+    });
+
+    fixture.update(|window, cx| {
+        popover.update(cx, |popover, cx| popover.fixture_type(url, window, cx))
+    });
+    fixture.update(|window, _| {
+        assert!(window.try_find("link-save").is_some());
+        assert!(window.try_find("link-save-disabled").is_none());
+    });
+    // A format chip chooses that format, and the choice stays.
+    fixture.update(|window, cx| {
+        window.click(
+            ("link-format", crate::link_download::Format::Flac as usize),
+            cx,
+        )
+    });
+    fixture.update(|_, cx| {
+        let downloads = services::AppServices::link_downloads(cx);
+        assert_eq!(
+            downloads.read(cx).format(),
+            crate::link_download::Format::Flac
+        );
+    });
+    fixture.no_commands();
+}
+
 #[test]
 fn a_folder_change_during_a_scan_rescans_once_it_finishes() {
     let mut fixture = Fixture::new(false);

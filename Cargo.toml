@@ -1,6 +1,6 @@
 [package]
 name = "cadence"
-version = "0.8.48"
+version = "0.8.49"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/parentless/sonder"
@@ -37,6 +37,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.53", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 url = "2.5"
+percent-encoding = "2.3"
+sha2 = "0.10"
 # Reads tags and lengths of local music files. The same build librespot
 # decodes them with, so it adds no second copy.
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "vorbis", "flac", "isomp4", "aac", "alac", "wav", "pcm"] }
@@ -49,7 +51,6 @@ log = "0.4.33"
 objc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-sha2 = "0.10"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]

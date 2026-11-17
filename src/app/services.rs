@@ -14,6 +14,7 @@ pub(super) struct AppServices {
     player: Entity<player::Player>,
     session: Entity<session::Session>,
     library: Entity<library::Library>,
+    link_downloads: Entity<link_downloads::LinkDownloads>,
     image_cache: Entity<image_cache::BoundedImageCache>,
     brand_mark: Arc<gpui_kit::Image>,
     media_controls: Option<media_controls::SystemMediaControls>,
@@ -58,12 +59,15 @@ impl AppServices {
             cx.new(|cx| player::Player::new(handle.clone(), cx.background_executor().now()));
         let session = cx.new(|_| session::Session::new(handle.clone()));
         let library = cx.new(|_| library::Library::new(handle));
+        let link_downloads =
+            cx.new(|cx| link_downloads::LinkDownloads::new(Default::default(), cx));
         let image_cache = image_cache::BoundedImageCache::new(cx);
         cx.set_global(Self {
             backend: Some(backend),
             player,
             session,
             library,
+            link_downloads,
             image_cache,
             brand_mark: Arc::new(gpui_kit::Image::from_bytes(
                 gpui_kit::ImageFormat::Png,
@@ -104,6 +108,11 @@ impl AppServices {
             cx.new(|cx| player::Player::new(handle.clone(), cx.background_executor().now()));
         let session = cx.new(|_| session::Session::new(handle.clone()));
         let library = cx.new(|_| library::Library::new(handle.clone()));
+        let choice = store
+            .as_ref()
+            .and_then(|store| store.link_download_choice().ok())
+            .unwrap_or_default();
+        let link_downloads = cx.new(|cx| link_downloads::LinkDownloads::new(choice, cx));
         let image_cache = image_cache::BoundedImageCache::new(cx);
         let brand_mark = Arc::new(gpui_kit::Image::from_bytes(
             gpui_kit::ImageFormat::Png,
@@ -172,6 +181,7 @@ impl AppServices {
             player,
             session,
             library,
+            link_downloads,
             image_cache,
             brand_mark,
             media_controls,
@@ -373,6 +383,11 @@ impl AppServices {
         cx.global::<Self>().library.clone()
     }
 
+    /// The songs being saved from links.
+    pub(super) fn link_downloads(cx: &App) -> Entity<link_downloads::LinkDownloads> {
+        cx.global::<Self>().link_downloads.clone()
+    }
+
     /// The Sonder mark, drawn by both the sidebar and the setup screen.
     pub(super) fn brand_mark(cx: &App) -> Arc<gpui_kit::Image> {
         cx.global::<Self>().brand_mark.clone()
@@ -484,6 +499,18 @@ impl AppServices {
             .store
             .as_mut()
             .map(|store| store.set_local_folders(folders))
+    }
+
+    pub(super) fn set_link_download_choice(
+        format: &str,
+        folder: Option<&std::path::Path>,
+        cx: &mut App,
+    ) {
+        if let Some(store) = cx.global_mut::<Self>().store.as_mut()
+            && let Err(error) = store.set_link_download_choice(format, folder)
+        {
+            log::warn!("could not save the download choice: {error:#}");
+        }
     }
 
     pub(super) fn set_autoplay(autoplay: bool, cx: &mut App) -> Option<anyhow::Result<()>> {
