@@ -28,8 +28,6 @@ pub(super) struct LinkPopover {
     links: Vec<String>,
     /// Playlist links the listener chose to save only the first song of.
     first_only: HashSet<String>,
-    /// The clipboard link that filled the field, so the popover can say so.
-    from_clipboard: bool,
     pending_lookup: Option<gpui_kit::Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -49,19 +47,16 @@ impl LinkPopover {
                 }),
                 cx.observe(&downloads, |_, _, cx| cx.notify()),
             ];
-        let mut popover = Self {
+        Self {
             downloads,
             library: services::AppServices::library(cx),
             image_cache: services::AppServices::image_cache(cx),
             input,
             links: Vec::new(),
             first_only: HashSet::new(),
-            from_clipboard: false,
             pending_lookup: None,
             _subscriptions: subscriptions,
-        };
-        popover.fill_from_clipboard(window, cx);
-        popover
+        }
     }
 
     /// Opens ready to type or paste into.
@@ -69,33 +64,24 @@ impl LinkPopover {
         self.input.update(cx, |input, cx| input.focus(window, cx));
     }
 
-    /// A link already on the clipboard is the likeliest thing to paste, so it
-    /// fills an empty field; the popover says where it came from.
-    fn fill_from_clipboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Tests and screenshots must not depend on what the machine copied.
-        if cfg!(test) || !self.input.read(cx).value().is_empty() {
-            return;
-        }
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
-            return;
-        };
-        if link_download::parse_links(&text).is_empty() {
-            return;
-        }
-        self.set_text(&text, window, cx);
-        self.read_links(cx);
-        self.from_clipboard = true;
+    /// Starts a fresh visit: an empty field, ready to type or paste into.
+    pub(super) fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pending_lookup = None;
+        self.links.clear();
+        self.first_only.clear();
+        self.input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.focus(window, cx);
+        cx.notify();
     }
 
     fn set_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
         self.input
             .update(cx, |input, cx| input.set_value(text, window, cx));
-        self.from_clipboard = false;
     }
 
     fn text_changed(&mut self, cx: &mut Context<Self>) {
-        self.from_clipboard = false;
         self.pending_lookup = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(LOOKUP_DELAY).await;
             let _ = this.update(cx, |this, cx| this.read_links(cx));
@@ -633,18 +619,18 @@ impl Render for LinkPopover {
 
         let footer = div()
             .flex()
+            .flex_none()
             .items_center()
             .gap_3()
+            .pt_3()
+            .border_t_1()
+            .border_color(rgb(palette.border))
             .child(
                 div()
                     .flex_1()
                     .text_size(tokens::CAPTION_TEXT)
                     .text_color(rgb(palette.text_muted))
-                    .child(if self.from_clipboard {
-                        "Pasted from your clipboard. Only save audio you have the right to use."
-                    } else {
-                        "Only save audio you have the right to use."
-                    }),
+                    .child("Only save audio you have the right to use."),
             )
             .child(if can_save {
                 components::pill(
@@ -717,7 +703,6 @@ impl Render for LinkPopover {
                     )
                 })
                 .children(options)
-                .child(footer)
                 .when(items > 0, |column| {
                     column.child(
                         div()
@@ -816,5 +801,6 @@ impl Render for LinkPopover {
                     .overflow_y_scroll()
                     .child(body),
             )
+            .when(!folders.is_empty(), |card| card.child(footer))
     }
 }

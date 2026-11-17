@@ -5137,3 +5137,38 @@ fn a_click_neither_skips_the_launch_intro_nor_reaches_the_page_beneath() {
     fixture.update(|window, _| assert!(window.try_find("launch-intro").is_some()));
     assert_eq!(fixture.route(), route);
 }
+
+#[test]
+fn the_link_dialog_always_opens_with_an_empty_field() {
+    let mut fixture = on_local_files();
+    fixture.update(|window, cx| window.click("local-files-link", cx));
+    let workspace = fixture.workspace.clone().expect("workspace fixture");
+    let popover = fixture.update(|_, cx| {
+        workspace
+            .upgrade()
+            .expect("workspace")
+            .read(cx)
+            .local_files
+            .read(cx)
+            .link_popover()
+            .expect("open")
+    });
+    fixture.update(|window, cx| {
+        popover.update(cx, |popover, cx| {
+            popover.fixture_type(
+                "https://example.com/ana-lind/harbour-lights-live",
+                window,
+                cx,
+            )
+        })
+    });
+    fixture.update(|window, _| assert!(window.try_find("link-paste").is_none()));
+
+    // Closing and opening again starts over: no link, nothing found.
+    fixture.update(|window, cx| window.press("escape", cx));
+    fixture.update(|window, cx| window.click("local-files-link", cx));
+    fixture.update(|window, _| {
+        assert!(window.try_find("link-paste").is_some());
+        assert!(window.try_find("link-save").is_none());
+    });
+}

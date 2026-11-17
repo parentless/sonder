@@ -197,6 +197,8 @@ pub(super) struct LibraryTracksPage {
 struct LinkPopoverState {
     popover: Entity<link_popover::LinkPopover>,
     open: bool,
+    /// Counts openings, so each one plays its own entrance.
+    opened: u32,
     _subscription: Subscription,
 }
 
@@ -227,8 +229,9 @@ impl LibraryTracksPage {
         if let Some(state) = self.link.as_mut() {
             state.open = !state.open;
             if state.open {
+                state.opened += 1;
                 let popover = state.popover.clone();
-                popover.update(cx, |popover, cx| popover.focus(window, cx));
+                popover.update(cx, |popover, cx| popover.reset(window, cx));
             }
             cx.notify();
             return;
@@ -247,6 +250,7 @@ impl LibraryTracksPage {
         self.link = Some(LinkPopoverState {
             popover,
             open: true,
+            opened: 1,
             _subscription: subscription,
         });
         cx.notify();
@@ -270,36 +274,48 @@ impl LibraryTracksPage {
     fn link_layer(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let state = self.link.as_ref().filter(|state| state.open)?;
         let size = window.viewport_size();
-        Some(
-            deferred(
-                anchored().position(point(px(0.), px(0.))).child(
-                    div()
-                        .id("link-scrim")
-                        .test_support()
-                        .w(size.width)
-                        .h(size.height)
-                        .occlude()
-                        .bg(appearance::Appearance::palette(cx).scrim)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .on_mouse_down(
-                            gpui_kit::MouseButton::Left,
-                            cx.listener(|this, _, _, cx| {
-                                this.close_link_popover(cx);
-                            }),
-                        )
-                        .child(
-                            div()
-                                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
-                                    cx.stop_propagation()
-                                })
-                                .child(state.popover.clone()),
-                        ),
-                ),
-            )
-            .into_any_element(),
-        )
+        let scrim = appearance::Appearance::palette(cx).scrim;
+        let reduce_motion = cx.reduce_motion();
+        let dialog = div()
+            .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation()
+            })
+            .child(state.popover.clone());
+        let backdrop = div()
+            .id("link-scrim")
+            .test_support()
+            .w(size.width)
+            .h(size.height)
+            .occlude()
+            .flex()
+            .items_center()
+            .justify_center()
+            .on_mouse_down(
+                gpui_kit::MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.close_link_popover(cx);
+                }),
+            );
+        // The dim fades in while the card settles up from just below, so the
+        // dialog arrives where the eye already is. Opening is occasional, so
+        // the motion is short and never repeats.
+        let content: AnyElement = if reduce_motion {
+            backdrop.bg(scrim).child(dialog).into_any_element()
+        } else {
+            backdrop
+                .child(dialog.with_animation(
+                    ("link-dialog", state.opened),
+                    Animation::new(Duration::from_millis(220)).with_easing(ease_out_quint()),
+                    |card, progress| card.opacity(progress).mt(px((1. - progress) * 14.)),
+                ))
+                .with_animation(
+                    ("link-dim", state.opened),
+                    Animation::new(Duration::from_millis(180)).with_easing(ease_out_quint()),
+                    move |backdrop, progress| backdrop.bg(scrim.opacity(progress)),
+                )
+                .into_any_element()
+        };
+        Some(deferred(anchored().position(point(px(0.), px(0.))).child(content)).into_any_element())
     }
 
     #[cfg(test)]

@@ -42,13 +42,25 @@ const MONTHS: &[Month] = &[
         days: &[
             Day {
                 date: "Nov 17, 2026",
-                releases: &[Release {
-                    version: "0.8.50",
-                    notes: &[Note(
-                        Better,
-                        "From link now opens as a dialog in the middle of the window, with the page dimmed behind it. Close it with the × button, Escape, or a click outside.",
-                    )],
-                }],
+                releases: &[
+                    Release {
+                        version: "0.8.51",
+                        notes: &[
+                            Note(
+                                Fixed,
+                                "The From link dialog starts empty every time, and its Download button stays in view however many downloads are listed.",
+                            ),
+                            Note(Better, "The dialog fades in while it settles into place."),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.50",
+                        notes: &[Note(
+                            Better,
+                            "From link now opens as a dialog in the middle of the window, with the page dimmed behind it. Close it with the × button, Escape, or a click outside.",
+                        )],
+                    },
+                ],
             },
             Day {
                 date: "Nov 16, 2026",
