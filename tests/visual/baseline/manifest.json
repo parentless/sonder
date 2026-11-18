@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.56",
+    "cadence": "0.8.57",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "64687a34784f521a5e39b53bd61576b8a55d122a",
-    "lockfile_sha256": "841c0b40ae9702b31e5dce65f45a33cb81ff599ef00199d8ee78821b3cfb5d3e"
+    "revision": "16db6d5c8f0023181df09d75ef42902b5c376fc7",
+    "lockfile_sha256": "a7192ca6f27868c0d3d1137a20f8878e53d4133189e14ffa892a10f296323908"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/44199255585",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/44213324614",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.56",
+      "cadence": "0.8.57",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "64687a34784f521a5e39b53bd61576b8a55d122a",
-      "lockfile_sha256": "841c0b40ae9702b31e5dce65f45a33cb81ff599ef00199d8ee78821b3cfb5d3e"
+      "revision": "16db6d5c8f0023181df09d75ef42902b5c376fc7",
+      "lockfile_sha256": "a7192ca6f27868c0d3d1137a20f8878e53d4133189e14ffa892a10f296323908"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/44199255585"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/44213324614"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -108,6 +108,7 @@
     "0.8.53: only Settings (the version) and the What's new list changed",
     "0.8.54: Home opens with a greeting, shortcut tiles, a Continue card and a New from artists you play shelf above the artist to try, so home, home-permission, home-range-menu and launch-intro change; the track menu gains Credits (track-menu) and the new credits dialog scene is added; Settings shows version 0.8.54; What's new lists the new release",
     "0.8.55: Home's opening rows follow the O design (tiles with flush covers, Continue card, 148 px new-release covers, short Worth a listen rows), so the home, home-permission, home-range-menu and launch-intro references change; Settings shows version 0.8.55; What's new lists the new release",
-    "0.8.56: Home lines up (equal-width grids, covers fill their tiles, concentric corners, Your top artists removed, Save as playlist beside the range on Your top tracks), so home, home-permission, home-range-menu and launch-intro change; albums gain a Save as playlist button (album-tint, album-review); Settings shows version 0.8.56; What's new lists the new release"
+    "0.8.56: Home lines up (equal-width grids, covers fill their tiles, concentric corners, Your top artists removed, Save as playlist beside the range on Your top tracks), so home, home-permission, home-range-menu and launch-intro change; albums gain a Save as playlist button (album-tint, album-review); Settings shows version 0.8.56; What's new lists the new release",
+    "0.8.57: Home loses Your top tracks and the time-range menu (so home-range-menu is removed and home, home-permission and launch-intro-open change), Resume and Sample become 32 px pills with room around them, and the new-releases shelf fits covers to its column; Settings shows version 0.8.57; What's new lists the new release"
   ]
 }
