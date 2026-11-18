@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.58",
+    "cadence": "0.8.59",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "b5fef692f76c140448fcc73f71c22858600a566a",
-    "lockfile_sha256": "1fb6f8bca86317df06e4e5bc6a39ed4b03239a398d7ba60a10201cbe3074a5d1"
+    "revision": "563fb8a18a0f29d1af82f387e3ba3a04bfc1741c",
+    "lockfile_sha256": "487b5671f1c01a42a2daac14de164fc65945843067ea85ec730661bbd474ecca"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/44387065703",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/44400552000",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.58",
+      "cadence": "0.8.59",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "b5fef692f76c140448fcc73f71c22858600a566a",
-      "lockfile_sha256": "1fb6f8bca86317df06e4e5bc6a39ed4b03239a398d7ba60a10201cbe3074a5d1"
+      "revision": "563fb8a18a0f29d1af82f387e3ba3a04bfc1741c",
+      "lockfile_sha256": "487b5671f1c01a42a2daac14de164fc65945843067ea85ec730661bbd474ecca"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/44387065703"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/44400552000"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -110,6 +110,7 @@
     "0.8.55: Home's opening rows follow the O design (tiles with flush covers, Continue card, 148 px new-release covers, short Worth a listen rows), so the home, home-permission, home-range-menu and launch-intro references change; Settings shows version 0.8.55; What's new lists the new release",
     "0.8.56: Home lines up (equal-width grids, covers fill their tiles, concentric corners, Your top artists removed, Save as playlist beside the range on Your top tracks), so home, home-permission, home-range-menu and launch-intro change; albums gain a Save as playlist button (album-tint, album-review); Settings shows version 0.8.56; What's new lists the new release",
     "0.8.57: Home loses Your top tracks and the time-range menu (so home-range-menu is removed and home, home-permission and launch-intro-open change), Resume and Sample become 32 px pills with room around them, and the new-releases shelf fits covers to its column; Settings shows version 0.8.57; What's new lists the new release",
-    "0.8.58: the streaming-refused dialog offers Try again later or Set up Spotify's player with the quiet links below it; Settings (cache scene) and What's new show the new version and release; eight references are new (soloist-setup-key, soloist-setup-pairing)"
+    "0.8.58: the streaming-refused dialog offers Try again later or Set up Spotify's player with the quiet links below it; Settings (cache scene) and What's new show the new version and release; eight references are new (soloist-setup-key, soloist-setup-pairing)",
+    "0.8.59: only Settings (the version) and the What's new list changed; local files now play through any player"
   ]
 }
