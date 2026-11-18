@@ -125,6 +125,15 @@ impl Fixture {
         })
     }
 
+    fn open_soloist_setup(&mut self) {
+        let workspace = self.workspace.clone().expect("workspace fixture");
+        self.update(|_, cx| {
+            workspace
+                .update(cx, |workspace, cx| workspace.open_soloist_setup(cx))
+                .expect("live workspace");
+        });
+    }
+
     fn route(&mut self) -> Route {
         let workspace = self.workspace.clone().expect("workspace fixture");
         self.update(|_, cx| {
@@ -4808,7 +4817,7 @@ fn an_account_spotify_wont_stream_to_stops_and_says_why() {
     deliver(&mut fixture, refused(4));
     fixture.no_commands();
 
-    fixture.update(|window, cx| window.click("streaming-refused-ok", cx));
+    fixture.update(|window, cx| window.click("streaming-refused-later", cx));
     fixture.update(|window, _| assert!(window.try_find("streaming-refused").is_none()));
     fixture.no_commands();
 
@@ -4819,6 +4828,234 @@ fn an_account_spotify_wont_stream_to_stops_and_says_why() {
     fixture.update(|window, _| assert!(window.try_find("streaming-refused").is_none()));
 }
 
+/// Puts the process-wide choice of player back, so one test's setup never
+/// leaks into the next.
+struct RestoreEngine;
+
+impl Drop for RestoreEngine {
+    fn drop(&mut self) {
+        crate::playback::set_engine(crate::playback::Engine::BuiltIn);
+    }
+}
+
+fn setup_command(fixture: &mut Fixture) -> Option<String> {
+    match fixture.backend.commands.try_recv() {
+        Ok(BackendCommand::SetUpSoloist { api_key }) => api_key.or(Some(String::new())),
+        other => panic!(
+            "expected a Soloist setup, got {:?}",
+            other.map(|_| "a command")
+        ),
+    }
+}
+
+#[test]
+fn a_refused_account_can_set_up_spotifys_own_player() {
+    if !crate::soloist::supported() {
+        return;
+    }
+    let _restore = RestoreEngine;
+    let mut fixture = Fixture::new(false);
+    deliver(&mut fixture, BackendEvent::StreamingRefused);
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::Pause)
+    ));
+    fixture.update(|window, cx| window.click("streaming-refused-soloist", cx));
+    // The dialog hands over to the setup, which first asks the backend whether
+    // a key is already saved.
+    assert_eq!(setup_command(&mut fixture), Some(String::new()));
+    fixture.update(|window, _| {
+        assert!(window.try_find("streaming-refused").is_none());
+        assert!(window.try_find("soloist-setup-checking").is_some());
+    });
+
+    deliver(
+        &mut fixture,
+        BackendEvent::SoloistSetup(crate::soloist::Step::NeedKey),
+    );
+    fixture.update(|window, _| assert!(window.try_find("soloist-setup-key").is_some()));
+    // Nothing happens until there is a key to go on with.
+    fixture.update(|window, cx| window.click("soloist-setup-continue", cx));
+    fixture.no_commands();
+    fixture.update(|window, cx| {
+        window.click("soloist-setup-key-input", cx);
+        window.input("  my-key-123 ", cx);
+    });
+    fixture.update(|window, cx| window.click("soloist-setup-continue", cx));
+    assert_eq!(setup_command(&mut fixture), Some("my-key-123".into()));
+
+    deliver(
+        &mut fixture,
+        BackendEvent::SoloistSetup(crate::soloist::Step::Downloading),
+    );
+    fixture.update(|window, _| assert!(window.try_find("soloist-setup-downloading").is_some()));
+    deliver(
+        &mut fixture,
+        BackendEvent::SoloistSetup(crate::soloist::Step::Pairing),
+    );
+    fixture.update(|window, _| assert!(window.try_find("soloist-setup-pairing").is_some()));
+
+    // Once Spotify's player is up, the dialog closes and the choice is kept.
+    deliver(
+        &mut fixture,
+        BackendEvent::SoloistSetup(crate::soloist::Step::Done),
+    );
+    fixture.update(|window, cx| {
+        assert!(window.try_find("soloist-setup-pairing").is_none());
+        assert_eq!(
+            services::AppServices::preferences(cx).player,
+            crate::playback::Engine::Soloist
+        );
+    });
+    fixture.no_commands();
+}
+
+#[test]
+fn a_failed_setup_says_why_and_can_try_the_saved_key_again() {
+    if !crate::soloist::supported() {
+        return;
+    }
+    let _restore = RestoreEngine;
+    let mut fixture = Fixture::new(false);
+    fixture.open_soloist_setup();
+    assert_eq!(setup_command(&mut fixture), Some(String::new()));
+    deliver(
+        &mut fixture,
+        BackendEvent::SoloistSetup(crate::soloist::Step::Failed(
+            "Spotify’s player stopped as it started".into(),
+        )),
+    );
+    fixture.update(|window, _| {
+        assert!(window.try_find("soloist-setup-key").is_some());
+        assert!(window.try_find("soloist-setup-error").is_some());
+    });
+    // The key was saved before, so trying again needs nothing pasted.
+    fixture.update(|window, cx| window.click("soloist-setup-continue", cx));
+    assert_eq!(setup_command(&mut fixture), Some(String::new()));
+    fixture.update(|window, _| assert!(window.try_find("soloist-setup-checking").is_some()));
+}
+
+#[test]
+fn leaving_the_setup_stops_it_and_keeps_the_player_as_it_was() {
+    if !crate::soloist::supported() {
+        return;
+    }
+    let _restore = RestoreEngine;
+    let mut fixture = Fixture::new(false);
+    fixture.open_soloist_setup();
+    assert_eq!(setup_command(&mut fixture), Some(String::new()));
+    deliver(
+        &mut fixture,
+        BackendEvent::SoloistSetup(crate::soloist::Step::Pairing),
+    );
+    fixture.press("escape");
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::CancelSoloistSetup)
+    ));
+    fixture.update(|window, cx| {
+        assert!(window.try_find("soloist-setup-pairing").is_none());
+        assert_eq!(
+            services::AppServices::preferences(cx).player,
+            crate::playback::Engine::BuiltIn
+        );
+    });
+    fixture.no_commands();
+}
+
+#[test]
+fn settings_switches_between_the_built_in_player_and_spotifys() {
+    if !crate::soloist::supported() {
+        return;
+    }
+    let _restore = RestoreEngine;
+    let mut fixture = Fixture::new(true);
+    fixture.update(|window, cx| {
+        window.scroll(
+            "settings-page",
+            gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-300.))),
+            cx,
+        );
+    });
+    // Choosing Spotify's player starts its setup rather than switching blind.
+    fixture.update(|window, cx| window.click(("settings-player", 1usize), cx));
+    assert_eq!(setup_command(&mut fixture), Some(String::new()));
+    fixture.update(|_, cx| {
+        assert_eq!(
+            services::AppServices::preferences(cx).player,
+            crate::playback::Engine::BuiltIn
+        );
+    });
+    deliver(
+        &mut fixture,
+        BackendEvent::SoloistSetup(crate::soloist::Step::Done),
+    );
+    fixture.update(|_, cx| {
+        assert_eq!(
+            services::AppServices::preferences(cx).player,
+            crate::playback::Engine::Soloist
+        );
+    });
+    // And back again: the backend is told, and the choice is kept.
+    fixture.update(|window, cx| window.click(("settings-player", 0usize), cx));
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::UseBuiltInPlayer)
+    ));
+    fixture.update(|_, cx| {
+        assert_eq!(
+            services::AppServices::preferences(cx).player,
+            crate::playback::Engine::BuiltIn
+        );
+    });
+    fixture.no_commands();
+}
+
+#[test]
+fn spotifys_player_that_wont_connect_can_be_set_up_again_or_swapped_out() {
+    if !crate::soloist::supported() {
+        return;
+    }
+    let _restore = RestoreEngine;
+    let mut fixture = Fixture::new(false);
+    fixture.update(|_, cx| {
+        let _ = services::AppServices::set_player(crate::playback::Engine::Soloist, cx);
+    });
+    deliver(
+        &mut fixture,
+        BackendEvent::PlaybackConnectFailed("Spotify’s player stopped as it started".into()),
+    );
+    fixture.update(|window, _| {
+        assert!(window.try_find("playback-not-connected").is_some());
+        assert!(window.try_find("playback-not-connected-built-in").is_some());
+    });
+    // Setting up again means redoing Spotify's player, not the browser sign-in.
+    fixture.update(|window, cx| window.click("playback-not-connected-reset", cx));
+    assert_eq!(setup_command(&mut fixture), Some(String::new()));
+    fixture.update(|window, _| assert!(window.try_find("soloist-setup-checking").is_some()));
+    fixture.press("escape");
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::CancelSoloistSetup)
+    ));
+
+    deliver(
+        &mut fixture,
+        BackendEvent::PlaybackConnectFailed("Spotify’s player stopped as it started".into()),
+    );
+    fixture.update(|window, cx| window.click("playback-not-connected-built-in", cx));
+    assert!(matches!(
+        fixture.backend.commands.try_recv(),
+        Ok(BackendCommand::UseBuiltInPlayer)
+    ));
+    fixture.update(|_, cx| {
+        assert_eq!(
+            services::AppServices::preferences(cx).player,
+            crate::playback::Engine::BuiltIn
+        );
+    });
+}
+
 #[test]
 fn a_song_that_plays_clears_the_account_message() {
     let mut fixture = Fixture::new(false);
@@ -4827,7 +5064,7 @@ fn a_song_that_plays_clears_the_account_message() {
         fixture.backend.commands.try_recv(),
         Ok(BackendCommand::Pause)
     ));
-    fixture.update(|window, cx| window.click("streaming-refused-ok", cx));
+    fixture.update(|window, cx| window.click("streaming-refused-later", cx));
     fixture.player_event(BackendEvent::PlaybackContext {
         current: track(3),
         next: Vec::new(),

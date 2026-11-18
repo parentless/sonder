@@ -106,8 +106,9 @@ struct PlaybackOAuthToken {
     refresh_token: String,
 }
 
+/// Spotify's streaming session run inside Sonder, with librespot.
 #[derive(Clone)]
-pub struct Playback {
+pub struct BuiltIn {
     player: Arc<Player>,
     mixer: Arc<dyn Mixer>,
     session: Session,
@@ -144,7 +145,185 @@ impl LocalFilePaths {
     }
 }
 
+/// Which player makes the sound. The built-in one is librespot; Soloist is
+/// Spotify's own, for accounts Spotify won't unlock songs for in the first.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Engine {
+    #[default]
+    BuiltIn,
+    Soloist,
+}
+
+static SOLOIST_ENGINE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_engine(engine: Engine) {
+    SOLOIST_ENGINE.store(engine == Engine::Soloist, Ordering::Relaxed);
+}
+
+pub fn engine() -> Engine {
+    if SOLOIST_ENGINE.load(Ordering::Relaxed) {
+        Engine::Soloist
+    } else {
+        Engine::BuiltIn
+    }
+}
+
+/// The live player, whichever engine it is.
+#[derive(Clone)]
+pub enum Playback {
+    BuiltIn(BuiltIn),
+    Soloist {
+        player: crate::soloist::Player,
+        /// A built-in session kept only to ask Spotify for radio, which
+        /// Soloist can't. Without it, autoplay has nothing to play.
+        radio: Option<BuiltIn>,
+    },
+}
+
+/// Why Spotify's player can't play a local file.
+const LOCAL_FILES_NEED_BUILT_IN: &str = "Local files need Sonder’s built-in player";
+
 impl Playback {
+    pub(crate) async fn prepare_authorization() -> Result<PlaybackAuthorization> {
+        BuiltIn::prepare_authorization().await
+    }
+
+    /// Connects whichever player the listener chose, with what is saved.
+    pub(crate) async fn connect(
+        load_saved_token: bool,
+        authorization: Option<PlaybackAuthorization>,
+    ) -> Result<Self> {
+        match engine() {
+            Engine::BuiltIn => BuiltIn::connect(load_saved_token, authorization)
+                .await
+                .map(Self::BuiltIn),
+            Engine::Soloist => Self::connect_soloist(None, false, |_| {}).await,
+        }
+    }
+
+    pub async fn reconnect() -> Result<Self> {
+        match engine() {
+            Engine::BuiltIn => BuiltIn::reconnect().await.map(Self::BuiltIn),
+            Engine::Soloist => Self::connect_soloist(None, false, |_| {}).await,
+        }
+    }
+
+    /// Starts Spotify's own player. With a key it is a setup, which may wait
+    /// for the listener to choose the player in a Spotify app; without one it
+    /// is the saved player coming back.
+    pub(crate) async fn connect_soloist(
+        key: Option<String>,
+        interactive: bool,
+        report: impl Fn(crate::soloist::Step) + Send + Sync,
+    ) -> Result<Self> {
+        let key = match key {
+            Some(key) => key,
+            None => crate::soloist::saved_key().await?.ok_or_else(|| {
+                crate::soloist::SetupError(
+                    "Spotify’s player isn’t set up yet. Set it up again from Settings.".to_owned(),
+                )
+            })?,
+        };
+        let player = crate::soloist::connect(key, interactive, report).await?;
+        // Soloist plays; it can't ask for radio. A short built-in session can,
+        // and a failure only costs autoplay.
+        let radio = match tokio::time::timeout(Duration::from_secs(15), BuiltIn::reconnect()).await
+        {
+            Ok(Ok(radio)) => Some(radio),
+            Ok(Err(error)) => {
+                log::info!("soloist: no radio session: {error:#}");
+                None
+            }
+            Err(_) => {
+                log::info!("soloist: the radio session took too long");
+                None
+            }
+        };
+        Ok(Self::Soloist { player, radio })
+    }
+
+    /// Loads a Spotify track, or a local file by the path its track carries.
+    /// `uri` is the track's [`playback_uri`].
+    pub fn load_track(&self, track: &Track, uri: SpotifyUri, playing: bool, position_ms: u32) {
+        match self {
+            Self::BuiltIn(player) => player.load_track(track, uri, playing, position_ms),
+            Self::Soloist { player, .. } => {
+                let spotify = if track.is_local() {
+                    None
+                } else {
+                    uri.to_uri().ok()
+                };
+                match spotify {
+                    Some(uri) => player.load(&uri, playing, position_ms),
+                    None => player.reject(
+                        &uri.to_string(),
+                        if track.is_local() {
+                            LOCAL_FILES_NEED_BUILT_IN
+                        } else {
+                            "Spotify’s player can’t play this"
+                        },
+                    ),
+                }
+            }
+        }
+    }
+
+    pub fn play(&self) {
+        match self {
+            Self::BuiltIn(player) => player.play(),
+            Self::Soloist { player, .. } => player.play(),
+        }
+    }
+
+    pub fn pause(&self) {
+        match self {
+            Self::BuiltIn(player) => player.pause(),
+            Self::Soloist { player, .. } => player.pause(),
+        }
+    }
+
+    pub fn seek(&self, position_ms: u32) {
+        match self {
+            Self::BuiltIn(player) => player.seek(position_ms),
+            Self::Soloist { player, .. } => player.seek(position_ms),
+        }
+    }
+
+    pub fn set_volume(&self, volume: f32) {
+        match self {
+            Self::BuiltIn(player) => player.set_volume(volume),
+            Self::Soloist { player, .. } => player.set_volume(volume),
+        }
+    }
+
+    pub fn stop(&self) {
+        match self {
+            Self::BuiltIn(player) => player.stop(),
+            Self::Soloist { player, .. } => player.stop(),
+        }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        match self {
+            Self::BuiltIn(player) => player.is_connected(),
+            Self::Soloist { player, .. } => player.is_connected(),
+        }
+    }
+
+    pub async fn radio_track_uris(&self, seed_uri: &str) -> Result<Vec<String>> {
+        match self {
+            Self::BuiltIn(player) => player.radio_track_uris(seed_uri).await,
+            Self::Soloist {
+                radio: Some(radio), ..
+            } => radio.radio_track_uris(seed_uri).await,
+            Self::Soloist { radio: None, .. } => Err(anyhow!(
+                "Radio isn’t available while Spotify’s player is the only one connected"
+            )),
+        }
+    }
+}
+
+impl BuiltIn {
     pub(crate) async fn prepare_authorization() -> Result<PlaybackAuthorization> {
         let listener = TcpListener::bind("127.0.0.1:8898")
             .await

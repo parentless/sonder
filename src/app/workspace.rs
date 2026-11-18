@@ -40,9 +40,17 @@ pub(super) struct Workspace {
     pub(super) credits: Option<CreditsOpen>,
     /// Counts openings of the credits, so each plays its own entrance.
     pub(super) credits_opened: u32,
+    /// Setting up Spotify's own player, while that dialog is open.
+    pub(super) soloist_setup: Option<SoloistSetupOpen>,
     wheel_scroll: Rc<std::cell::RefCell<smooth_scroll::WheelScroll>>,
     wheel_route: Option<Route>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The open Soloist setup and the subscription that follows it.
+pub(super) struct SoloistSetupOpen {
+    pub(super) dialog: Entity<soloist_setup::SoloistSetup>,
+    pub(super) _subscription: Subscription,
 }
 
 /// The open credits dialog and the subscription that closes it.
@@ -175,6 +183,9 @@ impl Workspace {
                         this.last_error = Some(error);
                     }
                     cx.notify();
+                }
+                settings::SettingsEvent::SetPlayer(player) => {
+                    this.choose_player(*player, cx);
                 }
                 settings::SettingsEvent::SetStreamingQuality(quality) => {
                     let result = services::AppServices::set_streaming_quality(*quality, cx);
@@ -342,6 +353,7 @@ impl Workspace {
             intro,
             credits: None,
             credits_opened: 0,
+            soloist_setup: None,
             last_error: None,
             action_notice: None,
             radio_request_id: 0,
@@ -536,7 +548,7 @@ impl Workspace {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        if !self.session.read(cx).is_ready() {
+        if !self.session.read(cx).is_ready() || self.soloist_setup.is_some() {
             return None;
         }
         let problem = self.player.read(cx).problem()?.clone();
@@ -550,6 +562,7 @@ impl Workspace {
             palette,
             &problem,
             account_name,
+            services::AppServices::preferences(cx).player,
             window,
             move |action, cx| {
                 let _ = workspace.update(cx, |workspace, cx| {
@@ -700,6 +713,10 @@ impl Render for Workspace {
                 root.child(layer)
             })
             .when_some(playback_help, |root, dialog| root.child(deferred(dialog)))
+            .when_some(
+                self.soloist_setup.as_ref().map(|open| open.dialog.clone()),
+                |root, dialog| root.child(deferred(dialog)),
+            )
             .when(app_change_open, |root| {
                 root.child(deferred(self.app_change_confirmation(palette, cx)))
             })

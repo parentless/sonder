@@ -145,6 +145,9 @@ pub struct AppPreferences {
     /// Starts Sonder when the listener signs in to Windows.
     pub launch_at_login: bool,
     pub streaming_quality: StreamingQuality,
+    /// Which player makes the sound. Spotify's own is for accounts Spotify
+    /// won't unlock songs for in the built-in one.
+    pub player: crate::playback::Engine,
     /// Shows the lyrics button in the player. Off until the listener turns it
     /// on, because lyrics come from a third-party service.
     pub lyrics_view: LyricsView,
@@ -199,6 +202,7 @@ impl Default for AppPreferences {
             keep_in_tray: false,
             launch_at_login: false,
             streaming_quality: StreamingQuality::default(),
+            player: crate::playback::Engine::default(),
             lyrics_view: LyricsView::default(),
         }
     }
@@ -441,6 +445,10 @@ impl Store {
             .and_then(|value| value.parse().ok())
             .and_then(StreamingQuality::from_kbps)
             .unwrap_or_default();
+        let player = match self.preference("player")?.as_deref() {
+            Some("soloist") => crate::playback::Engine::Soloist,
+            _ => crate::playback::Engine::BuiltIn,
+        };
         let lyrics_view = self
             .preference("lyrics_view")?
             .and_then(|value| LyricsView::from_key(&value))
@@ -470,6 +478,7 @@ impl Store {
             keep_in_tray,
             launch_at_login,
             streaming_quality,
+            player,
             lyrics_view,
         })
     }
@@ -555,6 +564,16 @@ impl Store {
 
     pub fn set_streaming_quality(&mut self, quality: StreamingQuality) -> Result<()> {
         self.set_preference("streaming_quality", &quality.kbps().to_string())
+    }
+
+    pub fn set_player(&mut self, player: crate::playback::Engine) -> Result<()> {
+        self.set_preference(
+            "player",
+            match player {
+                crate::playback::Engine::BuiltIn => "built-in",
+                crate::playback::Engine::Soloist => "soloist",
+            },
+        )
     }
 
     pub fn set_launch_at_login(&mut self, launch: bool) -> Result<()> {
@@ -1469,6 +1488,7 @@ mod tests {
             .set_streaming_quality(super::StreamingQuality::High)
             .unwrap();
         store.set_lyrics_view(super::LyricsView::Strip).unwrap();
+        store.set_player(crate::playback::Engine::Soloist).unwrap();
         assert_eq!(
             store.preferences().unwrap(),
             AppPreferences {
@@ -1481,8 +1501,21 @@ mod tests {
                 keep_in_tray: true,
                 launch_at_login: true,
                 streaming_quality: super::StreamingQuality::High,
+                player: crate::playback::Engine::Soloist,
                 lyrics_view: super::LyricsView::Strip,
             }
+        );
+        // Going back to the built-in player is remembered too, and anything
+        // unreadable means the built-in one.
+        store.set_player(crate::playback::Engine::BuiltIn).unwrap();
+        assert_eq!(
+            store.preferences().unwrap().player,
+            crate::playback::Engine::BuiltIn
+        );
+        store.set_preference("player", "something-else").unwrap();
+        assert_eq!(
+            store.preferences().unwrap().player,
+            crate::playback::Engine::BuiltIn
         );
     }
 

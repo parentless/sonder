@@ -461,6 +461,15 @@ pub enum BackendCommand {
     /// Forgets the playback sign-in and asks Spotify for a new one in the
     /// browser, keeping the account's library sign-in and queue.
     ResetPlayback,
+    /// Starts Spotify's own player (Soloist). With a key it is a fresh setup;
+    /// without one it uses the key saved before, or asks for one.
+    SetUpSoloist {
+        api_key: Option<String>,
+    },
+    /// Gives up a Soloist setup that is still waiting.
+    CancelSoloistSetup,
+    /// Plays through Sonder's built-in player again, and stops Soloist.
+    UseBuiltInPlayer,
     Next,
     Previous,
     Seek(u32),
@@ -563,6 +572,8 @@ pub enum BackendEvent {
     PlaybackApprovalRequested {
         url: String,
     },
+    /// Where setting up Spotify's own player has got to.
+    SoloistSetup(crate::soloist::Step),
     /// The account is on the free plan, which cannot stream through Sonder.
     PremiumRequired,
     /// Spotify refuses to unlock songs for this account, whatever the song.
@@ -1621,6 +1632,18 @@ impl Worker {
                 self.reset_playback().await;
                 Ok(())
             }
+            BackendCommand::SetUpSoloist { api_key } => {
+                self.set_up_soloist(api_key).await;
+                Ok(())
+            }
+            BackendCommand::CancelSoloistSetup => {
+                self.cancel_soloist_setup();
+                Ok(())
+            }
+            BackendCommand::UseBuiltInPlayer => {
+                self.use_built_in_player();
+                Ok(())
+            }
             BackendCommand::MarkPlayed(track) => self.mark_played(track).await,
             BackendCommand::SetShuffle(enabled) => {
                 self.shuffle = enabled;
@@ -2210,12 +2233,72 @@ impl Worker {
         });
     }
 
+    /// Starts Spotify's own player. A working player stays until the new one
+    /// is ready, so a setup that fails costs nothing.
+    async fn set_up_soloist(&mut self, api_key: Option<String>) {
+        let given = api_key
+            .map(|key| key.trim().to_owned())
+            .filter(|key| !key.is_empty());
+        let step = |step| BackendEvent::SoloistSetup(step);
+        if !crate::soloist::supported() {
+            let _ = self
+                .events
+                .send(step(crate::soloist::Step::Failed(
+                    "Spotify doesn’t make its player for this computer yet.".to_owned(),
+                )))
+                .await;
+            return;
+        }
+        let key = match given {
+            Some(key) => key,
+            None => match crate::soloist::saved_key().await {
+                Ok(Some(key)) => key,
+                Ok(None) => {
+                    let _ = self.events.send(step(crate::soloist::Step::NeedKey)).await;
+                    return;
+                }
+                Err(error) => {
+                    let _ = self
+                        .events
+                        .send(step(crate::soloist::Step::Failed(format!("{error:#}"))))
+                        .await;
+                    return;
+                }
+            },
+        };
+        self.connection.begin_soloist_setup(key, &self.events);
+    }
+
+    fn cancel_soloist_setup(&mut self) {
+        if self.connection.setup {
+            log::info!("soloist: setup cancelled");
+            abort_task(&mut self.connection.connect);
+            self.connection.setup = false;
+        }
+    }
+
+    fn use_built_in_player(&mut self) {
+        self.cancel_soloist_setup();
+        crate::playback::set_engine(crate::playback::Engine::BuiltIn);
+        self.retry_playback();
+    }
+
     async fn finish_connect(&mut self, connected: Finished<Result<Playback>>) {
         self.connection.connect = None;
+        let setup = std::mem::take(&mut self.connection.setup);
         match connected {
             Some(Ok(Ok(player))) => {
                 log::info!("playback: connected");
+                if matches!(player, Playback::Soloist { .. }) {
+                    crate::playback::set_engine(crate::playback::Engine::Soloist);
+                }
                 self.connection.adopt(player, &self.events);
+                if setup {
+                    let _ = self
+                        .events
+                        .send(BackendEvent::SoloistSetup(crate::soloist::Step::Done))
+                        .await;
+                }
                 self.playback_credentials_invalidated = false;
                 if let Err(error) = self.store.set_playback_credentials_invalidated(false).await {
                     send_error(&self.events, error).await;
@@ -2244,7 +2327,19 @@ impl Worker {
                     .fail_pending_play(&error, &self.events)
                     .await;
                 self.pending_playlist_cursor = None;
-                if error
+                if setup {
+                    log::warn!("soloist: setup failed: {error:#}");
+                    let message = match error.downcast_ref::<crate::soloist::SetupError>() {
+                        Some(error) => error.to_string(),
+                        None => format!("{error:#}"),
+                    };
+                    let _ = self
+                        .events
+                        .send(BackendEvent::SoloistSetup(crate::soloist::Step::Failed(
+                            message,
+                        )))
+                        .await;
+                } else if error
                     .downcast_ref::<crate::playback::PremiumRequired>()
                     .is_some()
                 {
@@ -3160,6 +3255,8 @@ struct PlaybackConnection {
     /// The connect in flight is replacing a dropped session rather than starting
     /// a fresh one, so playback must not be restored on top of it.
     connect_restoring: bool,
+    /// The connect in flight is a Soloist setup the listener is watching.
+    setup: bool,
     /// A play requested while the session was still connecting, started as
     /// soon as it is up so the first click after launch is not lost.
     pending_play: Option<(Vec<Track>, usize)>,
@@ -3203,6 +3300,8 @@ impl PlaybackConnection {
     }
 
     fn adopt(&mut self, player: Playback, events: &EventSender) {
+        // A player being replaced stops with its own observer.
+        self.disconnect();
         self.observer = Some(observe_playback(&player, events));
         self.player = Some(player);
     }
@@ -3222,6 +3321,33 @@ impl PlaybackConnection {
             request.load_saved_token,
             request.authorization,
         )));
+    }
+
+    /// Starts Spotify's own player alongside whatever plays now, reporting each
+    /// step as it goes.
+    fn begin_soloist_setup(&mut self, key: String, events: &EventSender) {
+        self.abort_attempts();
+        self.reconnect_pending = false;
+        self.setup = true;
+        let events = events.clone();
+        self.connect = Some(tokio::spawn(async move {
+            let (steps, mut reports) = tokio::sync::mpsc::unbounded_channel();
+            let forward = tokio::spawn({
+                let events = events.clone();
+                async move {
+                    while let Some(step) = reports.recv().await {
+                        let _ = events.send(BackendEvent::SoloistSetup(step)).await;
+                    }
+                }
+            });
+            let player = Playback::connect_soloist(Some(key), true, move |step| {
+                let _ = steps.send(step);
+            })
+            .await;
+            // Every step is out before the result is.
+            let _ = forward.await;
+            player
+        }));
     }
 
     /// Starts a reconnect attempt when the session dropped, unless one is
@@ -3613,6 +3739,67 @@ async fn logout_account(store: BlockingStore, spotify: Spotify) -> Result<()> {
 const SONG_REFUSED: &str = "Spotify wouldn’t unlock this song";
 
 fn observe_playback(player: &Playback, events: &EventSender) -> tokio::task::JoinHandle<()> {
+    match player {
+        Playback::BuiltIn(player) => observe_built_in(player, events),
+        Playback::Soloist { player, .. } => observe_soloist(player, events),
+    }
+}
+
+/// Passes on what Spotify's own player reports. It tells each song's story
+/// itself, so there is no key to read and nothing to decode here.
+fn observe_soloist(
+    player: &crate::soloist::Player,
+    events: &EventSender,
+) -> tokio::task::JoinHandle<()> {
+    use crate::soloist::Signal;
+    let mut signals = player.signals();
+    let event_sender = events.clone();
+    tokio::spawn(async move {
+        loop {
+            let signal = match signals.recv().await {
+                Ok(signal) => signal,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            let event = match signal {
+                Signal::Loading { uri } => BackendEvent::Loading { spotify_uri: uri },
+                Signal::Playing { uri, position_ms } => {
+                    let _ = event_sender
+                        .send_ordered(BackendEvent::PositionChanged {
+                            spotify_uri: uri.clone(),
+                            position_ms,
+                        })
+                        .await;
+                    BackendEvent::Playing { spotify_uri: uri }
+                }
+                Signal::Paused { uri, position_ms } => {
+                    let _ = event_sender
+                        .send_ordered(BackendEvent::PositionChanged {
+                            spotify_uri: uri.clone(),
+                            position_ms,
+                        })
+                        .await;
+                    BackendEvent::Paused { spotify_uri: uri }
+                }
+                Signal::Position { uri, position_ms } => BackendEvent::PositionChanged {
+                    spotify_uri: uri,
+                    position_ms,
+                },
+                Signal::EndOfTrack { uri } => BackendEvent::EndOfTrack { spotify_uri: uri },
+                Signal::Unavailable { uri, reason } => BackendEvent::TrackFailed {
+                    spotify_uri: uri,
+                    error: reason.to_owned(),
+                },
+            };
+            let _ = event_sender.send(event).await;
+        }
+    })
+}
+
+fn observe_built_in(
+    player: &crate::playback::BuiltIn,
+    events: &EventSender,
+) -> tokio::task::JoinHandle<()> {
     let mut player_events = player.events();
     let mut key_outcomes = Some(player.key_outcomes());
     let event_sender = events.clone();

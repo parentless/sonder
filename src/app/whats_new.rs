@@ -42,23 +42,38 @@ const MONTHS: &[Month] = &[
         days: &[
             Day {
                 date: "Nov 18, 2026",
-                releases: &[Release {
-                    version: "0.8.57",
-                    notes: &[
-                        Note(
-                            Better,
-                            "Resume and Sample are smaller, quieter buttons with room around them, so they sit inside their card and row instead of out-weighing them.",
-                        ),
-                        Note(
-                            Better,
-                            "New from artists you play shows more albums as the window gets wider, instead of spreading three covers far apart.",
-                        ),
-                        Note(
-                            Better,
-                            "Your top tracks and the time range are gone from Home, which now ends after Worth a listen. Save as playlist stays on every album.",
-                        ),
-                    ],
-                }],
+                releases: &[
+                    Release {
+                        version: "0.8.58",
+                        notes: &[
+                            Note(
+                                New,
+                                "Spotify’s own player: when Spotify won’t stream to an account in Sonder’s built-in player, you can set up Spotify’s Soloist instead, or wait and try again. Settings has a Player choice too. It needs your own Soloist key from the Spotify developer dashboard, and picking “Sonder” in a Spotify app once.",
+                            ),
+                            Note(
+                                Better,
+                                "The refused-account message no longer blames accounts made since 2024. It says some accounts get refused for a while and others every time.",
+                            ),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.57",
+                        notes: &[
+                            Note(
+                                Better,
+                                "Resume and Sample are smaller, quieter buttons with room around them, so they sit inside their card and row instead of out-weighing them.",
+                            ),
+                            Note(
+                                Better,
+                                "New from artists you play shows more albums as the window gets wider, instead of spreading three covers far apart.",
+                            ),
+                            Note(
+                                Better,
+                                "Your top tracks and the time range are gone from Home, which now ends after Worth a listen. Save as playlist stays on every album.",
+                            ),
+                        ],
+                    },
+                ],
             },
             Day {
                 date: "Nov 17, 2026",

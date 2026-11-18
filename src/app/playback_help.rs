@@ -16,20 +16,32 @@ pub(super) enum PlaybackHelpAction {
     Retry,
     Reset,
     UseAnotherAccount,
+    /// Set up Spotify's own player, which may play where the built-in one can't.
+    SetUpSoloist,
+    /// Go back to the built-in player.
+    UseBuiltIn,
 }
 
 pub(super) fn playback_problem_dialog(
     palette: CadencePalette,
     problem: &PlaybackProblem,
     account_name: Option<SharedString>,
+    engine: crate::playback::Engine,
     window: &Window,
     act: impl Fn(PlaybackHelpAction, &mut App) + Clone + 'static,
 ) -> Div {
     let card = match problem {
         PlaybackProblem::AccountRefused => account_refused(palette, account_name, window, act),
-        PlaybackProblem::NotConnected { detail } => not_connected(palette, detail, window, act),
+        PlaybackProblem::NotConnected { detail } => {
+            not_connected(palette, detail, engine, window, act)
+        }
         PlaybackProblem::AwaitingApproval { url } => awaiting_approval(palette, url, window, act),
     };
+    overlay(palette, card)
+}
+
+/// Dims the window and sits a dialog card in its middle.
+pub(super) fn overlay(palette: CadencePalette, card: Stateful<Div>) -> Div {
     div()
         .absolute()
         .inset_0()
@@ -51,7 +63,9 @@ fn account_refused(
         || "this account".to_owned(),
         |name| format!("{name}’s account"),
     );
+    let soloist = crate::soloist::supported();
     let use_another = act.clone();
+    let set_up = act.clone();
     let dismiss = act;
     dialog_card(palette, "streaming-refused")
         .child(badge(palette, CadenceIcon::Lock))
@@ -59,37 +73,63 @@ fn account_refused(
         .child(body(
             palette,
             format!(
-                "Spotify refuses to unlock songs for {who} in players like Sonder. It does this to many accounts made since 2024, and nothing on this computer can change it."
+                "Spotify is refusing to unlock songs for {who} in Sonder’s built-in player. Some accounts get this for a while and then it clears. Others get it every time."
             ),
         ))
         .child(note(
             palette,
-            "Your library, playlists and search still work here.",
+            if soloist {
+                "Spotify’s own player may play songs that Sonder’s can’t. Or wait a bit and try again. Your library, playlists and search still work here."
+            } else {
+                "Wait a bit and try again, or use another account. Your library, playlists and search still work here."
+            },
         ))
         .child(
-            actions()
+            div().mt_6().flex().justify_end().child(
+                buttons()
+                    .child(
+                        components::settings_button(
+                            palette,
+                            "streaming-refused-later",
+                            if soloist { "Try again later" } else { "OK" },
+                        )
+                        .test_support()
+                        .on_click({
+                            let dismiss = dismiss.clone();
+                            move |_, _, cx| dismiss(PlaybackHelpAction::Dismiss, cx)
+                        }),
+                    )
+                    .when(soloist, |row| {
+                        row.child(
+                            primary_button(
+                                palette,
+                                "streaming-refused-soloist",
+                                "Set up Spotify’s player",
+                            )
+                            .test_support()
+                            .on_click(move |_, _, cx| set_up(PlaybackHelpAction::SetUpSoloist, cx)),
+                        )
+                    }),
+            ),
+        )
+        .child(
+            div()
+                .mt_4()
+                .flex()
+                .items_center()
+                .gap_4()
                 .child(
                     quiet_link(palette, "streaming-refused-why", "Why this happens", window)
                         .on_click(|_, _, cx| cx.open_url(STREAMING_REFUSED_URL)),
                 )
                 .child(
-                    buttons()
-                        .child(
-                            components::settings_button(
-                                palette,
-                                "streaming-refused-switch",
-                                "Use another account",
-                            )
-                            .test_support()
-                            .on_click(move |_, _, cx| {
-                                use_another(PlaybackHelpAction::UseAnotherAccount, cx)
-                            }),
-                        )
-                        .child(
-                            primary_button(palette, "streaming-refused-ok", "OK")
-                                .test_support()
-                                .on_click(move |_, _, cx| dismiss(PlaybackHelpAction::Dismiss, cx)),
-                        ),
+                    quiet_link(
+                        palette,
+                        "streaming-refused-switch",
+                        "Use another account",
+                        window,
+                    )
+                    .on_click(move |_, _, cx| use_another(PlaybackHelpAction::UseAnotherAccount, cx)),
                 ),
         )
 }
@@ -97,18 +137,25 @@ fn account_refused(
 fn not_connected(
     palette: CadencePalette,
     detail: &SharedString,
+    engine: crate::playback::Engine,
     window: &Window,
     act: impl Fn(PlaybackHelpAction, &mut App) + Clone + 'static,
 ) -> Stateful<Div> {
+    let soloist = engine == crate::playback::Engine::Soloist;
     let dismiss = act.clone();
     let retry = act.clone();
+    let built_in = act.clone();
     let reset = act;
     dialog_card(palette, "playback-not-connected")
         .child(badge(palette, CadenceIcon::SpeakerMuted))
         .child(title(palette, "Playback isn’t connected"))
         .child(body(
             palette,
-            "Sonder can show your library, but it can’t play anything until Spotify’s player connects. Setting it up again opens a Spotify page to approve, and usually fixes this.",
+            if soloist {
+                "Sonder can show your library, but it can’t play anything until Spotify’s player connects. Setting it up again checks your key and starts it afresh."
+            } else {
+                "Sonder can show your library, but it can’t play anything until Spotify’s player connects. Setting it up again opens a Spotify page to approve, and usually fixes this."
+            },
         ))
         .when(!detail.is_empty(), |card| {
             card.child(
@@ -131,8 +178,27 @@ fn not_connected(
         .child(
             actions()
                 .child(
-                    quiet_link(palette, "playback-not-connected-later", "Not now", window)
-                        .on_click(move |_, _, cx| dismiss(PlaybackHelpAction::Dismiss, cx)),
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_4()
+                        .child(
+                            quiet_link(palette, "playback-not-connected-later", "Not now", window)
+                                .on_click(move |_, _, cx| dismiss(PlaybackHelpAction::Dismiss, cx)),
+                        )
+                        .when(soloist, |links| {
+                            links.child(
+                                quiet_link(
+                                    palette,
+                                    "playback-not-connected-built-in",
+                                    "Use the built-in player",
+                                    window,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    built_in(PlaybackHelpAction::UseBuiltIn, cx)
+                                }),
+                            )
+                        }),
                 )
                 .child(
                     buttons()
@@ -197,7 +263,7 @@ fn awaiting_approval(
         )
 }
 
-fn dialog_card(palette: CadencePalette, id: &'static str) -> Stateful<Div> {
+pub(super) fn dialog_card(palette: CadencePalette, id: &'static str) -> Stateful<Div> {
     div()
         .id(id)
         .w(tokens::DIALOG_WIDTH)
@@ -212,7 +278,7 @@ fn dialog_card(palette: CadencePalette, id: &'static str) -> Stateful<Div> {
 }
 
 /// A quiet tile that names the kind of problem before the words do.
-fn badge(palette: CadencePalette, glyph: CadenceIcon) -> Div {
+pub(super) fn badge(palette: CadencePalette, glyph: CadenceIcon) -> Div {
     div()
         .size_10()
         .rounded(tokens::CONTROL_RADIUS)
@@ -227,7 +293,7 @@ fn badge(palette: CadencePalette, glyph: CadenceIcon) -> Div {
         ))
 }
 
-fn title(palette: CadencePalette, text: &'static str) -> Div {
+pub(super) fn title(palette: CadencePalette, text: &'static str) -> Div {
     div()
         .mt_4()
         .text_xl()
@@ -236,7 +302,7 @@ fn title(palette: CadencePalette, text: &'static str) -> Div {
         .child(text)
 }
 
-fn body(palette: CadencePalette, text: impl Into<SharedString>) -> Div {
+pub(super) fn body(palette: CadencePalette, text: impl Into<SharedString>) -> Div {
     div()
         .mt_2()
         .text_sm()
@@ -245,7 +311,7 @@ fn body(palette: CadencePalette, text: impl Into<SharedString>) -> Div {
         .child(text.into())
 }
 
-fn note(palette: CadencePalette, text: &'static str) -> Div {
+pub(super) fn note(palette: CadencePalette, text: &'static str) -> Div {
     div()
         .mt_2()
         .text_sm()
@@ -255,15 +321,15 @@ fn note(palette: CadencePalette, text: &'static str) -> Div {
 }
 
 /// A quiet way out on the left, the real choices on the right.
-fn actions() -> Div {
+pub(super) fn actions() -> Div {
     div().mt_6().flex().items_center().justify_between().gap_4()
 }
 
-fn buttons() -> Div {
+pub(super) fn buttons() -> Div {
     div().flex().items_center().gap_2()
 }
 
-fn quiet_link(
+pub(super) fn quiet_link(
     palette: CadencePalette,
     id: &'static str,
     label: &'static str,
@@ -275,7 +341,11 @@ fn quiet_link(
         .child(label)
 }
 
-fn primary_button(palette: CadencePalette, id: &'static str, label: &'static str) -> Stateful<Div> {
+pub(super) fn primary_button(
+    palette: CadencePalette,
+    id: &'static str,
+    label: &'static str,
+) -> Stateful<Div> {
     components::filled_button(palette, id)
         .h_10()
         .px_3p5()

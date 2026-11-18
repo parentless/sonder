@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "cadence"
-version = "0.8.57"
+version = "0.8.58"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -998,6 +998,7 @@ dependencies = [
  "souvlaki",
  "symphonia",
  "tokio",
+ "tokio-tungstenite",
  "url",
  "vergen",
  "windows-sys 0.61.2",

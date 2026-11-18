@@ -102,6 +102,7 @@ impl AppServices {
         // Before the backend can connect playback.
         crate::playback::set_normalisation(preferences.normalise_volume);
         crate::playback::set_streaming_kbps(preferences.streaming_quality.kbps());
+        crate::playback::set_engine(preferences.player);
         let (backend, events) = Backend::start();
         let handle = backend.handle();
         let player =
@@ -536,6 +537,21 @@ impl AppServices {
             crate::playback::set_normalisation(normalise);
         }
         result
+    }
+
+    /// Remembers which player makes the sound. The backend has already
+    /// switched; this keeps the choice for the next launch.
+    pub(super) fn set_player(
+        player: crate::playback::Engine,
+        cx: &mut App,
+    ) -> Option<anyhow::Result<()>> {
+        let services = cx.global_mut::<Self>();
+        services.preferences.player = player;
+        crate::playback::set_engine(player);
+        services
+            .store
+            .as_mut()
+            .map(|store| store.set_player(player))
     }
 
     /// Saves the choice, then adds or removes the Windows login entry. If the

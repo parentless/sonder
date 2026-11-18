@@ -397,6 +397,7 @@ mod session;
 mod settings;
 mod sidebar;
 mod smooth_scroll;
+mod soloist_setup;
 mod tokens;
 mod top_listening;
 mod track_list;

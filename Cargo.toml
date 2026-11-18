@@ -1,6 +1,6 @@
 [package]
 name = "cadence"
-version = "0.8.57"
+version = "0.8.58"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/parentless/sonder"
@@ -35,7 +35,10 @@ rust-embed = { version = "8", features = ["debug-embed"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.53", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.53", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+# Reaches Spotify Soloist, the official player, on this computer's own address.
+# librespot already builds this version.
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "handshake"] }
 url = "2.5"
 percent-encoding = "2.3"
 sha2 = "0.10"

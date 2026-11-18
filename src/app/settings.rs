@@ -11,6 +11,7 @@ pub(super) enum SettingsEvent {
     SetNormaliseVolume(bool),
     SetKeepInTray(bool),
     SetStreamingQuality(StreamingQuality),
+    SetPlayer(crate::playback::Engine),
     SetLaunchAtLogin(bool),
     SetLyricsView(LyricsView),
     SetDiscord(crate::discord::Config),
@@ -344,6 +345,7 @@ impl Settings {
         let keep_in_tray = preferences.keep_in_tray;
         let launch_at_login = preferences.launch_at_login;
         let streaming_quality = preferences.streaming_quality;
+        let player = preferences.player;
 
         let tab = self.tab;
         // The tab list stays put while the selected group scrolls beside it.
@@ -488,6 +490,41 @@ impl Settings {
                                                 ),
                                             )),
                                     )
+                                    .when(crate::soloist::supported() || player == crate::playback::Engine::Soloist, |card| {
+                                        card.child(
+                                            div()
+                                                .mt_5()
+                                                .pt_5()
+                                                .border_t_1()
+                                                .border_color(rgb(palette.border))
+                                                .child(Self::playback_setting_row(
+                                                    palette,
+                                                    "Player",
+                                                    "Spotify’s own player may play on accounts the built-in one can’t. It ignores streaming quality and volume normalization, and can’t play local files.",
+                                                    div().flex().flex_wrap().gap_2().children(
+                                                        [
+                                                            (crate::playback::Engine::BuiltIn, "Built-in"),
+                                                            (crate::playback::Engine::Soloist, "Spotify’s player"),
+                                                        ]
+                                                        .into_iter()
+                                                        .enumerate()
+                                                        .map(|(index, (engine, label))| {
+                                                            components::pill(
+                                                                palette,
+                                                                ("settings-player", index),
+                                                                label,
+                                                                engine == player,
+                                                            )
+                                                            .test_support()
+                                                            .h_9()
+                                                            .on_click(cx.listener(move |_, _, _, cx| {
+                                                                cx.emit(SettingsEvent::SetPlayer(engine));
+                                                            }))
+                                                        }),
+                                                    ),
+                                                )),
+                                        )
+                                    })
                                     .child(
                                         div()
                                             .mt_5()

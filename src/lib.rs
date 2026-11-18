@@ -21,6 +21,7 @@ pub mod playback;
 #[cfg(any(target_os = "windows", test))]
 mod rotating_log;
 mod similar;
+pub mod soloist;
 pub mod spotify;
 pub mod storage;
 mod trash;

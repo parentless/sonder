@@ -61,6 +61,8 @@ enum Scene {
     StreamingRefused,
     PlaybackNotConnected,
     PlaybackApproval,
+    SoloistSetupKey,
+    SoloistSetupPairing,
     SearchArtists,
     SearchGalleryScrolled,
     ShuffleOn,
@@ -129,6 +131,8 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("streaming-refused", Scene::StreamingRefused),
         ("playback-not-connected", Scene::PlaybackNotConnected),
         ("playback-approval", Scene::PlaybackApproval),
+        ("soloist-setup-key", Scene::SoloistSetupKey),
+        ("soloist-setup-pairing", Scene::SoloistSetupPairing),
         ("search-artists", Scene::SearchArtists),
         ("search-gallery-scrolled", Scene::SearchGalleryScrolled),
         ("shuffle-on", Scene::ShuffleOn),
@@ -482,6 +486,19 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                         player.handle_backend_event(event, cx);
                     });
                     // The refused account also pauses the song it was opening.
+                    while backend.commands.try_recv().is_ok() {}
+                }
+                Scene::SoloistSetupKey | Scene::SoloistSetupPairing => {
+                    workspace.open_soloist_setup(cx);
+                    workspace.soloist_setup_step(
+                        if matches!(scene, Scene::SoloistSetupKey) {
+                            crate::soloist::Step::NeedKey
+                        } else {
+                            crate::soloist::Step::Pairing
+                        },
+                        cx,
+                    );
+                    // Opening it asked the backend whether a key is saved.
                     while backend.commands.try_recv().is_ok() {}
                 }
                 Scene::ShuffleOn => { services::AppServices::player(cx).update(cx, |player, cx| player.toggle_shuffle(cx)); }

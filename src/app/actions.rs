@@ -51,6 +51,10 @@ impl Workspace {
         if self.close_credits(cx) {
             return;
         }
+        if self.soloist_setup.is_some() {
+            self.cancel_soloist_setup(cx);
+            return;
+        }
         // An in-flight scrub is the most immediate thing Escape can undo, so it
         // takes precedence over closing whatever is open behind it.
         if self.player_bar.update(cx, |bar, cx| bar.cancel_scrub(cx)) {
@@ -100,8 +104,27 @@ impl Workspace {
                     .update(cx, |player, cx| player.retry_playback(cx));
             }
             PlaybackHelpAction::Reset => {
+                if services::AppServices::preferences(cx).player == crate::playback::Engine::Soloist
+                {
+                    // Spotify's own player has no browser sign-in to redo;
+                    // what needs redoing is its setup.
+                    self.player
+                        .update(cx, |player, cx| player.dismiss_problem(cx));
+                    self.open_soloist_setup(cx);
+                } else {
+                    self.player
+                        .update(cx, |player, cx| player.reset_playback(cx));
+                }
+            }
+            PlaybackHelpAction::SetUpSoloist => {
                 self.player
-                    .update(cx, |player, cx| player.reset_playback(cx));
+                    .update(cx, |player, cx| player.dismiss_problem(cx));
+                self.open_soloist_setup(cx);
+            }
+            PlaybackHelpAction::UseBuiltIn => {
+                self.player
+                    .update(cx, |player, cx| player.dismiss_problem(cx));
+                self.choose_player(crate::playback::Engine::BuiltIn, cx);
             }
             PlaybackHelpAction::UseAnotherAccount => {
                 self.player
@@ -268,6 +291,92 @@ impl Workspace {
             _subscription: subscription,
         });
         cx.notify();
+    }
+
+    /// Opens the setup for Spotify's own player. It asks the backend first, so
+    /// a saved key goes straight on to downloading and pairing.
+    pub(super) fn open_soloist_setup(&mut self, cx: &mut Context<Self>) {
+        if self.soloist_setup.is_some() {
+            return;
+        }
+        let dialog = cx.new(|_| soloist_setup::SoloistSetup::new());
+        let subscription = cx.subscribe(
+            &dialog,
+            |this, _, event: &soloist_setup::SoloistSetupEvent, cx| match event {
+                soloist_setup::SoloistSetupEvent::Start(api_key) => {
+                    services::AppServices::backend(cx).send(
+                        crate::backend::BackendCommand::SetUpSoloist {
+                            api_key: api_key.clone(),
+                        },
+                    );
+                }
+                soloist_setup::SoloistSetupEvent::Cancel => this.cancel_soloist_setup(cx),
+            },
+        );
+        self.soloist_setup = Some(workspace::SoloistSetupOpen {
+            dialog,
+            _subscription: subscription,
+        });
+        services::AppServices::backend(cx)
+            .send(crate::backend::BackendCommand::SetUpSoloist { api_key: None });
+        cx.notify();
+    }
+
+    /// Closes the setup and stops whatever it was waiting for.
+    pub(super) fn cancel_soloist_setup(&mut self, cx: &mut Context<Self>) {
+        if self.soloist_setup.take().is_some() {
+            services::AppServices::backend(cx)
+                .send(crate::backend::BackendCommand::CancelSoloistSetup);
+            cx.notify();
+        }
+    }
+
+    /// Passes what the backend reports on to the open setup. Once Spotify's
+    /// player is ready the choice is saved and the setup closes.
+    pub(super) fn soloist_setup_step(
+        &mut self,
+        step: crate::soloist::Step,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(open) = self.soloist_setup.as_ref() else {
+            return;
+        };
+        if step == crate::soloist::Step::Done {
+            self.soloist_setup = None;
+            self.save_player(crate::playback::Engine::Soloist, cx);
+            cx.notify();
+            return;
+        }
+        open.dialog
+            .update(cx, |dialog, cx| dialog.set_step(step, cx));
+    }
+
+    /// The listener's choice of player, from Settings or a dialog.
+    pub(super) fn choose_player(
+        &mut self,
+        player: crate::playback::Engine,
+        cx: &mut Context<Self>,
+    ) {
+        match player {
+            crate::playback::Engine::Soloist => self.open_soloist_setup(cx),
+            crate::playback::Engine::BuiltIn => {
+                if services::AppServices::preferences(cx).player == crate::playback::Engine::BuiltIn
+                {
+                    return;
+                }
+                services::AppServices::backend(cx)
+                    .send(crate::backend::BackendCommand::UseBuiltInPlayer);
+                self.save_player(crate::playback::Engine::BuiltIn, cx);
+            }
+        }
+    }
+
+    fn save_player(&mut self, player: crate::playback::Engine, cx: &mut Context<Self>) {
+        let result = services::AppServices::set_player(player, cx);
+        let result = services::require_settings_storage(result);
+        if let Some(error) = services::preference_save_error("player", result) {
+            self.last_error = Some(error);
+        }
     }
 
     /// Closes the credits, returning whether they were open.

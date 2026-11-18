@@ -54,6 +54,7 @@ impl Workspace {
                 BackendEvent::Error(error) => {
                     self.last_error = Some(error.into());
                 }
+                BackendEvent::SoloistSetup(step) => self.soloist_setup_step(step, cx),
                 // Consumed by the app-scoped services before the window sees them.
                 BackendEvent::SetupRequired
                 | BackendEvent::SpotifyConfigured { .. }
