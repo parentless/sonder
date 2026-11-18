@@ -500,7 +500,7 @@ impl Settings {
                                                 .child(Self::playback_setting_row(
                                                     palette,
                                                     "Player",
-                                                    "Spotify’s own player may play on accounts the built-in one can’t. It ignores streaming quality and volume normalization, and can’t play local files.",
+                                                    "Spotify’s own player may play on accounts the built-in one can’t. It ignores streaming quality and volume normalization. Local files still play in Sonder.",
                                                     div().flex().flex_wrap().gap_2().children(
                                                         [
                                                             (crate::playback::Engine::BuiltIn, "Built-in"),

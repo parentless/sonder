@@ -2269,6 +2269,20 @@ impl Worker {
         self.connection.begin_soloist_setup(key, &self.events);
     }
 
+    /// With no Spotify player to be had, local files can still play: they
+    /// need nothing from Spotify. A Spotify song fails as it would anyway.
+    fn adopt_local_player(&mut self) {
+        if self.connection.player.is_some() {
+            return;
+        }
+        match crate::playback::BuiltIn::offline() {
+            Ok(local) => self
+                .connection
+                .adopt(Playback::BuiltIn(local), &self.events),
+            Err(error) => log::warn!("playback: no player for local files: {error:#}"),
+        }
+    }
+
     fn cancel_soloist_setup(&mut self) {
         if self.connection.setup {
             log::info!("soloist: setup cancelled");
@@ -2327,6 +2341,7 @@ impl Worker {
                     .fail_pending_play(&error, &self.events)
                     .await;
                 self.pending_playlist_cursor = None;
+                self.adopt_local_player();
                 if setup {
                     log::warn!("soloist: setup failed: {error:#}");
                     let message = match error.downcast_ref::<crate::soloist::SetupError>() {
@@ -3740,8 +3755,15 @@ const SONG_REFUSED: &str = "Spotify wouldn’t unlock this song";
 
 fn observe_playback(player: &Playback, events: &EventSender) -> tokio::task::JoinHandle<()> {
     match player {
-        Playback::BuiltIn(player) => observe_built_in(player, events),
-        Playback::Soloist { player, .. } => observe_soloist(player, events),
+        Playback::BuiltIn(player) => tokio::spawn(observe_built_in(player, events)),
+        Playback::Soloist { player, local, .. } => {
+            // Spotify's player and the one for local files both report here.
+            let soloist = observe_soloist(player, events);
+            let local = observe_built_in(local, events);
+            tokio::spawn(async move {
+                tokio::join!(soloist, local);
+            })
+        }
     }
 }
 
@@ -3750,11 +3772,11 @@ fn observe_playback(player: &Playback, events: &EventSender) -> tokio::task::Joi
 fn observe_soloist(
     player: &crate::soloist::Player,
     events: &EventSender,
-) -> tokio::task::JoinHandle<()> {
+) -> impl std::future::Future<Output = ()> + Send + 'static {
     use crate::soloist::Signal;
     let mut signals = player.signals();
     let event_sender = events.clone();
-    tokio::spawn(async move {
+    async move {
         loop {
             let signal = match signals.recv().await {
                 Ok(signal) => signal,
@@ -3793,17 +3815,17 @@ fn observe_soloist(
             };
             let _ = event_sender.send(event).await;
         }
-    })
+    }
 }
 
 fn observe_built_in(
     player: &crate::playback::BuiltIn,
     events: &EventSender,
-) -> tokio::task::JoinHandle<()> {
+) -> impl std::future::Future<Output = ()> + Send + 'static {
     let mut player_events = player.events();
     let mut key_outcomes = Some(player.key_outcomes());
     let event_sender = events.clone();
-    tokio::spawn(async move {
+    async move {
         let mut keys = crate::playback::KeyRefusals::default();
         // The song being opened, and those already reported as failed, so the
         // player's own late "unavailable" for them is not reported twice.
@@ -3942,7 +3964,7 @@ fn observe_built_in(
                 let _ = event_sender.send(event).await;
             }
         }
-    })
+    }
 }
 
 /// Serves the Local Files index, walking the folders first when asked. The

@@ -174,14 +174,16 @@ pub enum Playback {
     BuiltIn(BuiltIn),
     Soloist {
         player: crate::soloist::Player,
+        /// Plays local files, which Soloist can't.
+        local: BuiltIn,
+        /// Which of the two holds the song now, so play, pause and seek reach
+        /// the right one.
+        local_active: Arc<AtomicBool>,
         /// A built-in session kept only to ask Spotify for radio, which
         /// Soloist can't. Without it, autoplay has nothing to play.
         radio: Option<BuiltIn>,
     },
 }
-
-/// Why Spotify's player can't play a local file.
-const LOCAL_FILES_NEED_BUILT_IN: &str = "Local files need Sonder’s built-in player";
 
 impl Playback {
     pub(crate) async fn prepare_authorization() -> Result<PlaybackAuthorization> {
@@ -239,7 +241,12 @@ impl Playback {
                 None
             }
         };
-        Ok(Self::Soloist { player, radio })
+        Ok(Self::Soloist {
+            player,
+            local: BuiltIn::offline()?,
+            local_active: Arc::new(AtomicBool::new(false)),
+            radio,
+        })
     }
 
     /// Loads a Spotify track, or a local file by the path its track carries.
@@ -247,22 +254,28 @@ impl Playback {
     pub fn load_track(&self, track: &Track, uri: SpotifyUri, playing: bool, position_ms: u32) {
         match self {
             Self::BuiltIn(player) => player.load_track(track, uri, playing, position_ms),
-            Self::Soloist { player, .. } => {
-                let spotify = if track.is_local() {
-                    None
+            Self::Soloist {
+                player,
+                local,
+                local_active,
+                ..
+            } => {
+                let is_local = track.is_local();
+                // Whichever held the last song gives way to the one that takes
+                // the next, so two never play at once.
+                if local_active.swap(is_local, Ordering::AcqRel) != is_local {
+                    if is_local {
+                        player.stop();
+                    } else {
+                        local.stop();
+                    }
+                }
+                if is_local {
+                    local.load_track(track, uri, playing, position_ms);
+                } else if let Ok(uri) = uri.to_uri() {
+                    player.load(&uri, playing, position_ms);
                 } else {
-                    uri.to_uri().ok()
-                };
-                match spotify {
-                    Some(uri) => player.load(&uri, playing, position_ms),
-                    None => player.reject(
-                        &uri.to_string(),
-                        if track.is_local() {
-                            LOCAL_FILES_NEED_BUILT_IN
-                        } else {
-                            "Spotify’s player can’t play this"
-                        },
-                    ),
+                    player.reject(&uri.to_string(), "Spotify’s player can’t play this");
                 }
             }
         }
@@ -271,35 +284,75 @@ impl Playback {
     pub fn play(&self) {
         match self {
             Self::BuiltIn(player) => player.play(),
-            Self::Soloist { player, .. } => player.play(),
+            Self::Soloist {
+                player,
+                local,
+                local_active,
+                ..
+            } => {
+                if local_active.load(Ordering::Acquire) {
+                    local.play();
+                } else {
+                    player.play();
+                }
+            }
         }
     }
 
     pub fn pause(&self) {
         match self {
             Self::BuiltIn(player) => player.pause(),
-            Self::Soloist { player, .. } => player.pause(),
+            Self::Soloist {
+                player,
+                local,
+                local_active,
+                ..
+            } => {
+                if local_active.load(Ordering::Acquire) {
+                    local.pause();
+                } else {
+                    player.pause();
+                }
+            }
         }
     }
 
     pub fn seek(&self, position_ms: u32) {
         match self {
             Self::BuiltIn(player) => player.seek(position_ms),
-            Self::Soloist { player, .. } => player.seek(position_ms),
+            Self::Soloist {
+                player,
+                local,
+                local_active,
+                ..
+            } => {
+                if local_active.load(Ordering::Acquire) {
+                    local.seek(position_ms);
+                } else {
+                    player.seek(position_ms);
+                }
+            }
         }
     }
 
     pub fn set_volume(&self, volume: f32) {
         match self {
             Self::BuiltIn(player) => player.set_volume(volume),
-            Self::Soloist { player, .. } => player.set_volume(volume),
+            // Both, so the slider means the same whichever plays next.
+            Self::Soloist { player, local, .. } => {
+                player.set_volume(volume);
+                local.set_volume(volume);
+            }
         }
     }
 
     pub fn stop(&self) {
         match self {
             Self::BuiltIn(player) => player.stop(),
-            Self::Soloist { player, .. } => player.stop(),
+            Self::Soloist { player, local, .. } => {
+                player.stop();
+                local.stop();
+            }
         }
     }
 
@@ -449,6 +502,18 @@ impl BuiltIn {
             }
             tokio::time::sleep(ACCOUNT_TYPE_POLL_DELAY).await;
         }
+        Self::assemble(session)
+    }
+
+    /// A player that never signs in to Spotify. Local files are read from
+    /// disk and need no session, so they play on any account, with Spotify
+    /// down, and beside Spotify's own player. A Spotify song loaded here
+    /// simply fails.
+    pub(crate) fn offline() -> Result<Self> {
+        Self::assemble(Session::new(SessionConfig::default(), None))
+    }
+
+    fn assemble(session: Session) -> Result<Self> {
         let mixer = mixer::find(None).context("no supported audio mixer is available")?(
             MixerConfig::default(),
         )?;
@@ -972,5 +1037,95 @@ mod local_playback_tests {
             );
             eprintln!("played {} ({frames} frames)", track.source_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod offline_tests {
+    use super::*;
+    use librespot::playback::player::PlayerEvent;
+
+    /// One second of silence as a mono 16-bit WAV.
+    fn silent_wav(path: &std::path::Path) {
+        let samples = 44_100u32;
+        let data = samples * 2;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&44_100u32.to_le_bytes());
+        bytes.extend_from_slice(&88_200u32.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data.to_le_bytes());
+        bytes.resize(bytes.len() + data as usize, 0);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    async fn first_matching(
+        events: &mut PlayerEventChannel,
+        matches: impl Fn(&PlayerEvent) -> bool,
+    ) -> Option<PlayerEvent> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(event) = events.recv().await {
+                if matches(&event) {
+                    return Some(event);
+                }
+            }
+            None
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    #[tokio::test]
+    async fn a_local_file_opens_without_any_spotify_session() {
+        let directory = std::env::temp_dir().join(format!("sonder-offline-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("tone.wav");
+        silent_wav(&path);
+        let uri = SpotifyUri::from_uri(&crate::local_files::local_uri("Ana", "Album", "Tone", 1))
+            .unwrap();
+
+        let local = BuiltIn::offline().expect("an offline player");
+        local.local_files.remember(uri.clone(), path);
+        let mut events = local.events();
+        local.player.load(uri, false, 0);
+        let opened = first_matching(&mut events, |event| {
+            matches!(
+                event,
+                PlayerEvent::TrackChanged { .. } | PlayerEvent::Unavailable { .. }
+            )
+        })
+        .await;
+        let _ = std::fs::remove_dir_all(directory);
+        assert!(
+            matches!(opened, Some(PlayerEvent::TrackChanged { .. })),
+            "the file should open, got {opened:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_spotify_song_on_an_offline_player_fails_instead_of_hanging() {
+        let local = BuiltIn::offline().expect("an offline player");
+        let mut events = local.events();
+        local.player.load(
+            SpotifyUri::from_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQC").unwrap(),
+            true,
+            0,
+        );
+        let failed = first_matching(&mut events, |event| {
+            matches!(event, PlayerEvent::Unavailable { .. })
+        })
+        .await;
+        assert!(
+            failed.is_some(),
+            "a song with no session must report unavailable"
+        );
     }
 }

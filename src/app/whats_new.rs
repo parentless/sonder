@@ -44,6 +44,13 @@ const MONTHS: &[Month] = &[
                 date: "Nov 18, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.59",
+                        notes: &[Note(
+                            Fixed,
+                            "Local files play through Spotify’s own player too. They never needed Spotify, so they now play whichever player you use, and still play when Spotify can’t connect.",
+                        )],
+                    },
+                    Release {
                         version: "0.8.58",
                         notes: &[
                             Note(
