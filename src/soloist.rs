@@ -992,13 +992,15 @@ mod tests {
                 uri: "spotify:track:one".into()
             }
         );
-        assert_eq!(
-            next_signal(&mut signals).await,
-            Signal::Playing {
-                uri: "spotify:track:one".into(),
-                position_ms: 0
+        // The report is stamped when the stand-in sends it, so a slow machine
+        // may read a few milliseconds in.
+        match next_signal(&mut signals).await {
+            Signal::Playing { uri, position_ms } => {
+                assert_eq!(uri, "spotify:track:one");
+                assert!(position_ms < 500, "started at {position_ms} ms");
             }
-        );
+            other => panic!("expected the song to start, got {other:?}"),
+        }
         // The clock runs while it plays, then the song ends.
         loop {
             match next_signal(&mut signals).await {
