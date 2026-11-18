@@ -34,7 +34,6 @@ enum Scene {
     ArtistPortrait,
     ArtistManyPopular,
     ArtistYours,
-    HomeMenu,
     IntroGlow,
     IntroClick,
     IntroOpen,
@@ -119,7 +118,6 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("premium-required", Scene::PremiumRequired),
         ("home", Scene::Home),
         ("home-permission", Scene::HomePermission),
-        ("home-range-menu", Scene::HomeMenu),
         ("launch-intro-glow", Scene::IntroGlow),
         ("launch-intro-click", Scene::IntroClick),
         ("launch-intro-open", Scene::IntroOpen),
@@ -396,7 +394,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     let BackendCommand::SearchCatalog { respond, .. } = backend.commands.try_recv().unwrap() else { panic!("search request") };
                     respond.send(Ok(super::gallery_results())).unwrap();
                 }
-                Scene::Home | Scene::HomePermission | Scene::HomeMenu | Scene::IntroGlow | Scene::IntroClick | Scene::IntroOpen => {
+                Scene::Home | Scene::HomePermission | Scene::IntroGlow | Scene::IntroClick | Scene::IntroOpen => {
                     workspace.navigate(Route::Home, cx);
                     let BackendCommand::LoadHome { respond, .. } = backend.commands.try_recv().unwrap() else { panic!("home request") };
                     let BackendCommand::LoadNewReleases { respond: releases } = backend.commands.try_recv().unwrap() else { panic!("new releases request") };
@@ -456,9 +454,6 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             if let BackendCommand::LoadDiscover { respond } = command {
                                 respond.send(Ok(offered.clone())).unwrap();
                             }
-                        }
-                        if matches!(scene, Scene::HomeMenu) {
-                            workspace.home.update(cx, |home, cx| home.open_range_menu(cx));
                         }
                         // The first-launch intro, held at one moment of its 2.3 s.
                         let intro_at = match scene {

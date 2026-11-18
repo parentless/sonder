@@ -62,11 +62,6 @@ impl Workspace {
         {
             return;
         }
-        if self.router.route() == Route::Home
-            && self.home.update(cx, |page, cx| page.close_range_menu(cx))
-        {
-            return;
-        }
         if self.router.route() == Route::LocalFiles
             && self
                 .local_files
@@ -250,7 +245,6 @@ impl Workspace {
         self.queue_drawer
             .update(cx, |drawer, cx| drawer.close_menus(cx));
         self.liked_songs.update(cx, |page, cx| page.close_menus(cx));
-        self.home.update(cx, |page, cx| page.close_menus(cx));
         self.recent.update(cx, |page, cx| page.close_menus(cx));
         self.local_files.update(cx, |page, cx| page.close_menus(cx));
         self.search.update(cx, |page, cx| page.close_menus(cx));

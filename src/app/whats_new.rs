@@ -41,6 +41,26 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 18, 2026",
+                releases: &[Release {
+                    version: "0.8.57",
+                    notes: &[
+                        Note(
+                            Better,
+                            "Resume and Sample are smaller, quieter buttons with room around them, so they sit inside their card and row instead of out-weighing them.",
+                        ),
+                        Note(
+                            Better,
+                            "New from artists you play shows more albums as the window gets wider, instead of spreading three covers far apart.",
+                        ),
+                        Note(
+                            Better,
+                            "Your top tracks and the time range are gone from Home, which now ends after Worth a listen. Save as playlist stays on every album.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
                 date: "Nov 17, 2026",
                 releases: &[Release {
                     version: "0.8.56",

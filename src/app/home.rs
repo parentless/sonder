@@ -1,7 +1,7 @@
 //! The Home page. It starts with a greeting and shortcuts back into the
 //! library, then what you were playing and what is new from artists you play.
 //! Below that: two short rows (an artist to try next, found because they sound
-//! like ones you play, and the next announced release), then your top tracks.
+//! like ones you play, and the next announced release).
 //!
 //! Who sounds like whom comes from ListenBrainz (see `similar.rs`), looked up
 //! once every few days and kept on disk. Two small Spotify requests per time
@@ -23,10 +23,16 @@ const DISCOVER_STALE_TIME: Duration = Duration::from_secs(6 * 60 * 60);
 const DISCOVER_SONGS: usize = 3;
 /// Artists whose songs are kept, so stepping back and forth asks for nothing.
 const DISCOVER_SONGS_KEPT: usize = 8;
-/// New albums shown under Home's first heading.
-const RELEASES_SHOWN: usize = 3;
+/// The fewest and most new albums in a row.
+const RELEASES_MIN: usize = 2;
+const RELEASES_MAX: usize = 6;
+/// A shelf cover's width and the space between covers, at 100% zoom.
+const SHELF_COVER: f32 = 148.;
+const SHELF_GAP: f32 = 12.;
 /// The hue of the Liked Songs tile.
 const LIKED_HUE: f32 = 340.;
+/// Home reads the stretch Spotify calls medium term (about six months).
+const RANGE: model::HomeRange = model::HomeRange::Months;
 
 /// One way back into the library, drawn as a tile at the top of Home.
 struct Shortcut {
@@ -79,9 +85,6 @@ pub(super) struct HomePage {
     backend: BackendHandle,
     session: Entity<session::Session>,
     top: Entity<TopListening>,
-    track_list: Entity<track_list::TrackList>,
-    range: model::HomeRange,
-    range_menu_open: bool,
     releases: Option<Releases>,
     releases_loading: bool,
     releases_request: Option<gpui_kit::Task<()>>,
@@ -106,11 +109,9 @@ impl EventEmitter<PageEvent> for HomePage {}
 
 impl HomePage {
     pub(super) fn new(backend: BackendHandle, cx: &mut Context<Self>) -> Self {
-        let track_list = cx.new(|cx| track_list::TrackList::new(cx).with_inline_rows());
         let session = services::AppServices::session(cx);
         let top = TopListening::shared(&backend, cx);
         let subscriptions = vec![
-            page::forward(&track_list, cx),
             cx.subscribe(&session, |this, _, event: &session::SessionEvent, cx| {
                 this.handle_session_event(event, cx)
             }),
@@ -127,9 +128,6 @@ impl HomePage {
             backend,
             session,
             top,
-            track_list,
-            range: model::HomeRange::default(),
-            range_menu_open: false,
             releases: None,
             releases_loading: false,
             releases_request: None,
@@ -169,11 +167,11 @@ impl HomePage {
 
     fn handle_top_event(&mut self, event: &TopEvent, cx: &mut Context<Self>) {
         match event {
-            TopEvent::Loaded(range) if *range == self.range => {
+            TopEvent::Loaded(range) if *range == RANGE => {
                 self.error = None;
                 cx.emit(PageEvent::Loaded);
             }
-            TopEvent::Failed(range, error) if *range == self.range => {
+            TopEvent::Failed(range, error) if *range == RANGE => {
                 self.error = Some(error.clone());
                 cx.emit(PageEvent::Failed(error.clone()));
             }
@@ -196,8 +194,6 @@ impl HomePage {
         self.discover_songs.clear();
         self.discover_songs_request = None;
         self.error = None;
-        self.range_menu_open = false;
-        self.track_list.update(cx, |list, cx| list.clear(cx));
         cx.notify();
     }
 
@@ -206,10 +202,8 @@ impl HomePage {
     pub(super) fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         self.visible = visible;
         if !visible {
-            self.range_menu_open = false;
-            // Leaving frees the list's rows; the few kilobytes of fetched data
-            // stay so coming back needs no new request.
-            self.track_list.update(cx, |list, cx| list.clear(cx));
+            // The few kilobytes of fetched data stay so coming back needs no
+            // new request.
             // The listener has had their look at what was new.
             release_watch::acknowledge_all(cx);
             return;
@@ -220,7 +214,7 @@ impl HomePage {
     }
 
     fn load_if_needed(&mut self, cx: &mut Context<Self>) {
-        let range = self.range;
+        let range = RANGE;
         self.error = None;
         self.top.update(cx, |top, cx| top.ensure(range, cx));
     }
@@ -457,35 +451,6 @@ impl HomePage {
         }
     }
 
-    fn select_range(&mut self, range: model::HomeRange, cx: &mut Context<Self>) {
-        self.range_menu_open = false;
-        if range != self.range {
-            self.range = range;
-            self.load_if_needed(cx);
-        }
-        cx.notify();
-    }
-
-    #[cfg(test)]
-    pub(super) fn open_range_menu(&mut self, cx: &mut Context<Self>) {
-        self.range_menu_open = true;
-        cx.notify();
-    }
-
-    /// Closes the time-range menu, reporting whether it was open.
-    pub(super) fn close_range_menu(&mut self, cx: &mut Context<Self>) -> bool {
-        let was_open = std::mem::take(&mut self.range_menu_open);
-        if was_open {
-            cx.notify();
-        }
-        was_open
-    }
-
-    pub(super) fn close_menus(&mut self, cx: &mut Context<Self>) {
-        self.track_list.update(cx, |list, cx| list.close_menu(cx));
-        self.close_range_menu(cx);
-    }
-
     /// The ways back into the library, in the order they are shown. A tile is
     /// left out when there is nothing behind it yet.
     fn shortcuts(&self, cx: &App) -> Vec<Shortcut> {
@@ -557,7 +522,7 @@ impl HomePage {
         if let Some(artist) = self
             .top
             .read(cx)
-            .data(self.range)
+            .data(RANGE)
             .and_then(|data| data.artists.first())
         {
             tiles.push(Shortcut {
@@ -816,7 +781,7 @@ impl HomePage {
                                                 .test_support()
                                                 .w_full()
                                                 .h(rem(5.))
-                                                .my(rem(4.))
+                                                .mt(rem(4.))
                                                 .rounded_full()
                                                 .bg(rgb(palette.card_hover))
                                                 .child(
@@ -829,14 +794,14 @@ impl HomePage {
                                         )
                                 })
                                 .child(
-                                    div().child(
-                                        components::icon_pill(
+                                    div().mt(rem(12.)).child(
+                                        compact(components::icon_pill(
                                             palette,
                                             "home-continue-play",
                                             icon,
                                             label,
                                             true,
-                                        )
+                                        ))
                                         .test_support()
                                         .on_click(
                                             cx.listener(move |_, _, _, cx| {
@@ -863,12 +828,13 @@ impl HomePage {
     /// The newest albums from artists you play, as covers.
     fn releases_shelf(
         &self,
+        count: usize,
         palette: CadencePalette,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let cache = services::AppServices::image_cache(cx);
         let size = tokens::ArtworkSize {
-            size: Rems(9.25),
+            size: rem(SHELF_COVER),
             radius: Rems(0.875),
         };
         let Some(releases) = self.releases.as_ref() else {
@@ -880,7 +846,7 @@ impl HomePage {
                     .w_full()
                     .flex()
                     .justify_between()
-                    .children((0..RELEASES_SHOWN).map(|_| {
+                    .children((0..count).map(|_| {
                         div()
                             .size(size.size)
                             .rounded(size.radius)
@@ -897,8 +863,15 @@ impl HomePage {
             .test_support()
             .w_full()
             .flex()
-            .justify_between();
-        for (index, album) in releases.albums.iter().take(RELEASES_SHOWN).enumerate() {
+            .map(|row| {
+                // A full row spreads to both edges; a short one keeps its gap.
+                if releases.albums.len() >= count {
+                    row.justify_between()
+                } else {
+                    row.gap(rem(SHELF_GAP))
+                }
+            });
+        for (index, album) in releases.albums.iter().take(count).enumerate() {
             let mut artist = album
                 .artists
                 .iter()
@@ -1013,21 +986,26 @@ impl HomePage {
                             .child(row_text(palette, artist.name.clone(), because).ml(rem(12.)))
                             .on_click(cx.listener(|this, _, _, cx| this.open_suggested_artist(cx))),
                     )
-                    .child(div().flex_none().mr(rem(8.)).child(if ready {
-                        components::icon_pill(
+                    .child(div().flex_none().mr(rem(6.)).child(if ready {
+                        compact(components::icon_pill(
                             palette,
                             "home-discover-play",
                             CadenceIcon::Play,
                             "Sample",
                             true,
-                        )
+                        ))
                         .test_support()
                         .on_click(cx.listener(|this, _, _, cx| this.play_sample(0, cx)))
                         .into_any_element()
                     } else {
-                        components::pending_pill(palette, "home-discover-pending", "Sample")
-                            .opacity(0.35)
-                            .into_any_element()
+                        compact(components::pending_pill(
+                            palette,
+                            "home-discover-pending",
+                            "Sample",
+                        ))
+                        .px(rem(14.))
+                        .opacity(0.35)
+                        .into_any_element()
                     }))
                     .child(
                         components::icon_button_sized(
@@ -1038,7 +1016,7 @@ impl HomePage {
                         )
                         .test_support()
                         .size_8()
-                        .mr(rem(8.))
+                        .mr(rem(10.))
                         .on_click(cx.listener(|this, _, _, cx| this.dismiss_suggestion(cx))),
                     )
                     .into_any_element(),
@@ -1101,74 +1079,6 @@ impl HomePage {
                 .children(artist_row)
                 .children(release_row)
                 .into_any_element(),
-        )
-    }
-
-    /// The time range as one button that opens a short menu.
-    fn range_menu(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Div {
-        let selected = self.range;
-        div().flex().child(
-            div()
-                .relative()
-                .flex_none()
-                .child(
-                    components::pill(palette, "home-range-menu", selected.label(), false)
-                        .test_support()
-                        .gap_2()
-                        .child(components::icon(
-                            if self.range_menu_open {
-                                CadenceIcon::ChevronUp
-                            } else {
-                                CadenceIcon::ChevronDown
-                            },
-                            tokens::INLINE_ICON,
-                            palette.text_primary,
-                        ))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.range_menu_open = !this.range_menu_open;
-                            cx.notify();
-                        })),
-                )
-                .when(self.range_menu_open, |anchor| {
-                    anchor.child(deferred(
-                        components::solid_menu_surface(palette)
-                            .on_mouse_up_out(
-                                gpui_kit::MouseButton::Left,
-                                cx.listener(|this, _, _, cx| this.close_menus(cx)),
-                            )
-                            .absolute()
-                            .top(Rems(2.75))
-                            .right_0()
-                            .w(Rems(13.))
-                            .children(model::HomeRange::ALL.into_iter().map(|range| {
-                                let chosen = range == selected;
-                                components::button(palette, ("home-range", range.index()))
-                                    .test_support()
-                                    .w_full()
-                                    .h_9()
-                                    .px_2p5()
-                                    .justify_between()
-                                    .rounded_lg()
-                                    .text_size(tokens::BODY_TEXT)
-                                    .text_color(rgb(palette.text_primary))
-                                    .when(chosen, |row| {
-                                        row.font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                    })
-                                    .hover(|style| style.bg(rgb(palette.control_hover)))
-                                    .child(range.label())
-                                    .when(chosen, |row| {
-                                        row.child(components::icon(
-                                            CadenceIcon::Check,
-                                            tokens::MENU_ICON,
-                                            palette.text_primary,
-                                        ))
-                                    })
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.select_range(range, cx)
-                                    }))
-                            })),
-                    ))
-                }),
         )
     }
 
@@ -1244,7 +1154,8 @@ impl Render for HomePage {
             .map(|(index, shortcut)| self.shortcut_tile(index, shortcut, palette, cx))
             .collect();
         let continue_card = self.continue_card(palette, cx);
-        let shelf = self.releases_shelf(palette, cx);
+        let shelf_count = shelf_count(room, pair_columns);
+        let shelf = self.releases_shelf(shelf_count, palette, cx);
         let worth = self.worth_a_listen(palette, pair_columns, cx);
         let first = div()
             .flex()
@@ -1287,82 +1198,12 @@ impl Render for HomePage {
                 )
             });
 
-        let (permission_missing, current) = {
-            let top = self.top.read(cx);
-            (
-                top.permission_missing(),
-                top.data(self.range).map(|data| data.tracks.clone()),
-            )
-        };
-        let loaded = current.is_some();
-        let tracks = current.unwrap_or_default();
-        // The range lives beside the top tracks; until there is a list to hold
-        // it, and when there is nothing to list, it stands alone.
-        let range_alone = !permission_missing && !(loaded && !tracks.is_empty());
-        let content = if permission_missing {
-            self.permission_prompt(palette, cx)
-        } else if self.error.is_some() && !loaded {
-            div().child(components::empty_state(
-                palette,
-                CadenceIcon::MusicNote,
-                "Couldn’t load your top tracks",
-                Some("Spotify didn’t answer. Try again in a moment.".into()),
-            ))
-        } else if !loaded {
-            div().child(components::list_skeleton_rows(palette, 4))
-        } else if tracks.is_empty() {
-            div().child(components::empty_state(
-                palette,
-                CadenceIcon::MusicNote,
-                "Nothing here yet",
-                Some("Listen to more music and your top tracks will show up here.".into()),
-            ))
-        } else {
-            self.track_list.update(cx, |list, cx| {
-                list.show(("home-tracks", self.range.index()), tracks.clone(), cx);
-            });
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(
-                    div()
-                        .h_10()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_3()
-                        .child(heading("home-tracks-heading", "Your top tracks".into()))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .child(
-                                    components::pill(
-                                        palette,
-                                        "home-save-playlist",
-                                        "Save as playlist",
-                                        false,
-                                    )
-                                    .test_support()
-                                    .on_click(cx.listener({
-                                        let tracks = tracks.clone();
-                                        let name =
-                                            format!("Your top tracks · {}", self.range.label());
-                                        move |_, _, _, cx| {
-                                            cx.emit(PageEvent::SavePlaylist {
-                                                name: name.clone().into(),
-                                                tracks: tracks.clone(),
-                                            });
-                                        }
-                                    })),
-                                )
-                                .child(self.range_menu(palette, cx)),
-                        ),
-                )
-                .child(self.track_list.clone())
-        };
+        // The only thing below the rows is the ask for the permission they need.
+        let permission = self
+            .top
+            .read(cx)
+            .permission_missing()
+            .then(|| self.permission_prompt(palette, cx));
         div()
             .id("home-page")
             .size_full()
@@ -1387,18 +1228,15 @@ impl Render for HomePage {
                                 greeting(),
                                 "Pick up where you left off",
                             ))
-                            .child(first.mb_6())
-                            .when(range_alone, |page| {
-                                page.child(div().mb_5().child(self.range_menu(palette, cx)))
-                            })
-                            .child(content),
+                            .child(first)
+                            .children(permission.map(|prompt| div().mt_6().child(prompt))),
                     ),
             )
     }
 }
 
 /// The sidebar and the page's margins, in pixels at 100% zoom.
-const PAGE_CHROME: f32 = 330.;
+const PAGE_CHROME: f32 = 312.;
 /// The space between neighbours in every grid, so edges line up.
 const GRID_GAP: f32 = 16.;
 /// Corner radius of the shortcut tiles and the Worth a listen rows.
@@ -1407,6 +1245,29 @@ const TILE_RADIUS: f32 = 18.;
 /// the corners run parallel.
 const CARD_RADIUS: f32 = 24.;
 const CARD_PADDING: f32 = 14.;
+
+/// Covers per row: as many as fit the shelf's column, so a wider window shows
+/// more albums instead of spreading three apart. `room` is the page's width in
+/// pixels at 100% zoom.
+fn shelf_count(room: f32, pair_columns: u16) -> usize {
+    let width = if pair_columns == 2 {
+        (room - GRID_GAP) / 2.
+    } else {
+        room
+    };
+    (((width + SHELF_GAP) / (SHELF_COVER + SHELF_GAP)) as usize).clamp(RELEASES_MIN, RELEASES_MAX)
+}
+
+/// A pill sized for a card or a row: 32 high, so it sits quietly inside the
+/// card it is on instead of out-weighing it.
+fn compact(pill: Stateful<Div>) -> Stateful<Div> {
+    pill.h(rem(32.))
+        .pl(rem(12.))
+        .pr(rem(14.))
+        .text_size(rem(13.5))
+        // Pressing sinks it a little, so it feels like it heard the click.
+        .active(|style| style.opacity(0.85))
+}
 
 /// A length that follows the interface zoom, written in the pixels it comes to
 /// at 100%. Everything on this page is sized this way so covers, cards and
@@ -1462,7 +1323,7 @@ fn release_label(date: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{greeting_for, release_label};
+    use super::{greeting_for, release_label, shelf_count};
 
     #[test]
     fn the_greeting_follows_the_hour() {
@@ -1475,6 +1336,20 @@ mod tests {
         assert_eq!(greeting_for(22), "Late night");
         assert_eq!(greeting_for(0), "Late night");
         assert_eq!(greeting_for(4), "Late night");
+    }
+
+    #[test]
+    fn the_shelf_shows_more_albums_as_the_window_widens() {
+        // The default window: two columns of about 476, so three covers.
+        assert_eq!(shelf_count(968., 2), 3);
+        // Wider windows add covers rather than gaps.
+        assert_eq!(shelf_count(1400., 2), 4);
+        assert_eq!(shelf_count(2200., 2), 6);
+        assert_eq!(shelf_count(5000., 2), 6);
+        // One column holds the whole width.
+        assert_eq!(shelf_count(700., 1), 4);
+        // Never fewer than two, however narrow.
+        assert_eq!(shelf_count(200., 1), 2);
     }
 
     #[test]

@@ -4060,7 +4060,7 @@ fn home_loads_top_items_once_when_opened_and_lists_no_top_artists() {
     fixture.update(|window, _| {
         assert!(window.try_find("home-artists-heading").is_none());
         assert!(window.try_find(("home-artist", 0usize)).is_none());
-        assert!(window.try_find("home-tracks-heading").is_some());
+        assert!(window.try_find("home-tracks-heading").is_none());
     });
 }
 
@@ -4076,45 +4076,6 @@ fn notice(fixture: &mut Fixture) -> String {
             .map(|notice| notice.to_string())
             .unwrap_or_default()
     })
-}
-
-#[test]
-fn home_saves_its_top_tracks_as_a_private_playlist_and_says_how_it_went() {
-    let mut fixture = Fixture::new(false);
-    fixture.update(|window, cx| window.click("nav-home", cx));
-    let BackendCommand::LoadHome { respond, .. } = fixture.backend.commands.try_recv().unwrap()
-    else {
-        panic!("expected a Home request")
-    };
-    respond
-        .send(Ok(model::HomeData {
-            artists: vec![],
-            tracks: vec![track(0), track(1)],
-        }))
-        .unwrap();
-    answer_new_releases(&mut fixture, Ok(vec![release_album()]));
-    fixture.update(|_, _| {});
-    scroll_home(&mut fixture, 700.);
-
-    fixture.update(|window, cx| window.click("home-save-playlist", cx));
-    let BackendCommand::CreatePlaylist {
-        name,
-        uris,
-        respond,
-    } = fixture.backend.commands.try_recv().unwrap()
-    else {
-        panic!("expected a playlist request")
-    };
-    assert!(name.starts_with("Your top tracks"), "{name}");
-    assert_eq!(uris, ["spotify:track:track-0", "spotify:track:track-1"]);
-    assert!(notice(&mut fixture).starts_with("Saving"));
-    // A second press while one is running makes nothing new.
-    fixture.update(|window, cx| window.click("home-save-playlist", cx));
-    fixture.no_commands();
-
-    respond.send(Ok(())).unwrap();
-    fixture.update(|_, _| {});
-    assert!(notice(&mut fixture).starts_with("Saved"));
 }
 
 #[test]
@@ -4239,41 +4200,6 @@ fn home_opens_with_shortcuts_back_into_the_library_and_the_song_to_carry_on_with
         fixture.backend.commands.try_recv(),
         Ok(BackendCommand::Resume)
     ));
-}
-
-/// Opens the range menu and picks a range.
-fn pick_home_range(fixture: &mut Fixture, index: usize) {
-    fixture.update(|window, cx| window.click("home-range-menu", cx));
-    fixture.update(|window, cx| window.click(("home-range", index), cx));
-}
-
-#[test]
-fn home_time_ranges_load_once_each_and_are_remembered() {
-    let mut fixture = Fixture::new(false);
-    fixture.update(|window, cx| window.click("nav-home", cx));
-    let reply = |fixture: &mut Fixture, expected: model::HomeRange| {
-        let BackendCommand::LoadHome { range, respond } =
-            fixture.backend.commands.try_recv().unwrap()
-        else {
-            panic!("expected a Home request")
-        };
-        assert_eq!(range, expected);
-        respond.send(Ok(model::HomeData::default())).unwrap();
-    };
-    reply(&mut fixture, model::HomeRange::Months);
-    answer_new_releases(&mut fixture, Ok(Vec::new()));
-    fixture.update(|_, _| {});
-    pick_home_range(&mut fixture, 0);
-    reply(&mut fixture, model::HomeRange::Weeks);
-    fixture.update(|_, _| {});
-    // The 6-month chart was fetched to compare with, so all time is cached too.
-    pick_home_range(&mut fixture, 2);
-    fixture.no_commands();
-    // Every range is now cached, so moving between them asks for nothing.
-    for index in [1usize, 0, 2, 1] {
-        pick_home_range(&mut fixture, index);
-        fixture.no_commands();
-    }
 }
 
 #[test]
@@ -5095,25 +5021,6 @@ fn top_artist(id: &str) -> model::Artist {
 }
 
 #[test]
-fn the_home_range_menu_opens_picks_and_closes() {
-    let mut fixture = Fixture::new(false);
-    fixture.update(|window, cx| window.click("nav-home", cx));
-    fixture.update(|window, _| assert!(window.try_find(("home-range", 0usize)).is_none()));
-    fixture.update(|window, cx| window.click("home-range-menu", cx));
-    fixture.update(|window, _| {
-        for index in 0..3usize {
-            assert!(window.try_find(("home-range", index)).is_some());
-        }
-    });
-    // Escape closes it without choosing.
-    fixture.press("escape");
-    fixture.update(|window, _| assert!(window.try_find(("home-range", 0usize)).is_none()));
-    // Choosing closes it too.
-    pick_home_range(&mut fixture, 2);
-    fixture.update(|window, _| assert!(window.try_find(("home-range", 0usize)).is_none()));
-}
-
-#[test]
 fn the_you_tab_only_appears_for_artists_the_listener_plays() {
     for (artist_id, known) in [("artist-known", true), ("artist-stranger", false)] {
         let mut fixture = Fixture::new(false);
@@ -5621,6 +5528,5 @@ fn home_keeps_its_other_rows_when_there_is_nobody_to_suggest() {
     fixture.update(|window, _| {
         assert!(window.try_find("home-discover").is_none());
         assert!(window.try_find("home-shortcuts").is_some());
-        assert!(window.try_find("home-range-menu").is_some());
     });
 }

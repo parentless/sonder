@@ -52,7 +52,7 @@ needed. See [Windows setup](docs/WINDOWS.md) and [releasing](docs/RELEASING.md).
 - Delete a Local Files song from the right-click menu. It moves to the Recycle Bin (Trash on macOS), so it can be restored, and needs no permission prompt.
 - Home opens with a greeting and shortcuts back to Liked Songs, Recently played, your latest album, a playlist, your most played artist and Local Files; then the song to carry on with and the newest albums from artists you play. These cost no extra requests.
 - See who made a song from its right-click menu: writers, producers, mixing and mastering, vocals and players. Credits come from MusicBrainz (volunteer-written, so newer releases are often missing); the song's ISRC is sent there when the dialog opens.
-- Make a private Spotify playlist from Home's Your top tracks or from any album with **Save as playlist**. It needs one extra permission, so sign out and in again the first time. New releases on Home also cover artists you follow.
+- Make a private Spotify playlist from any album with **Save as playlist**. It needs one extra permission, so sign out and in again the first time. New releases on Home also cover artists you follow.
 - Home suggests an artist to try next, found because they sound like ones you play (from ListenBrainz, no account or key needed). Sample plays their top songs right there, and the close button (“Not for me”) is remembered.
 - Follow lyrics as a song plays, in a side panel, over the page or as one line above the player, once you turn them on in Settings (lyrics come from LRCLIB, so a song's title, artist and length are sent there while lyrics are open)
 - Browse native artist and album pages
