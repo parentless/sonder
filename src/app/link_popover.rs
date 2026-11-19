@@ -430,7 +430,8 @@ impl LinkPopover {
                     )
                     .child(
                         div()
-                            .truncate()
+                            // A failure is read in full; progress is one line.
+                            .when(!failed, |line| line.truncate())
                             .text_size(tokens::CAPTION_TEXT)
                             .text_color(rgb(if failed {
                                 palette.danger

@@ -1106,6 +1106,9 @@ fn find_on_page(url: &str, cancel: &AtomicBool) -> Found {
 
 // ---------------------------------------------------------------- errors
 
+/// How an error nobody planned for begins.
+const UNEXPECTED: &str = "That link could not be saved";
+
 fn looks_outdated(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
     ["changed how", "try again later", "refused"]
@@ -1167,10 +1170,10 @@ fn friendly_error(stderr: &str) -> String {
         .trim_start_matches("ERROR:")
         .trim();
     if line.is_empty() {
-        "That link could not be saved.".to_owned()
+        format!("{UNEXPECTED}.")
     } else {
-        let short: String = line.chars().take(140).collect();
-        format!("That link could not be saved: {short}")
+        let short: String = line.chars().take(300).collect();
+        format!("{UNEXPECTED}: {short}")
     }
 }
 
@@ -1369,15 +1372,19 @@ fn container_for(extension: &str) -> &'static str {
 }
 
 /// The yt-dlp arguments for a job, without the program or the link.
-fn yt_dlp_arguments(job: &Job, ffmpeg: &Path) -> Vec<String> {
+///
+/// `plain` is the careful second try: no cover art, no tag rewriting and a
+/// name from the title alone, so one odd detail of a song can't stop the save.
+fn yt_dlp_arguments(job: &Job, ffmpeg: &Path, plain: bool) -> Vec<String> {
     let (codec, quality) = job.format.extraction(job.probe.source_codec.as_deref());
     // A `%` in the folder's own name would be read as part of the template.
     let folder = job.folder.to_string_lossy().replace('%', "%%");
-    let template = format!(
-        "{}{}%(artist,uploader,channel&{{}} - |)s%(title)s.%(ext)s",
-        folder,
-        std::path::MAIN_SEPARATOR
-    );
+    let name = if plain {
+        "%(title).100s.%(ext)s"
+    } else {
+        "%(artist,uploader,channel&{} - |)s%(title)s.%(ext)s"
+    };
+    let template = format!("{folder}{}{name}", std::path::MAIN_SEPARATOR);
     let mut args: Vec<String> = [
         "--newline",
         "--no-colors",
@@ -1398,6 +1405,8 @@ fn yt_dlp_arguments(job: &Job, ffmpeg: &Path) -> Vec<String> {
         "--audio-format",
         codec,
         "--embed-metadata",
+        "--trim-filenames",
+        "150",
         "--progress-template",
         "download:SONDER_PROGRESS %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s %(progress.speed)s",
         "--print",
@@ -1405,7 +1414,7 @@ fn yt_dlp_arguments(job: &Job, ffmpeg: &Path) -> Vec<String> {
     ]
     .map(str::to_owned)
     .to_vec();
-    if !job.probe.tagged_artist {
+    if !plain && !job.probe.tagged_artist {
         // An upload named "Artist - Title" gets that artist and title tag,
         // unless the site already named the artist.
         args.extend([
@@ -1415,7 +1424,7 @@ fn yt_dlp_arguments(job: &Job, ffmpeg: &Path) -> Vec<String> {
     }
     // WAV has nowhere to keep a picture, and yt-dlp fails the whole save
     // rather than skip it.
-    if codec != "wav" {
+    if codec != "wav" && !plain {
         args.extend(["--embed-thumbnail", "--convert-thumbnails", "jpg"].map(str::to_owned));
     }
     if let Some(quality) = quality {
@@ -1459,9 +1468,19 @@ fn save_with_yt_dlp(
     let ffmpeg = tools.ffmpeg.context("the converter is missing")?;
     refresh_if_stale(&yt_dlp);
     let mut updated = false;
+    let mut plain = false;
     loop {
-        match run_yt_dlp(job, &yt_dlp, &ffmpeg, cancel, report) {
+        match run_yt_dlp(job, &yt_dlp, &ffmpeg, plain, cancel, report) {
             Ok(files) => return Ok(files),
+            // An error nobody planned for: try once more with the details
+            // that can go wrong left out.
+            Err(error)
+                if !plain
+                    && !cancel.load(Ordering::Relaxed)
+                    && error.to_string().starts_with(UNEXPECTED) =>
+            {
+                plain = true;
+            }
             Err(error)
                 if !updated
                     && looks_outdated(&error.to_string())
@@ -1479,11 +1498,12 @@ fn run_yt_dlp(
     job: &Job,
     yt_dlp: &Path,
     ffmpeg: &Path,
+    plain: bool,
     cancel: &Arc<AtomicBool>,
     report: Report<'_>,
 ) -> Result<Vec<PathBuf>> {
     let mut child = command(yt_dlp)
-        .args(yt_dlp_arguments(job, ffmpeg))
+        .args(yt_dlp_arguments(job, ffmpeg, plain))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -1556,6 +1576,10 @@ fn run_yt_dlp(
     if files.is_empty() && status.success() {
         bail!("That link had no audio to save.");
     }
+    log::warn!(
+        "link download failed (plain: {plain}, exit {status}): {}",
+        errors.trim()
+    );
     bail!(friendly_error(&errors))
 }
 
@@ -1781,12 +1805,12 @@ mod tests {
             playlist: false,
             probe: Probe::default(),
         };
-        let single = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"));
+        let single = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"), false);
         assert!(single.contains(&"--no-playlist".to_owned()));
         assert!(single.windows(2).any(|w| w == ["--audio-quality", "320K"]));
         assert_eq!(single.last().unwrap(), "https://a.example/watch?v=1");
         job.playlist = true;
-        let list = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"));
+        let list = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"), false);
         assert!(list.contains(&"--yes-playlist".to_owned()));
         assert!(!list.contains(&"--no-playlist".to_owned()));
     }
@@ -1800,9 +1824,9 @@ mod tests {
             playlist: false,
             probe: Probe::default(),
         };
-        let wav = yt_dlp_arguments(&job(Format::Wav), Path::new("/ff/ffmpeg"));
+        let wav = yt_dlp_arguments(&job(Format::Wav), Path::new("/ff/ffmpeg"), false);
         assert!(!wav.contains(&"--embed-thumbnail".to_owned()));
-        let mp3 = yt_dlp_arguments(&job(Format::Mp3), Path::new("/ff/ffmpeg"));
+        let mp3 = yt_dlp_arguments(&job(Format::Mp3), Path::new("/ff/ffmpeg"), false);
         assert!(mp3.contains(&"--embed-thumbnail".to_owned()));
     }
 
@@ -1815,9 +1839,25 @@ mod tests {
             playlist: false,
             probe: Probe::default(),
         };
-        let args = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"));
+        let args = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"), false);
         let template = &args[args.iter().position(|a| a == "-o").unwrap() + 1];
         assert!(template.starts_with("/music/100%% Hits"), "{template}");
+    }
+
+    #[test]
+    fn the_careful_second_try_leaves_out_art_tags_and_long_names() {
+        let job = Job {
+            url: "https://a.example/watch?v=1".into(),
+            format: Format::Mp3,
+            folder: PathBuf::from("/music"),
+            playlist: false,
+            probe: Probe::default(),
+        };
+        let plain = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"), true);
+        assert!(!plain.contains(&"--embed-thumbnail".to_owned()));
+        assert!(!plain.contains(&"--parse-metadata".to_owned()));
+        let template = &plain[plain.iter().position(|a| a == "-o").unwrap() + 1];
+        assert_eq!(template, "/music/%(title).100s.%(ext)s");
     }
 
     #[test]
@@ -1833,7 +1873,7 @@ mod tests {
                 ..Probe::default()
             },
         };
-        let args = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"));
+        let args = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"), false);
         assert_eq!(args.last().unwrap(), "https://player.example/v/7");
         assert!(
             args.windows(2)

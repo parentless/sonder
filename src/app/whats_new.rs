@@ -44,6 +44,13 @@ const MONTHS: &[Month] = &[
                 date: "Nov 18, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.61",
+                        notes: &[Note(
+                            Fixed,
+                            "Saving a link that failed with an odd error, such as “Invalid argument”, now tries again in a plainer way before giving up, and a failed link shows its whole message.",
+                        )],
+                    },
+                    Release {
                         version: "0.8.60",
                         notes: &[Note(
                             Fixed,
