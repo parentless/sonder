@@ -1857,7 +1857,10 @@ mod tests {
         assert!(!plain.contains(&"--embed-thumbnail".to_owned()));
         assert!(!plain.contains(&"--parse-metadata".to_owned()));
         let template = &plain[plain.iter().position(|a| a == "-o").unwrap() + 1];
-        assert_eq!(template, "/music/%(title).100s.%(ext)s");
+        assert_eq!(
+            template,
+            &format!("/music{}%(title).100s.%(ext)s", std::path::MAIN_SEPARATOR)
+        );
     }
 
     #[test]
