@@ -69,6 +69,17 @@ pub(super) struct ArtworkSize {
     pub(super) radius: Rems,
 }
 
+/// The picture on a search result: rounded for songs and albums, round for
+/// artists.
+pub(super) const SUGGESTION_ARTWORK: ArtworkSize = ArtworkSize {
+    size: Rems(2.125),
+    radius: Rems(0.4375),
+};
+pub(super) const SUGGESTION_ARTIST_ARTWORK: ArtworkSize = ArtworkSize {
+    size: Rems(2.125),
+    radius: Rems(1.0625),
+};
+
 pub(super) const TRACK_ARTWORK: ArtworkSize = ArtworkSize {
     size: Rems(2.5),
     radius: Rems(0.5),

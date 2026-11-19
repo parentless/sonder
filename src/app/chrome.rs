@@ -39,28 +39,76 @@ impl LiveResult {
         live
     }
 
-    fn parts(&self) -> (SharedString, String, CadenceIcon) {
+    /// What a row shows: title, the line under it, the quiet label on the
+    /// right, the picture (if Spotify gave one) and the shape it sits in.
+    fn parts(&self) -> LiveParts {
         match self {
-            Self::Artist(artist) => (artist.name.clone(), "Artist".into(), CadenceIcon::Person),
-            Self::Album(album) => {
-                let by = album
+            Self::Artist(artist) => LiveParts {
+                title: artist.name.clone(),
+                detail: "Artist".into(),
+                tag: "Artist",
+                artwork_url: artist.artwork_url.clone(),
+                icon: CadenceIcon::Person,
+                round: true,
+            },
+            Self::Album(album) => LiveParts {
+                title: album.name.clone(),
+                detail: album
                     .artists
                     .first()
-                    .map(|artist| format!(" · {}", artist.name))
-                    .unwrap_or_default();
-                (
-                    album.name.clone(),
-                    format!("Album{by}"),
-                    CadenceIcon::MusicNote,
-                )
-            }
-            Self::Track(track) => (
-                track.title.clone(),
-                format!("Song · {}", track.artist),
-                CadenceIcon::MusicNote,
-            ),
+                    .map(|artist| artist.name.clone())
+                    .unwrap_or_else(|| "Album".into()),
+                tag: "Album",
+                artwork_url: album.artwork_url.clone(),
+                icon: CadenceIcon::MusicNote,
+                round: false,
+            },
+            Self::Track(track) => LiveParts {
+                title: track.title.clone(),
+                detail: track.artist.clone(),
+                tag: "Song",
+                artwork_url: track.artwork_url.clone(),
+                icon: CadenceIcon::MusicNote,
+                round: false,
+            },
         }
     }
+}
+
+struct LiveParts {
+    title: SharedString,
+    detail: SharedString,
+    tag: &'static str,
+    artwork_url: Option<String>,
+    icon: CadenceIcon,
+    round: bool,
+}
+
+/// `text` with the letters the listener typed picked out in bold. A word the
+/// text does not contain, or one whose letter case changes its length, is
+/// shown plain.
+fn highlighted(text: &str, query: &str, palette: CadencePalette) -> gpui_kit::AnyElement {
+    let lower = text.to_lowercase();
+    let wanted = query.trim().to_lowercase();
+    let range = (lower.len() == text.len() && !wanted.is_empty())
+        .then(|| lower.find(&wanted).map(|start| start..start + wanted.len()))
+        .flatten()
+        .filter(|range| text.is_char_boundary(range.start) && text.is_char_boundary(range.end));
+    let Some(range) = range else {
+        return div().child(text.to_owned()).into_any_element();
+    };
+    div()
+        .child(
+            gpui_kit::StyledText::new(text.to_owned()).with_highlights([(
+                range,
+                gpui_kit::HighlightStyle {
+                    color: Some(rgb(palette.text_primary).into()),
+                    font_weight: Some(gpui_kit::FontWeight::SEMIBOLD),
+                    ..gpui_kit::HighlightStyle::default()
+                },
+            )]),
+        )
+        .into_any_element()
 }
 
 /// The bar above the page: search on the left, account on the right.
@@ -74,6 +122,8 @@ pub(super) struct Toolbar {
     /// Spotify's answer for the words typed, shown under the library matches.
     live: Vec<LiveResult>,
     live_task: Option<gpui_kit::Task<()>>,
+    /// Counts Spotify's answers, so each one can settle in on its own.
+    live_serial: u64,
     backend: BackendHandle,
     suggestion_task: Option<gpui_kit::Task<()>>,
     search_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -128,6 +178,7 @@ impl Toolbar {
             search_row: false,
             live: Vec::new(),
             live_task: None,
+            live_serial: 0,
             backend,
             suggestion_task: None,
             search_bounds: Rc::default(),
@@ -308,11 +359,17 @@ impl Toolbar {
                 return;
             };
             let Ok(results) = reply.await else {
+                // No answer: stop waiting for one and keep the library rows.
+                let _ = this.update(cx, |toolbar, cx| {
+                    toolbar.live_task = None;
+                    cx.notify();
+                });
                 return;
             };
             let _ = this.update(cx, |toolbar, cx| {
                 toolbar.live_task = None;
                 toolbar.live = LiveResult::pick(results);
+                toolbar.live_serial += 1;
                 cx.notify();
             });
         }));
@@ -358,6 +415,109 @@ impl Toolbar {
         }
     }
 
+    /// One result: a picture, the title with the typed letters in bold, the
+    /// line under it and a quiet label on the right.
+    #[allow(clippy::too_many_arguments)]
+    fn suggestion_row(
+        &self,
+        palette: CadencePalette,
+        id: (&'static str, usize),
+        art: gpui_kit::AnyElement,
+        title: gpui_kit::AnyElement,
+        detail: SharedString,
+        tag: &'static str,
+        selected: bool,
+    ) -> Stateful<Div> {
+        components::button(palette, id)
+            .w_full()
+            .h(px(48.))
+            .px(px(10.))
+            .gap(px(12.))
+            .rounded(px(9.))
+            .justify_start()
+            .when(selected, |row| row.bg(rgb(palette.selection)))
+            .hover(|style| style.bg(rgb(palette.surface_hover)))
+            .child(art)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_sm()
+                            .text_color(rgb(palette.text))
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_xs()
+                            .text_color(rgb(palette.text_muted))
+                            .child(detail),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(11.5))
+                    .text_color(rgb(palette.text_muted))
+                    .opacity(0.8)
+                    .child(tag),
+            )
+    }
+
+    fn suggestion_heading(palette: CadencePalette, label: &'static str, count: usize) -> Div {
+        div()
+            .px(px(8.))
+            .pt(px(8.))
+            .pb(px(4.))
+            .flex()
+            .justify_between()
+            .text_xs()
+            .text_color(rgb(palette.text_muted))
+            .child(label)
+            .when(count > 0, |head| {
+                head.child(div().opacity(0.65).child(count.to_string()))
+            })
+    }
+
+    /// Stand-ins while Spotify answers.
+    fn suggestion_placeholders(palette: CadencePalette, count: usize) -> Div {
+        let block = |width: f32, height: f32| {
+            div()
+                .w(px(width))
+                .h(px(height))
+                .rounded(px(5.))
+                .bg(rgb(palette.surface_hover))
+        };
+        div().flex().flex_col().children((0..count).map(move |_| {
+            div()
+                .h(px(48.))
+                .px(px(10.))
+                .gap(px(12.))
+                .flex()
+                .items_center()
+                .child(
+                    div()
+                        .size(px(34.))
+                        .flex_none()
+                        .rounded(px(7.))
+                        .bg(rgb(palette.surface_hover)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .child(block(150., 9.))
+                        .child(block(90., 7.)),
+                )
+        }))
+    }
+
     fn suggestion_menu(
         &self,
         palette: CadencePalette,
@@ -365,6 +525,24 @@ impl Toolbar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let library = self.library.read(cx);
+        let images = services::AppServices::image_cache(cx);
+        let motion = !cx.reduce_motion();
+        let query = self.suggestion_query.clone();
+        let wants_live = query.chars().count() >= LIVE_SEARCH_MIN_CHARS;
+        let waiting = wants_live && self.live.is_empty() && self.live_task.is_some();
+        let tile = |url: Option<&str>, icon: CadenceIcon, round: bool| {
+            components::artwork(
+                palette,
+                &images,
+                url,
+                if round {
+                    tokens::SUGGESTION_ARTIST_ARTWORK
+                } else {
+                    tokens::SUGGESTION_ARTWORK
+                },
+                icon,
+            )
+        };
         // Solid, so the page title behind it never shows through the rows.
         let mut menu = components::solid_menu_surface(palette)
             .id("cached-search-suggestions")
@@ -373,133 +551,120 @@ impl Toolbar {
             .top_12()
             .left_0()
             .w(width)
-            .when(!self.suggestions.is_empty(), |menu| {
-                menu.child(
-                    div()
-                        .px_3()
-                        .py_1()
-                        .text_xs()
-                        .text_color(rgb(palette.text_muted))
-                        .child("From your library"),
-                )
-            });
-        for (index, found) in self.suggestions.iter().enumerate() {
-            let Some(track) = found.resolve(library) else {
-                continue;
-            };
-            let found = found.clone();
+            .rounded(px(14.));
+
+        let found: Vec<(usize, &model::Track)> = self
+            .suggestions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, found)| Some((index, found.resolve(library)?)))
+            .collect();
+        if !found.is_empty() {
+            menu = menu.child(Self::suggestion_heading(
+                palette,
+                "From your library",
+                found.len(),
+            ));
+        }
+        for (index, track) in found {
+            let found = self.suggestions[index].clone();
             menu = menu.child(
-                components::button(palette, ("cached-search-track", index))
-                    .test_support()
-                    .w_full()
-                    .h_12()
-                    .px_3()
-                    .gap_2()
-                    .rounded_lg()
-                    .justify_start()
-                    .when(self.suggestion_selection == Some(index), |row| {
-                        row.bg(rgb(palette.selection))
-                    })
-                    .hover(|style| style.bg(rgb(palette.surface_hover)))
-                    .child(components::icon(
-                        CadenceIcon::MusicNote,
-                        tokens::CONTROL_ICON,
-                        palette.text_muted,
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_sm()
-                                    .text_color(rgb(palette.text_primary))
-                                    .child(track.title.clone()),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_xs()
-                                    .text_color(rgb(palette.text_muted))
-                                    .child(track.artist.clone()),
-                            ),
-                    )
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.play_cached(Some(&found), cx)),
-                    ),
+                self.suggestion_row(
+                    palette,
+                    ("cached-search-track", index),
+                    tile(track.artwork_url.as_deref(), CadenceIcon::MusicNote, false),
+                    highlighted(&track.title, &query, palette),
+                    track.artist.clone(),
+                    "In library",
+                    self.suggestion_selection == Some(index),
+                )
+                .test_support()
+                .on_click(cx.listener(move |this, _, _, cx| this.play_cached(Some(&found), cx))),
             );
         }
+
         if !self.live.is_empty() {
+            let mut group = div().flex().flex_col().child(Self::suggestion_heading(
+                palette,
+                "On Spotify",
+                self.live.len(),
+            ));
+            for (index, found) in self.live.iter().enumerate() {
+                let parts = found.parts();
+                let selected = self.suggestion_selection == Some(self.suggestions.len() + index);
+                group = group.child(
+                    self.suggestion_row(
+                        palette,
+                        ("live-search", index),
+                        tile(parts.artwork_url.as_deref(), parts.icon, parts.round),
+                        highlighted(&parts.title, &query, palette),
+                        parts.detail,
+                        parts.tag,
+                        selected,
+                    )
+                    .test_support()
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_live(index, cx))),
+                );
+            }
+            // Spotify's answer settles in; the library rows were already there.
+            menu = menu.child(if motion {
+                group
+                    .relative()
+                    .with_animation(
+                        ("live-in", self.live_serial),
+                        Animation::new(Duration::from_millis(160)).with_easing(ease_out_quint()),
+                        |group, delta| group.opacity(delta).top(px(4. * (1. - delta))),
+                    )
+                    .into_any_element()
+            } else {
+                group.into_any_element()
+            });
+        } else if waiting {
+            menu = menu
+                .child(Self::suggestion_heading(palette, "On Spotify", 0))
+                .child(Self::suggestion_placeholders(
+                    palette,
+                    if self.suggestions.is_empty() { 3 } else { 2 },
+                ));
+        }
+
+        if self.suggestions.is_empty() && self.live.is_empty() && !waiting {
             menu = menu.child(
                 div()
-                    .px_3()
-                    .py_1()
-                    .text_xs()
+                    .px(px(8.))
+                    .py(px(14.))
+                    .text_sm()
                     .text_color(rgb(palette.text_muted))
-                    .child("On Spotify"),
+                    .child(if wants_live {
+                        format!("Nothing for “{query}” in your library or on Spotify yet.")
+                    } else {
+                        format!("Nothing for “{query}” in your library.")
+                    }),
             );
         }
-        for (index, found) in self.live.iter().enumerate() {
-            let (title, detail, icon) = found.parts();
-            let selected = self.suggestion_selection == Some(self.suggestions.len() + index);
-            menu = menu.child(
-                components::button(palette, ("live-search", index))
-                    .test_support()
-                    .w_full()
-                    .h_12()
-                    .px_3()
-                    .gap_2()
-                    .rounded_lg()
-                    .justify_start()
-                    .when(selected, |row| row.bg(rgb(palette.selection)))
-                    .hover(|style| style.bg(rgb(palette.surface_hover)))
-                    .child(components::icon(
-                        icon,
-                        tokens::CONTROL_ICON,
-                        palette.text_muted,
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_sm()
-                                    .text_color(rgb(palette.text_primary))
-                                    .child(title),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_xs()
-                                    .text_color(rgb(palette.text_muted))
-                                    .child(detail),
-                            ),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| this.open_live(index, cx))),
-            );
-        }
-        let query = self.suggestion_query.clone();
+
         let selected = self.suggestion_selection == Some(self.suggestions.len() + self.live.len());
         menu = menu
             .when(
-                !self.suggestions.is_empty() || !self.live.is_empty(),
-                |menu| menu.child(div().h(px(1.)).mx_2().my_1().bg(rgb(palette.border))),
+                !self.suggestions.is_empty() || !self.live.is_empty() || waiting,
+                |menu| {
+                    menu.child(
+                        div()
+                            .h(px(1.))
+                            .mx(px(6.))
+                            .my(px(6.))
+                            .bg(rgb(palette.border)),
+                    )
+                },
             )
             .child(
                 components::button(palette, "cached-search-submit")
                     .test_support()
                     .w_full()
-                    .h_11()
-                    .px_3()
-                    .gap_2p5()
-                    .rounded_lg()
+                    .h(px(46.))
+                    .px(px(16.))
+                    .gap(px(10.))
+                    .rounded(px(9.))
                     .justify_start()
                     .when(selected, |row| row.bg(rgb(palette.selection)))
                     .hover(|style| style.bg(rgb(palette.surface_hover)))
@@ -520,18 +685,18 @@ impl Toolbar {
                     )
                     .child(
                         div()
-                            .px_1p5()
+                            .px(px(7.))
                             .py_0p5()
-                            .rounded_md()
+                            .rounded(px(6.))
                             .bg(gpui_kit::rgba(0xFFFFFF14))
                             .text_color(rgb(palette.text))
                             .text_size(tokens::CAPTION_TEXT)
-                            .child("Enter"),
+                            .child("↵"),
                     )
                     .on_click(cx.listener(|this, _, _, cx| this.submit_search_from_field(cx))),
             );
-        menu.on_mouse_down_out(
-            cx.listener(|this, event: &gpui_kit::MouseDownEvent, _, cx| {
+        let menu = menu.on_mouse_down_out(cx.listener(
+            |this, event: &gpui_kit::MouseDownEvent, _, cx| {
                 if !this
                     .search_bounds
                     .get()
@@ -539,8 +704,20 @@ impl Toolbar {
                 {
                     this.dismiss_suggestions(cx);
                 }
-            }),
-        )
+            },
+        ));
+        // The panel fades in and settles down 4px from the field. Closing is
+        // instant: the field is where the listener is already looking.
+        if motion {
+            menu.with_animation(
+                "search-suggestions-open",
+                Animation::new(Duration::from_millis(140)).with_easing(ease_out_quint()),
+                |menu, delta| menu.opacity(delta).top(px(48. + 4. * (1. - delta))),
+            )
+            .into_any_element()
+        } else {
+            menu.into_any_element()
+        }
     }
 
     fn search_field(

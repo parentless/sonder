@@ -44,6 +44,13 @@ const MONTHS: &[Month] = &[
                 date: "Nov 18, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.62",
+                        notes: &[Note(
+                            Better,
+                            "A new search dropdown: cover art on every result, the letters you typed in bold, a quiet label on the right for songs, albums and artists, counts on each section, and placeholders while Spotify answers.",
+                        )],
+                    },
+                    Release {
                         version: "0.8.61",
                         notes: &[Note(
                             Fixed,
