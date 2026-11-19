@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.61",
+    "cadence": "0.8.62",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "5f0877fb92df3ee051f4338eddf5cef0a0da4766",
-    "lockfile_sha256": "a93fe4075255d370f068e72c9fea4ad0ac47c5a5d74f79910ef375de3583cb9f"
+    "revision": "dadd3a5512c553bbcc8df85a3ab99459f9987288",
+    "lockfile_sha256": "0d0c7e91a07d68b94d0f608b5fe562bf954bfd5598b8752fffc3c27bc8ad6a77"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/44452660172",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/44631225443",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.61",
+      "cadence": "0.8.62",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "5f0877fb92df3ee051f4338eddf5cef0a0da4766",
-      "lockfile_sha256": "a93fe4075255d370f068e72c9fea4ad0ac47c5a5d74f79910ef375de3583cb9f"
+      "revision": "dadd3a5512c553bbcc8df85a3ab99459f9987288",
+      "lockfile_sha256": "0d0c7e91a07d68b94d0f608b5fe562bf954bfd5598b8752fffc3c27bc8ad6a77"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/44452660172"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/44631225443"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -113,6 +113,7 @@
     "0.8.58: the streaming-refused dialog offers Try again later or Set up Spotify's player with the quiet links below it; Settings (cache scene) and What's new show the new version and release; eight references are new (soloist-setup-key, soloist-setup-pairing)",
     "0.8.59: only Settings (the version) and the What's new list changed; local files now play through any player",
     "0.8.60: only Settings (the version) and the What's new list changed; saving audio from a link finds the song on a page",
-    "0.8.61: only Settings (the version) and the What's new list changed; failed links retry plainly"
+    "0.8.61: only Settings (the version) and the What's new list changed; failed links retry plainly",
+    "0.8.62: the search dropdown has cover art, bold matches, type labels and section counts (search-live, search-cached); Settings (the version) and the What's new list changed"
   ]
 }
