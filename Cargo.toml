@@ -1,6 +1,6 @@
 [package]
 name = "cadence"
-version = "0.8.59"
+version = "0.8.60"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/parentless/sonder"
@@ -39,6 +39,7 @@ tokio = { version = "1.53", features = ["io-util", "macros", "net", "process", "
 # Reaches Spotify Soloist, the official player, on this computer's own address.
 # librespot already builds this version.
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "handshake"] }
+regex = "1"
 url = "2.5"
 percent-encoding = "2.3"
 sha2 = "0.10"

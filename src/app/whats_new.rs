@@ -44,6 +44,13 @@ const MONTHS: &[Month] = &[
                 date: "Nov 18, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.60",
+                        notes: &[Note(
+                            Fixed,
+                            "Saving audio from a link works on far more pages. Sonder now looks through a page for the song itself, in a player, a download link or an embedded video, and checks it really is audio before saving. WAV saves no longer fail on songs that have cover art.",
+                        )],
+                    },
+                    Release {
                         version: "0.8.59",
                         notes: &[Note(
                             Fixed,

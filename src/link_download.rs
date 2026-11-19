@@ -10,6 +10,8 @@
 //!
 //! ffmpeg does the conversions (MP3, FLAC, M4A, Ogg, WAV) and tags the file.
 //! Everything here blocks, so callers run it on its own thread.
+mod page;
+
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use serde::Deserialize;
 use std::{
@@ -154,6 +156,12 @@ pub struct Probe {
     /// The artist is one the source named, not a channel or uploader stood
     /// in for it.
     pub tagged_artist: bool,
+    /// Where the audio really is when the link was a page that holds it: a
+    /// file on the page, or an embedded player's address.
+    pub source_url: Option<String>,
+    /// The page the audio was found on. Some servers hand a file only to
+    /// someone who came from the page.
+    pub referer: Option<String>,
 }
 
 /// Why a link was turned down before any work started.
@@ -212,7 +220,8 @@ pub fn parse_links(text: &str) -> Vec<String> {
 }
 
 const DIRECT_EXTENSIONS: &[&str] = &[
-    "mp3", "flac", "m4a", "ogg", "oga", "wav", "aac", "opus", "wma", "aif", "aiff", "mka",
+    "mp3", "flac", "m4a", "m4b", "ogg", "oga", "wav", "aac", "opus", "wma", "aif", "aiff", "mka",
+    "weba",
 ];
 /// The file types Sonder plays as they are.
 const PLAYABLE: &[&str] = &["mp3", "flac", "m4a", "ogg", "oga", "wav"];
@@ -267,8 +276,17 @@ pub fn sanitize_file_name(name: &str) -> String {
         .chars()
         .take(150)
         .collect();
-    let reserved = ["CON", "PRN", "AUX", "NUL"];
-    if trimmed.is_empty() || reserved.contains(&trimmed.to_ascii_uppercase().as_str()) {
+    let first_word = trimmed
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_ascii_uppercase();
+    let reserved = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    if trimmed.is_empty() || reserved.contains(&first_word.as_str()) {
         "Downloaded song".to_owned()
     } else {
         trimmed
@@ -698,6 +716,8 @@ fn probe_from_json(json: &str) -> Result<Probe> {
         direct: false,
         source_codec: best_audio_codec(&info.formats),
         tagged_artist,
+        source_url: None,
+        referer: None,
     })
 }
 
@@ -743,30 +763,98 @@ fn run_capture(
 }
 
 /// Looks a link up without saving anything.
+///
+/// A link to an audio file is taken as it is. Anything else goes to the
+/// downloader first, which knows 1,800+ sites. When it cannot find audio, the
+/// page itself is read for a file or an embedded player to save instead.
 pub fn probe(url: &str, cancel: &AtomicBool, report: Report<'_>) -> Result<Probe> {
     if let Some(reason) = refusal(url) {
         bail!(reason);
     }
     if let Some(extension) = direct_extension(url) {
-        return Ok(Probe {
-            title: decoded_file_stem(url),
-            artist: None,
-            duration_secs: None,
-            thumbnail: None,
-            site: url::Url::parse(url)
-                .ok()
-                .and_then(|parsed| {
-                    parsed
-                        .host_str()
-                        .map(|host| host.trim_start_matches("www.").to_owned())
-                })
-                .unwrap_or_default(),
-            playlist_count: None,
-            direct: true,
-            source_codec: Some(extension),
-            tagged_artist: false,
-        });
+        return Ok(direct_probe(url, &extension, None, None, None));
     }
+    let downloader_error = match probe_with_yt_dlp(url, cancel, report) {
+        Ok(probe) => return Ok(probe),
+        Err(error) => error,
+    };
+    ensure!(!cancel.load(Ordering::Relaxed), cancelled());
+    if !retry_on_the_page(&downloader_error.to_string()) {
+        return Err(downloader_error);
+    }
+    match find_on_page(url, cancel) {
+        Found::Probe(probe) => Ok(probe),
+        Found::Embeds { page, embeds } => {
+            for embed in embeds {
+                ensure!(!cancel.load(Ordering::Relaxed), cancelled());
+                if let Ok(mut probe) = probe_with_yt_dlp(&embed, cancel, &mut |_| {}) {
+                    probe.source_url = Some(embed);
+                    probe.referer = Some(page.clone());
+                    return Ok(probe);
+                }
+            }
+            bail!(NO_AUDIO)
+        }
+        Found::Nothing => bail!(NO_AUDIO),
+        Found::Withheld => {
+            bail!("That page links to audio, but the site won’t hand it over to Sonder.")
+        }
+        Found::Unreachable => Err(downloader_error),
+    }
+}
+
+const NO_AUDIO: &str = "Sonder looked through that page and found no audio it can save.";
+
+/// Whether looking at the page itself could help after the downloader's
+/// answer. A cancel, a missing tool or a copy-protection verdict could not.
+fn retry_on_the_page(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    !(lower.contains("copy-protected") || lower.contains("cancelled"))
+}
+
+fn host_of(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| {
+            parsed
+                .host_str()
+                .map(|host| host.trim_start_matches("www.").to_owned())
+        })
+        .unwrap_or_default()
+}
+
+/// A link to one audio file that Sonder fetches itself. `page` is where the
+/// link was found, when it was found on a page.
+fn direct_probe(
+    url: &str,
+    extension: &str,
+    page: Option<(&str, Option<&str>)>,
+    disposition: Option<&str>,
+    source: Option<&str>,
+) -> Probe {
+    let named = |file: &str| {
+        Path::new(file)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().replace(['_', '+'], " "))
+            .map(|stem| stem.trim().to_owned())
+            .filter(|stem| !stem.is_empty())
+    };
+    let title = page
+        .and_then(|(_, title)| title.map(str::to_owned))
+        .or_else(|| disposition.and_then(named))
+        .unwrap_or_else(|| decoded_file_stem(source.unwrap_or(url)));
+    Probe {
+        title,
+        site: host_of(page.map_or(url, |(page, _)| page)),
+        direct: true,
+        source_codec: Some(extension.to_owned()),
+        source_url: source.map(str::to_owned),
+        referer: page.map(|(page, _)| page.to_owned()),
+        ..Probe::default()
+    }
+}
+
+fn probe_with_yt_dlp(url: &str, cancel: &AtomicBool, report: Report<'_>) -> Result<Probe> {
     let tools = ensure_tools(false, true, cancel, report)?;
     let yt_dlp = tools.yt_dlp.context("the downloader is missing")?;
     refresh_if_stale(&yt_dlp);
@@ -806,6 +894,214 @@ pub fn probe(url: &str, cancel: &AtomicBool, report: Report<'_>) -> Result<Probe
         Err(error) => return Err(error),
     };
     probe_from_json(&json)
+}
+
+// ------------------------------------------------------------ page reading
+
+/// The most of a web page that is read.
+const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
+/// How much of a file is read to tell what it is.
+const HEAD_BYTES: usize = 2048;
+/// A browser's name. Many sites turn away anything that does not give one.
+const BROWSER: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Sonder";
+
+/// A client for reading pages and fetching audio files.
+fn web_client() -> Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .user_agent(BROWSER)
+        .connect_timeout(Duration::from_secs(20))
+        .read_timeout(Duration::from_secs(30))
+        .build()?)
+}
+
+/// An audio file, as the server it lives on describes it.
+struct Media {
+    url: String,
+    extension: String,
+    file_name: Option<String>,
+}
+
+/// What a link turned out to be.
+enum Fetched {
+    Audio(Media),
+    Page { url: url::Url, body: String },
+    Other,
+}
+
+enum Found {
+    /// Audio Sonder can fetch itself.
+    Probe(Probe),
+    /// No audio, but players embedded in the page that a downloader may know.
+    Embeds { page: String, embeds: Vec<String> },
+    /// The page loaded and holds nothing.
+    Nothing,
+    /// The page names audio files, but the site turned every one away.
+    Withheld,
+    /// The page could not be read at all.
+    Unreachable,
+}
+
+fn request(
+    client: &reqwest::Client,
+    url: &str,
+    referer: Option<&str>,
+    ranged: bool,
+) -> reqwest::RequestBuilder {
+    let mut request = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "audio/*,text/html;q=0.9,*/*;q=0.8");
+    if let Some(referer) = referer {
+        request = request.header(reqwest::header::REFERER, referer);
+    }
+    if ranged {
+        request = request.header(reqwest::header::RANGE, "bytes=0-4095");
+    }
+    request
+}
+
+async fn read_head(response: &mut reqwest::Response, want: usize) -> Result<Vec<u8>> {
+    let mut head = Vec::new();
+    while head.len() < want {
+        match response.chunk().await? {
+            Some(chunk) => head.extend_from_slice(&chunk),
+            None => break,
+        }
+    }
+    Ok(head)
+}
+
+fn media_of(response: &reqwest::Response, head: &[u8]) -> Option<Media> {
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok());
+    let url = response.url().to_string();
+    let extension = page::audio_kind(content_type, head, direct_extension(&url).as_deref())?;
+    let file_name = response
+        .headers()
+        .get(reqwest::header::CONTENT_DISPOSITION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(page::disposition_name);
+    Some(Media {
+        url,
+        extension,
+        file_name,
+    })
+}
+
+/// Opens a link and says whether it is an audio file or a page, reading a
+/// page in full and a file only as far as its first bytes.
+async fn fetch(client: &reqwest::Client, url: &str, referer: Option<&str>) -> Fetched {
+    let Ok(mut response) = request(client, url, referer, false).send().await else {
+        return Fetched::Other;
+    };
+    if !response.status().is_success() {
+        return Fetched::Other;
+    }
+    let Ok(mut body) = read_head(&mut response, HEAD_BYTES).await else {
+        return Fetched::Other;
+    };
+    if let Some(media) = media_of(&response, &body) {
+        return Fetched::Audio(media);
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let markup = [
+        "text/html",
+        "application/xhtml",
+        "text/plain",
+        "application/json",
+    ]
+    .iter()
+    .any(|kind| content_type.starts_with(kind))
+        || content_type.is_empty();
+    if !markup {
+        return Fetched::Other;
+    }
+    while body.len() < MAX_PAGE_BYTES {
+        match response.chunk().await {
+            Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    Fetched::Page {
+        url: response.url().clone(),
+        body: String::from_utf8_lossy(&body).into_owned(),
+    }
+}
+
+/// Whether `url` is an audio file, from a short read of its start.
+async fn sniff(client: &reqwest::Client, url: &str, referer: &str) -> Option<Media> {
+    let mut response = request(client, url, Some(referer), true)
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let head = read_head(&mut response, 64).await.ok()?;
+    media_of(&response, &head)
+}
+
+/// Reads the page at `url` for a song to save.
+fn find_on_page(url: &str, cancel: &AtomicBool) -> Found {
+    let Ok(runtime) = runtime() else {
+        return Found::Unreachable;
+    };
+    let Ok(client) = web_client() else {
+        return Found::Unreachable;
+    };
+    runtime.block_on(async {
+        let (page, body) = match fetch(&client, url, None).await {
+            // The link was a file all along, with nothing in its address to say so.
+            Fetched::Audio(media) => {
+                return Found::Probe(direct_probe(
+                    url,
+                    &media.extension,
+                    None,
+                    media.file_name.as_deref(),
+                    Some(&media.url),
+                ));
+            }
+            Fetched::Page { url, body } => (url, body),
+            Fetched::Other => return Found::Unreachable,
+        };
+        let found = page::scan(&body, &page);
+        for candidate in &found.audio {
+            if cancel.load(Ordering::Relaxed) {
+                return Found::Nothing;
+            }
+            if let Some(media) = sniff(&client, candidate, page.as_str()).await {
+                return Found::Probe(direct_probe(
+                    page.as_str(),
+                    &media.extension,
+                    Some((
+                        page.as_str(),
+                        // A page with several files names none of them.
+                        found.title.as_deref().filter(|_| found.audio.len() == 1),
+                    )),
+                    media.file_name.as_deref(),
+                    Some(&media.url),
+                ));
+            }
+        }
+        if found.embeds.is_empty() {
+            if found.audio.is_empty() {
+                Found::Nothing
+            } else {
+                Found::Withheld
+            }
+        } else {
+            Found::Embeds {
+                page: page.to_string(),
+                embeds: found.embeds,
+            }
+        }
+    })
 }
 
 // ---------------------------------------------------------------- errors
@@ -937,7 +1233,14 @@ pub fn save(job: &Job, cancel: &Arc<AtomicBool>, report: Report<'_>) -> Result<V
 }
 
 fn save_direct(job: &Job, cancel: &Arc<AtomicBool>, report: Report<'_>) -> Result<Vec<PathBuf>> {
-    let extension = direct_extension(&job.url).unwrap_or_else(|| "mp3".to_owned());
+    let source = job.probe.source_url.as_deref().unwrap_or(&job.url);
+    let extension = job
+        .probe
+        .source_codec
+        .clone()
+        .filter(|_| job.probe.direct)
+        .or_else(|| direct_extension(source))
+        .unwrap_or_else(|| "mp3".to_owned());
     let stem = sanitize_file_name(&job.probe.title);
     let plays_as_is = PLAYABLE.contains(&extension.as_str());
     let target_extension = match job.format {
@@ -954,8 +1257,14 @@ fn save_direct(job: &Job, cancel: &Arc<AtomicBool>, report: Report<'_>) -> Resul
         destination.with_extension(format!("{target_extension}.part"))
     };
     let fetched = runtime()?.block_on(async {
-        use futures::StreamExt as _;
-        let response = client()?.get(&job.url).send().await?.error_for_status()?;
+        let response = request(&web_client()?, source, job.probe.referer.as_deref(), false)
+            .send()
+            .await?;
+        ensure!(
+            response.status().is_success(),
+            "The site refused the download (error {}). Try again later.",
+            response.status().as_u16()
+        );
         if let Some(length) = response.content_length() {
             ensure!(
                 length <= MAX_DIRECT_BYTES,
@@ -963,13 +1272,22 @@ fn save_direct(job: &Job, cancel: &Arc<AtomicBool>, report: Report<'_>) -> Resul
             );
         }
         let total = response.content_length();
+        let mut response = response;
         let mut file = std::fs::File::create(&raw)?;
-        let mut stream = response.bytes_stream();
         let mut received = 0u64;
+        let mut checked = false;
         let started = std::time::Instant::now();
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = response.chunk().await? {
             ensure!(!cancel.load(Ordering::Relaxed), cancelled());
-            let chunk = chunk?;
+            if !checked {
+                // A page saved as a song would only fail later, in a
+                // confusing way.
+                checked = true;
+                ensure!(
+                    !chunk.trim_ascii_start().starts_with(b"<"),
+                    "That link opens a web page, not an audio file."
+                );
+            }
             received += chunk.len() as u64;
             ensure!(
                 received <= MAX_DIRECT_BYTES,
@@ -983,6 +1301,7 @@ fn save_direct(job: &Job, cancel: &Arc<AtomicBool>, report: Report<'_>) -> Resul
                 item: None,
             });
         }
+        ensure!(received > 0, "That link gave no audio.");
         file.sync_all()?;
         Ok(())
     });
@@ -1023,6 +1342,9 @@ fn save_direct(job: &Job, cancel: &Arc<AtomicBool>, report: Report<'_>) -> Resul
     };
     if !temp.is_file() || std::fs::metadata(&temp).map(|meta| meta.len()).unwrap_or(0) == 0 {
         let _ = std::fs::remove_file(&temp);
+        if errors.contains("Invalid data found") {
+            bail!("That file isn’t audio Sonder can read.");
+        }
         bail!(
             "The converter could not read that file{}",
             errors
@@ -1049,9 +1371,13 @@ fn container_for(extension: &str) -> &'static str {
 /// The yt-dlp arguments for a job, without the program or the link.
 fn yt_dlp_arguments(job: &Job, ffmpeg: &Path) -> Vec<String> {
     let (codec, quality) = job.format.extraction(job.probe.source_codec.as_deref());
-    let template = job
-        .folder
-        .join("%(artist,uploader,channel&{} - |)s%(title)s.%(ext)s");
+    // A `%` in the folder's own name would be read as part of the template.
+    let folder = job.folder.to_string_lossy().replace('%', "%%");
+    let template = format!(
+        "{}{}%(artist,uploader,channel&{{}} - |)s%(title)s.%(ext)s",
+        folder,
+        std::path::MAIN_SEPARATOR
+    );
     let mut args: Vec<String> = [
         "--newline",
         "--no-colors",
@@ -1072,9 +1398,6 @@ fn yt_dlp_arguments(job: &Job, ffmpeg: &Path) -> Vec<String> {
         "--audio-format",
         codec,
         "--embed-metadata",
-        "--embed-thumbnail",
-        "--convert-thumbnails",
-        "jpg",
         "--progress-template",
         "download:SONDER_PROGRESS %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s %(progress.speed)s",
         "--print",
@@ -1090,6 +1413,11 @@ fn yt_dlp_arguments(job: &Job, ffmpeg: &Path) -> Vec<String> {
             r"title:(?P<artist>.+?)\s+[-–—]\s+(?P<title>.+)".to_owned(),
         ]);
     }
+    // WAV has nowhere to keep a picture, and yt-dlp fails the whole save
+    // rather than skip it.
+    if codec != "wav" {
+        args.extend(["--embed-thumbnail", "--convert-thumbnails", "jpg"].map(str::to_owned));
+    }
     if let Some(quality) = quality {
         args.extend(["--audio-quality".to_owned(), quality.to_owned()]);
     }
@@ -1097,7 +1425,7 @@ fn yt_dlp_arguments(job: &Job, ffmpeg: &Path) -> Vec<String> {
         "--ffmpeg-location".to_owned(),
         ffmpeg.to_string_lossy().into_owned(),
     ]);
-    args.extend(["-o".to_owned(), template.to_string_lossy().into_owned()]);
+    args.extend(["-o".to_owned(), template]);
     if job.playlist {
         args.extend([
             "--yes-playlist".to_owned(),
@@ -1107,8 +1435,17 @@ fn yt_dlp_arguments(job: &Job, ffmpeg: &Path) -> Vec<String> {
     } else {
         args.push("--no-playlist".to_owned());
     }
+    if let (Some(referer), Some(_)) = (&job.probe.referer, &job.probe.source_url) {
+        // An embedded player often serves only to the page that embeds it.
+        args.extend(["--referer".to_owned(), referer.clone()]);
+    }
     args.push("--".to_owned());
-    args.push(job.url.clone());
+    args.push(
+        job.probe
+            .source_url
+            .clone()
+            .unwrap_or_else(|| job.url.clone()),
+    );
     args
 }
 
@@ -1287,6 +1624,8 @@ mod tests {
         );
         assert_eq!(sanitize_file_name("  ..  "), "Downloaded song");
         assert_eq!(sanitize_file_name("NUL"), "Downloaded song");
+        assert_eq!(sanitize_file_name("com1.live"), "Downloaded song");
+        assert_eq!(sanitize_file_name("Con Air"), "Con Air");
         assert_eq!(sanitize_file_name(&"a".repeat(400)).chars().count(), 150);
     }
 
@@ -1450,6 +1789,188 @@ mod tests {
         let list = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"));
         assert!(list.contains(&"--yes-playlist".to_owned()));
         assert!(!list.contains(&"--no-playlist".to_owned()));
+    }
+
+    #[test]
+    fn wav_saves_skip_the_thumbnail_it_cannot_hold() {
+        let job = |format| Job {
+            url: "https://a.example/watch?v=1".into(),
+            format,
+            folder: PathBuf::from("/music"),
+            playlist: false,
+            probe: Probe::default(),
+        };
+        let wav = yt_dlp_arguments(&job(Format::Wav), Path::new("/ff/ffmpeg"));
+        assert!(!wav.contains(&"--embed-thumbnail".to_owned()));
+        let mp3 = yt_dlp_arguments(&job(Format::Mp3), Path::new("/ff/ffmpeg"));
+        assert!(mp3.contains(&"--embed-thumbnail".to_owned()));
+    }
+
+    #[test]
+    fn a_percent_sign_in_the_folder_does_not_break_the_name_template() {
+        let job = Job {
+            url: "https://a.example/watch?v=1".into(),
+            format: Format::Mp3,
+            folder: PathBuf::from("/music/100% Hits"),
+            playlist: false,
+            probe: Probe::default(),
+        };
+        let args = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"));
+        let template = &args[args.iter().position(|a| a == "-o").unwrap() + 1];
+        assert!(template.starts_with("/music/100%% Hits"), "{template}");
+    }
+
+    #[test]
+    fn a_page_found_player_is_saved_from_its_own_address() {
+        let job = Job {
+            url: "https://a.example/post".into(),
+            format: Format::Mp3,
+            folder: PathBuf::from("/music"),
+            playlist: false,
+            probe: Probe {
+                source_url: Some("https://player.example/v/7".into()),
+                referer: Some("https://a.example/post".into()),
+                ..Probe::default()
+            },
+        };
+        let args = yt_dlp_arguments(&job, Path::new("/ff/ffmpeg"));
+        assert_eq!(args.last().unwrap(), "https://player.example/v/7");
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--referer", "https://a.example/post"])
+        );
+    }
+
+    /// A one-page website on this machine: `/post` holds a player for
+    /// `/media/song`, which has no extension and says what it is only in its
+    /// headers; `/blocked` serves a page where the song should be.
+    fn serve_site() -> String {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = listener.local_addr().expect("address");
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                std::thread::spawn(move || {
+                    let mut buffer = [0u8; 4096];
+                    let read = stream.read(&mut buffer).unwrap_or(0);
+                    let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+                    let path = request.split_whitespace().nth(1).unwrap_or("/").to_owned();
+                    let referred = request
+                        .to_ascii_lowercase()
+                        .contains("referer: http://127.0.0.1");
+                    let mut audio = b"ID3\x04\0\0\0\0\0\0".to_vec();
+                    audio.extend(std::iter::repeat_n(0x55u8, 3000));
+                    let (kind, body): (&str, Vec<u8>) = match path.as_str() {
+                        "/post" => (
+                            "text/html",
+                            br#"<title>Night Drive &amp; Co</title><audio controls><source src="/media/song"></audio>
+                                <a href="/about">about</a>"#
+                                .to_vec(),
+                        ),
+                        "/media/song" if referred => ("audio/mpeg", audio),
+                        "/media/song" => ("text/html", b"<html>Forbidden</html>".to_vec()),
+                        "/plain.bin" => ("application/octet-stream", audio),
+                        "/empty" => ("text/html", b"<title>Nothing</title>".to_vec()),
+                        _ => ("text/html", b"<html></html>".to_vec()),
+                    };
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = stream.write_all(head.as_bytes());
+                    let _ = stream.write_all(&body);
+                });
+            }
+        });
+        format!("http://{address}")
+    }
+
+    #[test]
+    fn a_page_with_a_player_is_saved_as_the_song_it_holds() {
+        let site = serve_site();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let found = match find_on_page(&format!("{site}/post"), &cancel) {
+            Found::Probe(probe) => probe,
+            _ => panic!("the page holds a song"),
+        };
+        assert!(found.direct);
+        assert_eq!(found.title, "Night Drive & Co");
+        assert_eq!(found.source_codec.as_deref(), Some("mp3"));
+        assert_eq!(found.source_url, Some(format!("{site}/media/song")));
+        assert_eq!(found.referer, Some(format!("{site}/post")));
+
+        let folder = std::env::temp_dir().join(format!("sonder-page-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let job = Job {
+            url: format!("{site}/post"),
+            format: Format::Best,
+            folder: folder.clone(),
+            playlist: false,
+            probe: found,
+        };
+        let files = save(&job, &cancel, &mut |_| {}).expect("saves");
+        assert_eq!(files, [folder.join("Night Drive & Co.mp3")]);
+        assert!(std::fs::metadata(&files[0]).unwrap().len() > 3000);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_link_to_audio_with_no_extension_is_recognised_by_what_it_sends() {
+        let site = serve_site();
+        let cancel = AtomicBool::new(false);
+        // The server calls it plain bytes; the bytes themselves say MP3.
+        match find_on_page(&format!("{site}/plain.bin"), &cancel) {
+            Found::Probe(probe) => {
+                assert!(probe.direct);
+                assert_eq!(probe.source_codec.as_deref(), Some("mp3"));
+            }
+            _ => panic!("the link is audio"),
+        }
+    }
+
+    #[test]
+    fn a_page_with_no_audio_says_so_and_an_unreachable_one_does_not() {
+        let site = serve_site();
+        let cancel = AtomicBool::new(false);
+        assert!(matches!(
+            find_on_page(&format!("{site}/empty"), &cancel),
+            Found::Nothing
+        ));
+        // Nothing listens here.
+        assert!(matches!(
+            find_on_page("http://127.0.0.1:9/none", &cancel),
+            Found::Unreachable
+        ));
+    }
+
+    #[test]
+    fn a_saved_page_is_refused_instead_of_kept_as_a_song() {
+        let site = serve_site();
+        let folder = std::env::temp_dir().join(format!("sonder-refuse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let job = Job {
+            url: format!("{site}/media/song"),
+            format: Format::Best,
+            folder: folder.clone(),
+            playlist: false,
+            probe: Probe {
+                direct: true,
+                title: "Song".into(),
+                source_codec: Some("mp3".into()),
+                ..Probe::default()
+            },
+        };
+        let error = save(&job, &cancel, &mut |_| {}).expect_err("a page is not a song");
+        assert!(error.to_string().contains("web page"), "{error}");
+        assert!(
+            std::fs::read_dir(&folder)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(true),
+            "no half-saved file is left"
+        );
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     /// Hits the network; run by hand with `cargo test real_links -- --ignored --nocapture`.

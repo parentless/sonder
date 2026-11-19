@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "cadence"
-version = "0.8.59"
+version = "0.8.60"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -986,6 +986,7 @@ dependencies = [
  "open",
  "percent-encoding",
  "raw-window-handle",
+ "regex",
  "reqwest",
  "ringbuf",
  "rspotify",
