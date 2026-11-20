@@ -951,6 +951,15 @@ fn artists_card(
             .mt_1()
             .mb(Rems(0.75)),
         )
+        .when(artists.is_empty(), |card| {
+            card.child(
+                div()
+                    .py_2()
+                    .text_sm()
+                    .text_color(rgb(palette.text_muted))
+                    .child("Spotify has no top artists for you yet. Listen a little more."),
+            )
+        })
         .children(artists.iter().enumerate().map(|(index, artist)| {
             div()
                 .id(("profile-artist", index))
