@@ -28,6 +28,7 @@ pub(super) struct Workspace {
     pub(super) album: Entity<catalog::AlbumPage>,
     pub(super) settings: Entity<settings::Settings>,
     pub(super) whats_new: Entity<whats_new::WhatsNewPage>,
+    pub(super) profile: Entity<profile::ProfilePage>,
     pub(super) sidebar: Entity<sidebar::Sidebar>,
     pub(super) toolbar: Entity<chrome::Toolbar>,
     pub(super) player_bar: Entity<player_bar::PlayerBar>,
@@ -147,6 +148,7 @@ impl Workspace {
             }));
         }
         let whats_new = cx.new(|_| whats_new::WhatsNewPage::new());
+        let profile = cx.new(|cx| profile::ProfilePage::new(backend.clone(), cx));
         let settings = cx.new(|cx| settings::Settings::new(window, cx));
         subscriptions.push(cx.subscribe_in(
             &settings,
@@ -373,6 +375,7 @@ impl Workspace {
             album,
             settings,
             whats_new,
+            profile,
             sidebar,
             toolbar,
             player_bar,
@@ -420,6 +423,7 @@ impl Workspace {
             Route::Artist => self.artist.clone().into_any_element(),
             Route::Album => self.album.clone().into_any_element(),
             Route::Settings => self.settings.clone().into_any_element(),
+            Route::Profile => self.profile.clone().into_any_element(),
             Route::WhatsNew => self.whats_new.clone().into_any_element(),
         }
     }

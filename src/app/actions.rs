@@ -397,7 +397,11 @@ impl Workspace {
         if route == Route::WhatsNew {
             return self.open_whats_new(cx);
         }
+        let already_there = self.router.route() == route;
         self.router.navigate(route);
+        if route == Route::Profile && !already_there {
+            self.profile.update(cx, |page, cx| page.opened(cx));
+        }
         if route == Route::LocalFiles {
             // Picks up files added or changed since the last look.
             self.library

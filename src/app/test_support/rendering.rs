@@ -28,6 +28,10 @@ enum Scene {
     PlaylistCollapsed,
     UpdateAvailable,
     WhatsNew,
+    Profile,
+    ProfileLoading,
+    ProfileEmpty,
+    ProfileScrolled,
     PlaylistZoomSmall,
     PlaylistZoomLarge,
     ArtistMenu,
@@ -104,6 +108,10 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("sidebar-collapsed", Scene::PlaylistCollapsed),
         ("update-available", Scene::UpdateAvailable),
         ("whats-new", Scene::WhatsNew),
+        ("profile", Scene::Profile),
+        ("profile-loading", Scene::ProfileLoading),
+        ("profile-empty", Scene::ProfileEmpty),
+        ("profile-scrolled", Scene::ProfileScrolled),
         ("playlist-zoom-small", Scene::PlaylistZoomSmall),
         ("playlist-zoom-large", Scene::PlaylistZoomLarge),
         ("settings", Scene::Settings),
@@ -508,6 +516,14 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     });
                 }
                 Scene::WhatsNew => workspace.open_whats_new(cx),
+                Scene::Profile | Scene::ProfileLoading | Scene::ProfileEmpty | Scene::ProfileScrolled => {
+                    workspace.navigate(Route::Profile, cx);
+                    workspace.profile.update(cx, |page, cx| match scene {
+                        Scene::ProfileLoading => page.seed_loading(cx),
+                        Scene::ProfileEmpty => page.seed(Default::default(), cx),
+                        _ => page.seed(profile_stats(), cx),
+                    });
+                }
                 Scene::Settings | Scene::SettingsAutoplayOff | Scene::SettingsCache => {
                     workspace.open_settings(cx);
                     if matches!(scene, Scene::SettingsAutoplayOff) {
@@ -672,6 +688,31 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             })
             .unwrap();
             settle(&mut cx, handle.into());
+        }
+        Scene::ProfileScrolled => {
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.dispatch_event(
+                    gpui_kit::ScrollWheelEvent {
+                        position: window.find("profile-page").bounds().center(),
+                        delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-20000.))),
+                        ..Default::default()
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+            })
+            .unwrap();
+            settle(&mut cx, handle.into());
+            cx.update_window(handle.into(), |_, window, _| {
+                // The last artist and the footnote must be reachable.
+                let last = window.find(("profile-artist", 4usize)).bounds();
+                let viewport = window.find("profile-page").bounds();
+                assert!(
+                    last.top() >= viewport.top() && last.bottom() <= viewport.bottom(),
+                    "last artist row is not reachable"
+                );
+            })
+            .unwrap();
         }
         Scene::SearchGalleryScrolled => {
             cx.update_window(handle.into(), |_, window, cx| {
@@ -1579,4 +1620,67 @@ pub(crate) fn run() {
         artifacts.display()
     );
     println!("Native visual checks: {count} repeatable cases, {mismatches} mismatches");
+}
+
+/// A listener who plays most after dark, for the profile page.
+fn profile_stats() -> crate::storage::ListeningStats {
+    use crate::storage::{ArtistHours, ListeningStats};
+    let mut heat = [[0u32; 24]; 7];
+    for (day, hours) in heat.iter_mut().enumerate() {
+        for (hour, minutes) in hours.iter_mut().enumerate() {
+            // Busiest late in the evening, quiet at night and in the morning.
+            let base = [
+                6., 4., 2., 1., 0.5, 0.5, 1., 2., 3., 3., 3., 3., 3., 3., 3., 4., 4., 5., 6., 8.,
+                10., 12., 14., 16.,
+            ][hour];
+            let weekend = if day >= 5 { 1.2 } else { 1. };
+            *minutes = (base * weekend * (0.7 + ((day * 7 + hour * 13) % 10) as f32 / 14.)) as u32;
+        }
+    }
+    let hours = |plays: [u32; 24]| plays;
+    ListeningStats {
+        plays: 17_011,
+        minutes: 58_940,
+        active_days: 612,
+        tracked_days: 800,
+        streak_days: 41,
+        heat,
+        top_artists: vec![
+            ArtistHours {
+                name: "glaive".into(),
+                plays: 3_250,
+                hours: hours([
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 5, 8, 9, 10, 7,
+                ]),
+            },
+            ArtistHours {
+                name: "Ericdoa".into(),
+                plays: 2_514,
+                hours: hours([
+                    0, 0, 0, 0, 0, 0, 1, 3, 6, 5, 3, 2, 2, 3, 4, 5, 6, 5, 4, 3, 2, 2, 1, 0,
+                ]),
+            },
+            ArtistHours {
+                name: "midwxst".into(),
+                plays: 2_128,
+                hours: hours([
+                    0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 6, 5, 4, 3, 3, 4, 6, 6, 5, 3, 1,
+                ]),
+            },
+            ArtistHours {
+                name: "Jane Remover".into(),
+                plays: 1_760,
+                hours: hours([
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 2, 3, 3, 4, 6, 8, 9, 8, 6, 3,
+                ]),
+            },
+            ArtistHours {
+                name: "brakence".into(),
+                plays: 1_469,
+                hours: hours([
+                    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 3, 4, 5, 6, 5, 4, 2, 1,
+                ]),
+            },
+        ],
+    }
 }

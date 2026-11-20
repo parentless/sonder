@@ -302,6 +302,7 @@ enum Route {
     Playlist,
     Artist,
     Album,
+    Profile,
     Settings,
     WhatsNew,
 }
@@ -387,6 +388,7 @@ mod playback_clock;
 mod playback_help;
 mod player;
 mod player_bar;
+mod profile;
 mod release_watch;
 mod review;
 mod review_image;

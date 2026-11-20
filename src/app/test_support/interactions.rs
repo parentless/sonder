@@ -814,7 +814,7 @@ fn pressing_inside_the_account_menu_keeps_it_open_and_its_items_still_act() {
     let mut fixture = Fixture::new(false);
     fixture.update(|window, cx| window.click("account", cx));
     let menu_padding =
-        fixture.update(|window, _| menu_padding_above(&window.find("account-whats-new")));
+        fixture.update(|window, _| menu_padding_above(&window.find("account-profile")));
 
     fixture.mouse_down(menu_padding);
     fixture.mouse_up(menu_padding);
@@ -5766,4 +5766,23 @@ fn home_keeps_its_other_rows_when_there_is_nobody_to_suggest() {
         assert!(window.try_find("home-discover").is_none());
         assert!(window.try_find("home-shortcuts").is_some());
     });
+}
+
+#[test]
+fn profile_opens_from_the_account_menu_and_marks_the_avatar() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|window, cx| window.click("account", cx));
+    fixture.update(|window, cx| window.click("account-profile", cx));
+    assert_eq!(fixture.route(), Route::Profile);
+    fixture.update(|window, _| {
+        assert!(window.try_find("account-menu").is_none());
+        assert!(window.try_find("profile-page").is_some());
+    });
+    // The page asks only for the all-time chart, which holds the artist pictures.
+    let BackendCommand::LoadHome { range, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected the all-time chart request");
+    };
+    assert_eq!(range, model::HomeRange::AllTime);
+    fixture.no_commands();
 }

@@ -115,6 +115,6 @@
     "0.8.60: only Settings (the version) and the What's new list changed; saving audio from a link finds the song on a page",
     "0.8.61: only Settings (the version) and the What's new list changed; failed links retry plainly",
     "0.8.62: the search dropdown has cover art, bold matches, type labels and section counts (search-live, search-cached); Settings (the version) and the What's new list changed",
-    "0.8.63: only Settings (the version) and the What's new list changed; shuffle is remembered"
+    "0.8.63: new Profile page (profile, profile-loading, profile-empty, profile-scrolled); the account menu gains a Profile row; Settings (the version) and the What's new list changed"
   ]
 }

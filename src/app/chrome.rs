@@ -902,6 +902,21 @@ impl Toolbar {
                     .child(
                         components::menu_item(
                             palette,
+                            "account-profile",
+                            CadenceIcon::Person,
+                            "Profile",
+                            false,
+                        )
+                        .test_support()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.menu_open = false;
+                            cx.emit(ToolbarEvent::Navigate(Route::Profile));
+                            cx.notify();
+                        })),
+                    )
+                    .child(
+                        components::menu_item(
+                            palette,
                             "account-whats-new",
                             CadenceIcon::Sparkle,
                             "What’s new",
@@ -1072,6 +1087,17 @@ impl Render for Toolbar {
                             .text_color(rgb(palette.on_accent))
                             .text_xs()
                             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            // The page you are on is marked, like a selected row.
+                            .when(self.route == Route::Profile, |avatar| {
+                                avatar.shadow(vec![
+                                    gpui_kit::BoxShadow::new(
+                                        px(0.),
+                                        px(0.),
+                                        rgb(palette.text_primary).into(),
+                                    )
+                                    .spread_radius(px(2.)),
+                                ])
+                            })
                             .child(components::profile_avatar(
                                 profile_artwork,
                                 components::initials(&profile_name),

@@ -45,10 +45,16 @@ const MONTHS: &[Month] = &[
                 releases: &[
                     Release {
                         version: "0.8.63",
-                        notes: &[Note(
-                            Fixed,
-                            "Shuffle now stays on or off when you close Sonder and open it again.",
-                        )],
+                        notes: &[
+                            Note(
+                                New,
+                                "A Profile page, opened from the account menu: when you listen across the week, your listening personality, minutes and songs played, your day streak, and the hours you play your favourite artists. It counts from today, so it fills in as you listen.",
+                            ),
+                            Note(
+                                Fixed,
+                                "Shuffle and volume now stay as you left them when you close Sonder and open it again.",
+                            ),
+                        ],
                     },
                     Release {
                         version: "0.8.62",
