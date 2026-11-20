@@ -926,7 +926,7 @@ fn genre_chip(palette: CadencePalette, genre: &str) -> Div {
         .px(px(9.))
         .py(px(3.))
         .rounded_full()
-        .bg(rgb(palette.control))
+        .bg(rgb(palette.control_hover))
         .text_size(Rems(0.75))
         .text_color(rgb(palette.text))
         .child(genre.to_owned())
