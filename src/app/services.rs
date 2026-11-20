@@ -107,7 +107,10 @@ impl AppServices {
         let handle = backend.handle();
         let player =
             cx.new(|cx| player::Player::new(handle.clone(), cx.background_executor().now()));
-        player.update(cx, |player, _| player.restore_shuffle(preferences.shuffle));
+        player.update(cx, |player, _| {
+            player.restore_shuffle(preferences.shuffle);
+            player.restore_volume(preferences.volume_percent);
+        });
         let session = cx.new(|_| session::Session::new(handle.clone()));
         let library = cx.new(|_| library::Library::new(handle.clone()));
         let choice = store
@@ -524,6 +527,19 @@ impl AppServices {
             .map(|store| store.set_shuffle(shuffle))
         {
             log::warn!("could not save shuffle: {error:#}");
+        }
+    }
+
+    pub(super) fn set_volume(volume: f32, cx: &mut App) {
+        let percent = (volume.clamp(0., 1.) * 100.).round() as u8;
+        let services = cx.global_mut::<Self>();
+        services.preferences.volume_percent = percent;
+        if let Some(Err(error)) = services
+            .store
+            .as_mut()
+            .map(|store| store.set_volume_percent(percent))
+        {
+            log::warn!("could not save the volume: {error:#}");
         }
     }
 

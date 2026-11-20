@@ -257,6 +257,19 @@ impl Player {
         }
     }
 
+    /// Starts at the volume the listener left. The backend gets it when
+    /// playback is ready.
+    pub(super) fn restore_volume(&mut self, percent: u8) {
+        self.volume = f32::from(percent.min(100)) / 100.;
+        if self.volume > 0. {
+            self.volume_before_mute = self.volume;
+        }
+    }
+
+    fn remember_volume(&self, cx: &mut Context<Self>) {
+        super::services::AppServices::set_volume(self.volume, cx);
+    }
+
     pub(super) fn next(&mut self, cx: &mut Context<Self>) {
         if self.now_playing.is_some() && self.send(BackendCommand::Next, cx) {
             self.loading = true;
@@ -362,6 +375,7 @@ impl Player {
             self.volume = self.volume_before_mute.max(0.2);
         }
         self.deliver(BackendCommand::SetVolume(self.volume), cx);
+        self.remember_volume(cx);
         cx.notify();
     }
 
@@ -393,6 +407,7 @@ impl Player {
     pub(super) fn end_volume_drag(&mut self, cx: &mut Context<Self>) {
         if self.volume_dragging {
             self.volume_dragging = false;
+            self.remember_volume(cx);
             cx.notify();
         }
     }

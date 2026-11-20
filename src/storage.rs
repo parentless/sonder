@@ -140,6 +140,8 @@ pub struct AppPreferences {
     pub autoplay: bool,
     /// Shuffle stays as the listener left it when Sonder closes.
     pub shuffle: bool,
+    /// Player volume, 0 to 100, as the listener left it.
+    pub volume_percent: u8,
     /// Evens out loudness between songs. Off unless the listener turns it on.
     pub normalise_volume: bool,
     /// Closing the window keeps Sonder running from the tray (Windows).
@@ -201,6 +203,7 @@ impl Default for AppPreferences {
             // Autoplay is on unless the listener turned it off.
             autoplay: true,
             shuffle: false,
+            volume_percent: 72,
             normalise_volume: false,
             keep_in_tray: false,
             launch_at_login: false,
@@ -441,6 +444,10 @@ impl Store {
         };
         let autoplay = self.preference("autoplay")?.as_deref() != Some("false");
         let shuffle = self.preference("shuffle")?.as_deref() == Some("true");
+        let volume_percent = self
+            .preference("volume_percent")?
+            .and_then(|value| value.parse::<u8>().ok())
+            .map_or(72, |percent| percent.min(100));
         let normalise_volume = self.preference("normalise_volume")?.as_deref() == Some("true");
         let keep_in_tray = self.preference("keep_in_tray")?.as_deref() == Some("true");
         let launch_at_login = self.preference("launch_at_login")?.as_deref() == Some("true");
@@ -479,6 +486,7 @@ impl Store {
                 .unwrap_or_default(),
             autoplay,
             shuffle,
+            volume_percent,
             normalise_volume,
             keep_in_tray,
             launch_at_login,
@@ -561,6 +569,10 @@ impl Store {
 
     pub fn set_shuffle(&mut self, shuffle: bool) -> Result<()> {
         self.set_preference("shuffle", if shuffle { "true" } else { "false" })
+    }
+
+    pub fn set_volume_percent(&mut self, percent: u8) -> Result<()> {
+        self.set_preference("volume_percent", &percent.min(100).to_string())
     }
 
     pub fn set_normalise_volume(&mut self, normalise: bool) -> Result<()> {
@@ -1491,6 +1503,7 @@ mod tests {
         store.set_theme_preference(ThemePreference::Dark).unwrap();
         store.set_autoplay(false).unwrap();
         store.set_shuffle(true).unwrap();
+        store.set_volume_percent(35).unwrap();
         store.set_normalise_volume(true).unwrap();
         store.set_keep_in_tray(true).unwrap();
         store.set_launch_at_login(true).unwrap();
@@ -1508,6 +1521,7 @@ mod tests {
                 ui_zoom: super::UiZoom::default(),
                 autoplay: false,
                 shuffle: true,
+                volume_percent: 35,
                 normalise_volume: true,
                 keep_in_tray: true,
                 launch_at_login: true,
