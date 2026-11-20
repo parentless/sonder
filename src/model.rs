@@ -68,6 +68,9 @@ pub struct Artist {
     pub spotify_uri: Option<String>,
     pub name: SharedString,
     pub artwork_url: Option<String>,
+    /// Spotify's genre tags, when it still sends them. Often empty.
+    #[serde(default)]
+    pub genres: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -134,6 +137,9 @@ impl CachedLibrary {
 pub struct UserProfile {
     pub display_name: SharedString,
     pub artwork_url: Option<String>,
+    /// Spotify's user id, which is the profile's address.
+    #[serde(default)]
+    pub id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -291,6 +297,24 @@ impl HomeRange {
 pub struct HomeData {
     pub artists: Vec<Artist>,
     pub tracks: Vec<Track>,
+}
+
+/// The slow-moving part of the Profile page: top artists over three ranges
+/// and how many artists the listener follows. Kept on disk for hours.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileTop {
+    /// Four weeks, six months and about a year, in that order.
+    pub ranges: [Vec<Artist>; 3],
+    pub followed: Option<u32>,
+}
+
+/// What the Profile page reads from Spotify.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ProfileData {
+    pub top: ProfileTop,
+    /// The local hour (0 to 23) of each of the last plays, newest first.
+    /// `None` when the saved sign-in lacks the permission to read them.
+    pub recent_hours: Option<Vec<u8>>,
 }
 
 /// The saved sign-in predates the permission to read top artists and tracks.

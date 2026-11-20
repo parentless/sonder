@@ -30,6 +30,8 @@ const CATALOG_TIMEOUT_SECONDS: u64 = 30;
 const NEW_RELEASES_CACHE_SECONDS: u64 = 12 * 60 * 60;
 /// Top artists and tracks move slowly, so a launch reuses the last answer.
 const HOME_CACHE_SECONDS: u64 = 6 * 60 * 60;
+/// How long the Profile page keeps the last plays Spotify reported.
+const PROFILE_RECENT_CACHE_SECONDS: u64 = 20 * 60;
 /// Announced releases change daily at most.
 const UPCOMING_CACHE_SECONDS: u64 = 24 * 60 * 60;
 /// Credits change when a volunteer adds them, which is rare.
@@ -357,6 +359,10 @@ pub enum BackendCommand {
     LoadHome {
         range: crate::model::HomeRange,
         respond: Reply<crate::model::HomeData>,
+    },
+    /// The Profile page's Spotify data: top artists, follow count, last plays.
+    LoadProfile {
+        respond: Reply<crate::model::ProfileData>,
     },
     LoadNewReleases {
         respond: Reply<Vec<Album>>,
@@ -1396,6 +1402,11 @@ impl Worker {
             BackendCommand::LoadHome { range, respond } => {
                 self.catalog
                     .home(self.spotify.clone(), self.store.clone(), range, respond);
+                Ok(())
+            }
+            BackendCommand::LoadProfile { respond } => {
+                self.catalog
+                    .profile(self.spotify.clone(), self.store.clone(), respond);
                 Ok(())
             }
             BackendCommand::LoadNewReleases { respond } => {
@@ -3000,6 +3011,7 @@ struct CatalogFetches {
     reload: Option<tokio::task::JoinHandle<()>>,
     search: Option<tokio::task::JoinHandle<()>>,
     home: Option<tokio::task::JoinHandle<()>>,
+    profile: Option<tokio::task::JoinHandle<()>>,
     new_releases: Option<tokio::task::JoinHandle<()>>,
     upcoming: Option<tokio::task::JoinHandle<()>>,
     discover: Option<tokio::task::JoinHandle<()>>,
@@ -3056,6 +3068,47 @@ impl CatalogFetches {
         );
         Self::start(&mut self.home, respond, "Spotify top items", async move {
             saved_or_fetch(&store, key, HOME_CACHE_SECONDS, spotify.home(range)).await
+        });
+    }
+
+    fn profile(
+        &mut self,
+        spotify: Spotify,
+        store: BlockingStore,
+        respond: Reply<crate::model::ProfileData>,
+    ) {
+        Self::start(&mut self.profile, respond, "Spotify profile", async move {
+            // Top artists move slowly, so they keep for hours. The last plays
+            // move fast, so they keep only briefly: the page opens a few times
+            // a day at most, and each answer is one request.
+            let top = saved_or_fetch(
+                &store,
+                "profile-top".to_owned(),
+                HOME_CACHE_SECONDS,
+                spotify.profile_top(),
+            )
+            .await?;
+            // A sign-in from before the permission has nothing to read, and
+            // that must not be saved as an answer.
+            let recent_hours = if spotify.can_read_recent_plays().await {
+                match saved_or_fetch(
+                    &store,
+                    "profile-recent".to_owned(),
+                    PROFILE_RECENT_CACHE_SECONDS,
+                    spotify.recent_play_hours(),
+                )
+                .await
+                {
+                    Ok(hours) => Some(hours),
+                    Err(error) => {
+                        log::warn!("could not read recent plays: {error:#}");
+                        Some(Vec::new())
+                    }
+                }
+            } else {
+                None
+            };
+            Ok(crate::model::ProfileData { top, recent_hours })
         });
     }
 
@@ -3247,6 +3300,7 @@ impl CatalogFetches {
         abort_task(&mut self.reload);
         abort_task(&mut self.search);
         abort_task(&mut self.home);
+        abort_task(&mut self.profile);
         abort_task(&mut self.new_releases);
         abort_task(&mut self.upcoming);
         abort_task(&mut self.discover);

@@ -146,6 +146,7 @@ pub(super) fn gallery_results() -> model::CatalogSearchResults {
             .into_iter()
             .enumerate()
             .map(|(index, name)| model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: format!("artist-{index}"),
                 spotify_uri: None,

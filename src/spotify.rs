@@ -459,6 +459,11 @@ const FOLLOWED_ARTISTS_READ: u32 = 30;
 const PLAYLIST_ADD_CHUNK: usize = 100;
 
 /// How long a fetched top-artist list is reused within one run.
+/// Artists asked for per range on the Profile page: enough to tell which
+/// favourites stay in every chart.
+const PROFILE_ARTISTS: u32 = 20;
+/// The most plays Spotify will return.
+const RECENT_PLAYS: u32 = 50;
 const TOP_ARTISTS_REUSE: Duration = Duration::from_secs(30 * 60);
 
 impl Spotify {
@@ -475,7 +480,8 @@ impl Spotify {
                 "playlist-read-collaborative",
                 "playlist-modify-private",
                 "user-read-private",
-                "user-top-read"
+                "user-top-read",
+                "user-read-recently-played"
             ),
             ..Default::default()
         };
@@ -673,6 +679,105 @@ impl Spotify {
                     .filter(Track::is_displayable)
                     .collect(),
             })
+        })
+        .await
+    }
+
+    /// Whether the saved sign-in carries `scope`.
+    async fn has_scope(&self, scope: &str) -> Result<bool> {
+        Ok(self
+            .client
+            .token
+            .lock()
+            .await
+            .map_err(|_| anyhow!("could not lock Spotify token state"))?
+            .as_ref()
+            .is_some_and(|token| token.scopes.contains(scope)))
+    }
+
+    /// Whether the last plays can be read: older sign-ins predate the permission.
+    pub async fn can_read_recent_plays(&self) -> bool {
+        self.has_scope("user-read-recently-played")
+            .await
+            .unwrap_or(false)
+    }
+
+    /// The Profile page's slow-moving part: the top artists of all three
+    /// ranges and the count of followed artists. Four small requests, made in
+    /// one go and kept on disk by the caller for hours.
+    pub async fn profile_top(&self) -> Result<crate::model::ProfileTop> {
+        self.gated(async {
+            self.require_top_read().await?;
+            let follows = self.has_scope("user-follow-read").await?;
+            // Each extra request takes its own slot.
+            for _ in 0..3 {
+                self.pace().await;
+            }
+            let ranges = [
+                TimeRange::ShortTerm,
+                TimeRange::MediumTerm,
+                TimeRange::LongTerm,
+            ];
+            let top = |range| {
+                self.client.current_user_top_artists_manual(
+                    Some(range),
+                    Some(PROFILE_ARTISTS),
+                    Some(0),
+                )
+            };
+            let followed = async {
+                if !follows {
+                    return None;
+                }
+                // One artist is enough: the page only wants the total.
+                match self
+                    .client
+                    .current_user_followed_artists(None, Some(1))
+                    .await
+                {
+                    Ok(page) => page.total,
+                    Err(error) => {
+                        log::debug!("could not count followed artists: {error:#}");
+                        None
+                    }
+                }
+            };
+            let (weeks, months, year, followed) =
+                futures::join!(top(ranges[0]), top(ranges[1]), top(ranges[2]), followed);
+            let convert = |page: rspotify::model::Page<FullArtist>| {
+                page.items
+                    .into_iter()
+                    .map(convert_artist)
+                    .collect::<Vec<_>>()
+            };
+            Ok(crate::model::ProfileTop {
+                ranges: [convert(weeks?), convert(months?), convert(year?)],
+                followed,
+            })
+        })
+        .await
+    }
+
+    /// The local hour of each of the last plays Spotify remembers (it keeps
+    /// 50 at most), newest first. One request.
+    pub async fn recent_play_hours(&self) -> Result<Vec<u8>> {
+        use chrono::Timelike as _;
+        self.gated(async {
+            let page = self
+                .client
+                .current_user_recently_played(Some(RECENT_PLAYS), None)
+                .await?;
+            Ok(page
+                .items
+                .iter()
+                .map(|play| {
+                    play.played_at
+                        .with_timezone(&chrono::Local)
+                        .hour()
+                        .try_into()
+                        .unwrap_or_default()
+                })
+                .collect())
         })
         .await
     }
@@ -1100,6 +1205,7 @@ impl Spotify {
                     .images
                     .and_then(|images| images.into_iter().next())
                     .map(|image| image.url),
+                id: profile.id.id().to_owned(),
             })
         })
         .await
@@ -1577,6 +1683,9 @@ fn convert_artist(artist: FullArtist) -> Artist {
         spotify_uri: Some(artist.id.uri()),
         name: artist.name.into(),
         artwork_url: artwork_url(&artist.images),
+        // Spotify may stop sending genres; the page hides the chips when empty.
+        #[allow(deprecated)]
+        genres: artist.genres,
     }
 }
 
@@ -2145,6 +2254,7 @@ mod tests {
             socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
         });
         let artist = Artist {
+            genres: Vec::new(),
             provider: Provider::Spotify,
             source_id: "artist".into(),
             name: "Artist".into(),
@@ -2194,6 +2304,7 @@ mod tests {
             }
         });
         let artist = Artist {
+            genres: Vec::new(),
             provider: Provider::Spotify,
             source_id: "artist".into(),
             name: "Artist".into(),

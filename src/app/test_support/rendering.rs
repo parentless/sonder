@@ -288,7 +288,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             song.artists = vec![model::ArtistRef { name: "The Midnight".into(), source_id: Some("fixture-artist".into()), spotify_uri: None }];
                             song
                         }).collect();
-                        let artists = ["a", "b", "fixture-artist"].map(|id| model::Artist { provider: model::Provider::Spotify, source_id: id.into(), spotify_uri: None, name: id.into(), artwork_url: None }).to_vec();
+                        let artists = ["a", "b", "fixture-artist"].map(|id| model::Artist { genres: Vec::new(), provider: model::Provider::Spotify, source_id: id.into(), spotify_uri: None, name: id.into(), artwork_url: None }).to_vec();
                         crate::app::top_listening::TopListening::existing(cx).update(cx, |top, cx| top.seed(model::HomeRange::Months, artists, mine, cx));
                     }
                     workspace.open_artist(reference, Route::LikedSongs, cx);
@@ -296,7 +296,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                         BackendCommand::LoadArtist { respond, .. } => {
                             respond
                                 .send(Ok((
-                                    model::Artist {
+                                    model::Artist { genres: Vec::new(),
                                         provider: model::Provider::Spotify,
                                         source_id: "fixture-artist".into(),
                                         spotify_uri: None,
@@ -417,7 +417,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                         releases.send(Ok(super::gallery_results().albums.into_iter().take(5).map(|mut album| { album.release_date = Some("2026-11-07".into()); album }).collect())).unwrap();
                         let results = super::gallery_results();
                         respond.send(Ok(model::HomeData {
-                            artists: (0..7).map(|index| model::Artist {
+                            artists: (0..7).map(|index| model::Artist { genres: Vec::new(),
                                 provider: model::Provider::Spotify,
                                 source_id: format!("top-{index}"),
                                 spotify_uri: None,
@@ -427,7 +427,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             tracks: results.tracks,
                         })).unwrap();
                         // The all-time chart, in another order, so some artists rise and some fall.
-                        let all_time: Vec<model::Artist> = [1, 0, 4, 2, 3, 6, 5].into_iter().map(|index: usize| model::Artist {
+                        let all_time: Vec<model::Artist> = [1, 0, 4, 2, 3, 6, 5].into_iter().map(|index: usize| model::Artist { genres: Vec::new(),
                             provider: model::Provider::Spotify,
                             source_id: format!("top-{index}"),
                             spotify_uri: None,
@@ -436,7 +436,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                         }).collect();
                         crate::app::top_listening::TopListening::existing(cx).update(cx, |top, cx| top.seed(model::HomeRange::AllTime, all_time, Vec::new(), cx));
                         let suggestion = |name: &str, id: &str, percent: u8, because: &[&str]| model::ArtistSuggestion {
-                            artist: model::Artist {
+                            artist: model::Artist { genres: Vec::new(),
                                 provider: model::Provider::Spotify,
                                 source_id: id.into(),
                                 spotify_uri: None,
@@ -520,8 +520,8 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     workspace.navigate(Route::Profile, cx);
                     workspace.profile.update(cx, |page, cx| match scene {
                         Scene::ProfileLoading => page.seed_loading(cx),
-                        Scene::ProfileEmpty => page.seed(Default::default(), cx),
-                        _ => page.seed(profile_stats(), cx),
+                        Scene::ProfileEmpty => page.seed(model::ProfileData { recent_hours: Some(Vec::new()), ..Default::default() }, cx),
+                        _ => page.seed(profile_data(), cx),
                     });
                 }
                 Scene::Settings | Scene::SettingsAutoplayOff | Scene::SettingsCache => {
@@ -1622,65 +1622,49 @@ pub(crate) fn run() {
     println!("Native visual checks: {count} repeatable cases, {mismatches} mismatches");
 }
 
-/// A listener who plays most after dark, for the profile page.
-fn profile_stats() -> crate::storage::ListeningStats {
-    use crate::storage::{ArtistHours, ListeningStats};
-    let mut heat = [[0u32; 24]; 7];
-    for (day, hours) in heat.iter_mut().enumerate() {
-        for (hour, minutes) in hours.iter_mut().enumerate() {
-            // Busiest late in the evening, quiet at night and in the morning.
-            let base = [
-                6., 4., 2., 1., 0.5, 0.5, 1., 2., 3., 3., 3., 3., 3., 3., 3., 4., 4., 5., 6., 8.,
-                10., 12., 14., 16.,
-            ][hour];
-            let weekend = if day >= 5 { 1.2 } else { 1. };
-            *minutes = (base * weekend * (0.7 + ((day * 7 + hour * 13) % 10) as f32 / 14.)) as u32;
-        }
+/// A listener who plays most after dark, with five artists in their charts.
+fn profile_data() -> model::ProfileData {
+    let artist = |name: &str, genres: &[&str]| model::Artist {
+        genres: genres.iter().map(|genre| (*genre).to_owned()).collect(),
+        provider: model::Provider::Spotify,
+        source_id: name.to_lowercase(),
+        spotify_uri: None,
+        name: name.into(),
+        artwork_url: None,
+    };
+    let artists = [
+        artist("glaive", &["hyperpop", "digicore"]),
+        artist("Ericdoa", &["hyperpop", "digicore"]),
+        artist("midwxst", &["digicore", "pop rap"]),
+        artist("Jane Remover", &["hyperpop", "dariacore"]),
+        artist("brakence", &["alt z", "bedroom pop"]),
+    ];
+    let mut hours = Vec::new();
+    for (hour, plays) in [
+        (23u8, 12),
+        (22, 7),
+        (0, 6),
+        (1, 4),
+        (21, 5),
+        (20, 3),
+        (14, 4),
+        (9, 3),
+        (15, 2),
+        (18, 2),
+        (12, 1),
+        (19, 1),
+    ] {
+        hours.extend(std::iter::repeat_n(hour, plays));
     }
-    let hours = |plays: [u32; 24]| plays;
-    ListeningStats {
-        plays: 17_011,
-        minutes: 58_940,
-        active_days: 612,
-        tracked_days: 800,
-        streak_days: 41,
-        heat,
-        top_artists: vec![
-            ArtistHours {
-                name: "glaive".into(),
-                plays: 3_250,
-                hours: hours([
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 5, 8, 9, 10, 7,
-                ]),
-            },
-            ArtistHours {
-                name: "Ericdoa".into(),
-                plays: 2_514,
-                hours: hours([
-                    0, 0, 0, 0, 0, 0, 1, 3, 6, 5, 3, 2, 2, 3, 4, 5, 6, 5, 4, 3, 2, 2, 1, 0,
-                ]),
-            },
-            ArtistHours {
-                name: "midwxst".into(),
-                plays: 2_128,
-                hours: hours([
-                    0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 6, 5, 4, 3, 3, 4, 6, 6, 5, 3, 1,
-                ]),
-            },
-            ArtistHours {
-                name: "Jane Remover".into(),
-                plays: 1_760,
-                hours: hours([
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 2, 3, 3, 4, 6, 8, 9, 8, 6, 3,
-                ]),
-            },
-            ArtistHours {
-                name: "brakence".into(),
-                plays: 1_469,
-                hours: hours([
-                    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 3, 4, 5, 6, 5, 4, 2, 1,
-                ]),
-            },
-        ],
+    model::ProfileData {
+        top: model::ProfileTop {
+            ranges: [
+                artists[1..4].to_vec(),
+                artists.to_vec(),
+                artists[..4].to_vec(),
+            ],
+            followed: Some(86),
+        },
+        recent_hours: Some(hours),
     }
 }

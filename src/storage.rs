@@ -236,65 +236,6 @@ pub struct AlbumReview {
     pub comments: Vec<String>,
 }
 
-/// The artist a play counts towards: the first one credited.
-fn primary_artist(track: &Track) -> String {
-    track
-        .artists
-        .first()
-        .map(|artist| artist.name.to_string())
-        .unwrap_or_else(|| {
-            track
-                .artist
-                .split(", ")
-                .next()
-                .unwrap_or_default()
-                .to_owned()
-        })
-}
-
-/// How the listener has used Sonder, counted from the plays it has logged.
-/// Hours are on the listener's own clock; weekdays start on Monday.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ListeningStats {
-    pub plays: u64,
-    pub minutes: u64,
-    /// Whole days with at least one play.
-    pub active_days: u32,
-    /// Days from the first logged play to today, counting both ends.
-    pub tracked_days: u32,
-    /// Days in a row, up to today or yesterday, with a play.
-    pub streak_days: u32,
-    /// Minutes played in each weekday and hour.
-    pub heat: [[u32; 24]; 7],
-    pub top_artists: Vec<ArtistHours>,
-}
-
-/// One artist's plays across the day.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ArtistHours {
-    pub name: String,
-    pub plays: u64,
-    pub hours: [u32; 24],
-}
-
-/// Days in a row that end today or yesterday. `days` are day numbers, newest
-/// first and without repeats.
-pub fn streak_length(days: &[i64], today: i64) -> u32 {
-    let mut expected = match days.first() {
-        Some(&newest) if newest == today || newest == today - 1 => newest,
-        _ => return 0,
-    };
-    let mut length = 0;
-    for &day in days {
-        if day != expected {
-            break;
-        }
-        length += 1;
-        expected -= 1;
-    }
-    length
-}
-
 pub struct Store {
     connection: Connection,
 }
@@ -334,7 +275,7 @@ impl Store {
         let version: u32 = self
             .connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if version > 9 {
+        if version > 8 {
             anyhow::bail!("database schema version {version} is newer than this Sonder build");
         }
         if version < 4 {
@@ -376,22 +317,6 @@ impl Store {
                      track_json TEXT
                  );
                  PRAGMA user_version = 8;
-                 COMMIT;",
-            )?;
-        }
-        if version < 9 {
-            // One row per song started, kept for the profile's listening
-            // stats. Unlike `history` it is never trimmed or de-duplicated.
-            self.connection.execute_batch(
-                "BEGIN IMMEDIATE;
-                 CREATE TABLE IF NOT EXISTS plays (
-                     id INTEGER PRIMARY KEY,
-                     played_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                     artist TEXT NOT NULL,
-                     duration_ms INTEGER NOT NULL
-                 );
-                 CREATE INDEX IF NOT EXISTS plays_by_artist ON plays (artist);
-                 PRAGMA user_version = 9;
                  COMMIT;",
             )?;
         }
@@ -994,13 +919,8 @@ impl Store {
             ],
         )?;
         transaction.execute(
-            "INSERT INTO plays (artist, duration_ms) VALUES (?1, ?2)",
-            params![primary_artist(track), track.duration_ms],
-        )?;
-        transaction.execute(
             "DELETE FROM history
-             WHERE provider = ?1 AND source_id = ?2
-               AND id <> (SELECT MAX(id) FROM history WHERE provider = ?1 AND source_id = ?2)",
+             WHERE provider = ?1 AND source_id = ?2 AND id <> last_insert_rowid()",
             params![track.provider.as_str(), track.source_id],
         )?;
         transaction.execute(
@@ -1010,95 +930,6 @@ impl Store {
         )?;
         transaction.commit()?;
         Ok(())
-    }
-
-    /// Totals, the weekday-by-hour heat map and the most played artists.
-    pub fn listening_stats(&self) -> Result<ListeningStats> {
-        let (plays, millis): (i64, i64) = self.connection.query_row(
-            "SELECT COUNT(*), COALESCE(SUM(duration_ms), 0) FROM plays",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        let mut stats = ListeningStats {
-            plays: plays.max(0) as u64,
-            minutes: (millis.max(0) as u64) / 60_000,
-            ..ListeningStats::default()
-        };
-        if plays == 0 {
-            return Ok(stats);
-        }
-        let mut heat = self.connection.prepare(
-            "SELECT (CAST(strftime('%w', played_at, 'unixepoch', 'localtime') AS INTEGER) + 6) % 7,
-                    CAST(strftime('%H', played_at, 'unixepoch', 'localtime') AS INTEGER),
-                    SUM(duration_ms)
-             FROM plays GROUP BY 1, 2",
-        )?;
-        for row in heat.query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })? {
-            let (weekday, hour, millis) = row?;
-            if let (Ok(weekday), Ok(hour)) = (usize::try_from(weekday), usize::try_from(hour))
-                && weekday < 7
-                && hour < 24
-            {
-                stats.heat[weekday][hour] = u32::try_from(millis / 60_000).unwrap_or(u32::MAX);
-            }
-        }
-        let today: i64 = self.connection.query_row(
-            "SELECT CAST(julianday(date('now', 'localtime')) AS INTEGER)",
-            [],
-            |row| row.get(0),
-        )?;
-        let days = self
-            .connection
-            .prepare(
-                "SELECT DISTINCT CAST(julianday(date(played_at, 'unixepoch', 'localtime')) AS INTEGER) AS day
-                 FROM plays ORDER BY day DESC",
-            )?
-            .query_map([], |row| row.get::<_, i64>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        stats.active_days = u32::try_from(days.len()).unwrap_or(u32::MAX);
-        stats.streak_days = streak_length(&days, today);
-        stats.tracked_days = days.last().map_or(0, |first| {
-            u32::try_from(today - first + 1).unwrap_or(1).max(1)
-        });
-        let top = self
-            .connection
-            .prepare(
-                "SELECT artist, COUNT(*) FROM plays WHERE artist <> ''
-                 GROUP BY artist ORDER BY COUNT(*) DESC, MAX(played_at) DESC LIMIT 5",
-            )?
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut hours = self.connection.prepare(
-            "SELECT CAST(strftime('%H', played_at, 'unixepoch', 'localtime') AS INTEGER), COUNT(*)
-             FROM plays WHERE artist = ?1 GROUP BY 1",
-        )?;
-        for (name, count) in top {
-            let mut by_hour = [0u32; 24];
-            for row in hours.query_map([&name], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, u32>(1)?))
-            })? {
-                let (hour, plays) = row?;
-                if let Ok(hour) = usize::try_from(hour)
-                    && hour < 24
-                {
-                    by_hour[hour] = plays;
-                }
-            }
-            stats.top_artists.push(ArtistHours {
-                name,
-                plays: count.max(0) as u64,
-                hours: by_hour,
-            });
-        }
-        Ok(stats)
     }
 
     pub fn recent_tracks(&self, limit: usize) -> Result<Vec<Track>> {
@@ -1471,10 +1302,7 @@ mod tests {
 
     use gpui_kit::SharedString;
 
-    use super::{
-        AppPreferences, IndexEntry, ListeningStats, Store, ThemePreference, primary_artist,
-        streak_length,
-    };
+    use super::{AppPreferences, IndexEntry, Store, ThemePreference};
     use crate::model::{LibraryFingerprint, Playlist, Provider, QueueItem, Track};
 
     fn track(id: &str) -> Track {
@@ -2057,51 +1885,6 @@ mod tests {
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].source_id, "one");
         assert_eq!(recent[1].source_id, "two");
-    }
-
-    #[test]
-    fn every_play_is_counted_even_when_history_forgets_it() {
-        let mut store = Store::in_memory().unwrap();
-        assert_eq!(store.listening_stats().unwrap(), ListeningStats::default());
-        store.add_history(&track("one")).unwrap();
-        store.add_history(&track("one")).unwrap();
-        store.add_history(&track("two")).unwrap();
-
-        assert_eq!(store.recent_tracks(10).unwrap().len(), 2);
-        let stats = store.listening_stats().unwrap();
-        assert_eq!(stats.plays, 3);
-        assert_eq!(stats.minutes, 9);
-        assert_eq!(stats.active_days, 1);
-        assert_eq!(stats.tracked_days, 1);
-        assert_eq!(stats.streak_days, 1);
-        assert_eq!(stats.heat.iter().flatten().sum::<u32>(), 9);
-        assert_eq!(stats.top_artists.len(), 1);
-        assert_eq!(stats.top_artists[0].name, "Artist");
-        assert_eq!(stats.top_artists[0].plays, 3);
-        assert_eq!(stats.top_artists[0].hours.iter().sum::<u32>(), 3);
-    }
-
-    #[test]
-    fn a_play_counts_towards_the_first_credited_artist() {
-        let mut credited = track("one");
-        credited.artists = vec![crate::model::ArtistRef {
-            name: "Lead".into(),
-            source_id: None,
-            spotify_uri: None,
-        }];
-        assert_eq!(primary_artist(&credited), "Lead");
-        let mut joined = track("two");
-        joined.artist = "First, Second".into();
-        assert_eq!(primary_artist(&joined), "First");
-    }
-
-    #[test]
-    fn a_streak_runs_to_today_or_yesterday_without_gaps() {
-        assert_eq!(streak_length(&[], 100), 0);
-        assert_eq!(streak_length(&[100, 99, 98], 100), 3);
-        assert_eq!(streak_length(&[99, 98], 100), 2);
-        assert_eq!(streak_length(&[98, 97], 100), 0);
-        assert_eq!(streak_length(&[100, 99, 97], 100), 2);
     }
 
     #[test]

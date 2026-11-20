@@ -41,20 +41,30 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 19, 2026",
+                releases: &[Release {
+                    version: "0.8.64",
+                    notes: &[
+                        Note(
+                            New,
+                            "A Profile page, opened from the account menu: when you listen across the day from your last 50 plays, your listening habit, your liked songs and playlists, the artists you follow, and your top artists with their genres. It uses only what Spotify shares, so nothing is counted on your computer. Sign in again once to allow it.",
+                        ),
+                        Note(
+                            Fixed,
+                            "Volume now stays as you left it when you close Sonder and open it again.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
                 date: "Nov 18, 2026",
                 releases: &[
                     Release {
                         version: "0.8.63",
-                        notes: &[
-                            Note(
-                                New,
-                                "A Profile page, opened from the account menu: when you listen across the week, your listening personality, minutes and songs played, your day streak, and the hours you play your favourite artists. It counts from today, so it fills in as you listen.",
-                            ),
-                            Note(
-                                Fixed,
-                                "Shuffle and volume now stay as you left them when you close Sonder and open it again.",
-                            ),
-                        ],
+                        notes: &[Note(
+                            Fixed,
+                            "Shuffle now stays on or off when you close Sonder and open it again.",
+                        )],
                     },
                     Release {
                         version: "0.8.62",

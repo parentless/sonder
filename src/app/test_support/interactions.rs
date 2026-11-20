@@ -397,6 +397,7 @@ fn the_dropdown_asks_spotify_after_a_pause_and_opens_a_result() {
     respond
         .send(Ok(model::CatalogSearchResults {
             artists: vec![model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: "song-exploder".into(),
                 spotify_uri: None,
@@ -2096,6 +2097,7 @@ fn empty_artist_still_has_both_sections_after_skeleton_loading() {
     respond
         .send(Ok((
             model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: "empty-artist".into(),
                 spotify_uri: None,
@@ -2130,6 +2132,7 @@ fn artist_tracks_scroll_into_virtualized_discography_and_albums_still_open() {
     respond
         .send(Ok((
             model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: "artist-flow".into(),
                 spotify_uri: None,
@@ -2256,6 +2259,7 @@ fn short_artist_pages_fully_dock_and_back_works_after_switching_artists() {
         respond
             .send(Ok((
                 model::Artist {
+                    genres: Vec::new(),
                     provider: model::Provider::Spotify,
                     source_id: id.into(),
                     spotify_uri: None,
@@ -2959,6 +2963,7 @@ fn search_places_artists_above_tracks_and_opens_the_selected_artist() {
     respond
         .send(Ok(model::CatalogSearchResults {
             artists: vec![model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: "glaive-id".into(),
                 spotify_uri: None,
@@ -3001,6 +3006,7 @@ fn search_filters_narrow_results_and_the_top_result_opens_its_artist() {
     respond
         .send(Ok(model::CatalogSearchResults {
             artists: vec![model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: "glaive-id".into(),
                 spotify_uri: None,
@@ -3249,6 +3255,7 @@ fn discography_cards_fit_the_available_width_at_narrow_and_wide_sizes() {
         respond
             .send(Ok((
                 model::Artist {
+                    genres: Vec::new(),
                     provider: model::Provider::Spotify,
                     name: "Artist".into(),
                     source_id: "artist".into(),
@@ -3668,6 +3675,7 @@ fn open_discography(fixture: &mut Fixture, id: &str, page: model::ArtistAlbumPag
     respond
         .send(Ok((
             model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: id.into(),
                 name: id.into(),
@@ -4050,6 +4058,7 @@ fn home_loads_top_items_once_when_opened_and_lists_no_top_artists() {
     respond
         .send(Ok(model::HomeData {
             artists: vec![model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: "artist-1".into(),
                 spotify_uri: Some("spotify:artist:artist-1".into()),
@@ -5249,6 +5258,7 @@ fn the_sidebar_offers_an_available_update_with_one_button() {
 
 fn top_artist(id: &str) -> model::Artist {
     model::Artist {
+        genres: Vec::new(),
         provider: model::Provider::Spotify,
         source_id: id.into(),
         spotify_uri: None,
@@ -5334,6 +5344,7 @@ fn popular_songs_stop_at_five_until_show_more_is_pressed() {
     respond
         .send(Ok((
             model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: "artist-popular".into(),
                 spotify_uri: None,
@@ -5607,6 +5618,7 @@ fn pressing_the_dim_area_closes_the_credits() {
 fn suggestion(name: &str, id: &str, percent: u8) -> model::ArtistSuggestion {
     model::ArtistSuggestion {
         artist: model::Artist {
+            genres: Vec::new(),
             provider: model::Provider::Spotify,
             source_id: id.into(),
             spotify_uri: Some(format!("spotify:artist:{id}")),
@@ -5633,6 +5645,7 @@ fn home_offering(
     respond
         .send(Ok(model::HomeData {
             artists: vec![model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: "artist-1".into(),
                 spotify_uri: None,
@@ -5675,6 +5688,7 @@ fn home_offering(
 
 fn offered_artist(source_id: &str) -> model::Artist {
     model::Artist {
+        genres: Vec::new(),
         provider: model::Provider::Spotify,
         source_id: source_id.to_owned(),
         spotify_uri: None,
@@ -5778,11 +5792,10 @@ fn profile_opens_from_the_account_menu_and_marks_the_avatar() {
         assert!(window.try_find("account-menu").is_none());
         assert!(window.try_find("profile-page").is_some());
     });
-    // The page asks only for the all-time chart, which holds the artist pictures.
-    let BackendCommand::LoadHome { range, .. } = fixture.backend.commands.try_recv().unwrap()
-    else {
-        panic!("expected the all-time chart request");
-    };
-    assert_eq!(range, model::HomeRange::AllTime);
+    // One request fills the page; opening it again right away asks for nothing.
+    assert!(matches!(
+        fixture.backend.commands.try_recv().unwrap(),
+        BackendCommand::LoadProfile { .. }
+    ));
     fixture.no_commands();
 }

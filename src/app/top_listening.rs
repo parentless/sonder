@@ -257,6 +257,7 @@ mod tests {
 
     fn artist(id: &str) -> model::Artist {
         model::Artist {
+            genres: Vec::new(),
             provider: model::Provider::Spotify,
             source_id: id.into(),
             spotify_uri: None,

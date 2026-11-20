@@ -80,6 +80,12 @@ pub(super) const SUGGESTION_ARTIST_ARTWORK: ArtworkSize = ArtworkSize {
     radius: Rems(1.0625),
 };
 
+/// A round artist picture in the Profile page's top artists.
+pub(super) const PROFILE_ARTIST_ARTWORK: ArtworkSize = ArtworkSize {
+    size: Rems(2.5),
+    radius: Rems(1.25),
+};
+
 pub(super) const TRACK_ARTWORK: ArtworkSize = ArtworkSize {
     size: Rems(2.5),
     radius: Rems(0.5),

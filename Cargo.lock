@@ -960,12 +960,13 @@ dependencies = [
 
 [[package]]
 name = "cadence"
-version = "0.8.63"
+version = "0.8.64"
 dependencies = [
  "ab_glyph",
  "anyhow",
  "async-channel",
  "base64",
+ "chrono",
  "cpal",
  "directories",
  "embed-resource",

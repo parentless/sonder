@@ -216,6 +216,7 @@ impl Toolbar {
         self.suggestion_query = "Song".into();
         self.live = LiveResult::pick(model::CatalogSearchResults {
             artists: vec![model::Artist {
+                genres: Vec::new(),
                 provider: model::Provider::Spotify,
                 source_id: "artist".into(),
                 spotify_uri: None,
