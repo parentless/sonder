@@ -138,6 +138,8 @@ pub struct AppPreferences {
     pub selection_color: SelectionColor,
     pub ui_zoom: UiZoom,
     pub autoplay: bool,
+    /// Shuffle stays as the listener left it when Sonder closes.
+    pub shuffle: bool,
     /// Evens out loudness between songs. Off unless the listener turns it on.
     pub normalise_volume: bool,
     /// Closing the window keeps Sonder running from the tray (Windows).
@@ -198,6 +200,7 @@ impl Default for AppPreferences {
             ui_zoom: UiZoom::default(),
             // Autoplay is on unless the listener turned it off.
             autoplay: true,
+            shuffle: false,
             normalise_volume: false,
             keep_in_tray: false,
             launch_at_login: false,
@@ -437,6 +440,7 @@ impl Store {
             _ => ThemePreference::System,
         };
         let autoplay = self.preference("autoplay")?.as_deref() != Some("false");
+        let shuffle = self.preference("shuffle")?.as_deref() == Some("true");
         let normalise_volume = self.preference("normalise_volume")?.as_deref() == Some("true");
         let keep_in_tray = self.preference("keep_in_tray")?.as_deref() == Some("true");
         let launch_at_login = self.preference("launch_at_login")?.as_deref() == Some("true");
@@ -474,6 +478,7 @@ impl Store {
                 .find(|color| selection_color.as_deref() == Some(color.name()))
                 .unwrap_or_default(),
             autoplay,
+            shuffle,
             normalise_volume,
             keep_in_tray,
             launch_at_login,
@@ -552,6 +557,10 @@ impl Store {
 
     pub fn set_autoplay(&mut self, autoplay: bool) -> Result<()> {
         self.set_preference("autoplay", if autoplay { "true" } else { "false" })
+    }
+
+    pub fn set_shuffle(&mut self, shuffle: bool) -> Result<()> {
+        self.set_preference("shuffle", if shuffle { "true" } else { "false" })
     }
 
     pub fn set_normalise_volume(&mut self, normalise: bool) -> Result<()> {
@@ -1481,6 +1490,7 @@ mod tests {
         store.set_sidebar_collapsed(true).unwrap();
         store.set_theme_preference(ThemePreference::Dark).unwrap();
         store.set_autoplay(false).unwrap();
+        store.set_shuffle(true).unwrap();
         store.set_normalise_volume(true).unwrap();
         store.set_keep_in_tray(true).unwrap();
         store.set_launch_at_login(true).unwrap();
@@ -1497,6 +1507,7 @@ mod tests {
                 selection_color: super::SelectionColor::default(),
                 ui_zoom: super::UiZoom::default(),
                 autoplay: false,
+                shuffle: true,
                 normalise_volume: true,
                 keep_in_tray: true,
                 launch_at_login: true,

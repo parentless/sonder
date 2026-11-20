@@ -107,6 +107,7 @@ impl AppServices {
         let handle = backend.handle();
         let player =
             cx.new(|cx| player::Player::new(handle.clone(), cx.background_executor().now()));
+        player.update(cx, |player, _| player.restore_shuffle(preferences.shuffle));
         let session = cx.new(|_| session::Session::new(handle.clone()));
         let library = cx.new(|_| library::Library::new(handle.clone()));
         let choice = store
@@ -511,6 +512,18 @@ impl AppServices {
             && let Err(error) = store.set_link_download_choice(format, folder)
         {
             log::warn!("could not save the download choice: {error:#}");
+        }
+    }
+
+    pub(super) fn set_shuffle(shuffle: bool, cx: &mut App) {
+        let services = cx.global_mut::<Self>();
+        services.preferences.shuffle = shuffle;
+        if let Some(Err(error)) = services
+            .store
+            .as_mut()
+            .map(|store| store.set_shuffle(shuffle))
+        {
+            log::warn!("could not save shuffle: {error:#}");
         }
     }
 

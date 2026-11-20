@@ -245,7 +245,15 @@ impl Player {
         let enabled = !self.shuffle;
         if self.deliver(BackendCommand::SetShuffle(enabled), cx) {
             self.shuffle = enabled;
+            super::services::AppServices::set_shuffle(enabled, cx);
             cx.notify();
+        }
+    }
+
+    /// Applies the shuffle the listener left on at the last launch.
+    pub(super) fn restore_shuffle(&mut self, enabled: bool) {
+        if enabled && self.backend.send(BackendCommand::SetShuffle(true)) {
+            self.shuffle = true;
         }
     }
 
