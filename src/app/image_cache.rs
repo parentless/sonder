@@ -313,7 +313,7 @@ impl BoundedImageCache {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
-        let mut target = side.clamp(64, 2048).next_power_of_two();
+        let mut target = size_bucket(side);
         // Consume a completed smaller request before deciding whether to upgrade.
         if self.items.contains_key(resource) {
             let result = self.cached(resource, window, cx);
@@ -342,11 +342,14 @@ impl BoundedImageCache {
             .get(resource)
             .and_then(|entry| entry.source.clone());
         self.evict_to_budget(usize::from(!self.items.contains_key(resource)), window, cx);
-        let fallback = AssetLogger::<ImageAssetLoader>::load(resource.clone(), cx);
         let uri = match resource {
             Resource::Uri(uri) => Some(uri.clone()),
             _ => None,
         };
+        // Only non-URI resources (embedded assets) need GPUI's own loader.
+        let fallback = uri
+            .is_none()
+            .then(|| AssetLogger::<ImageAssetLoader>::load(resource.clone(), cx));
         let client = cx.http_client();
         let workers = self.workers.clone();
         let task = cx
@@ -402,7 +405,9 @@ impl BoundedImageCache {
                     Ok(DecodedArtwork { image, source })
                 } else {
                     Ok(DecodedArtwork {
-                        image: fallback.await?,
+                        image: fallback
+                            .ok_or_else(|| artwork_error(anyhow::anyhow!("no artwork loader")))?
+                            .await?,
                         source: None,
                     })
                 }
@@ -583,6 +588,20 @@ fn decode_artwork(bytes: &[u8], side: u32) -> Result<Arc<RenderImage>, ImageCach
 
 /// Work runs on the background executor, never in layout or paint. At most
 /// 512 x 512 pixels are retained, and only the first frame is used.
+/// The backdrop is stretched and blurred, so detail past this size is wasted
+/// work. Sigma scales with the size so the look matches a 512 px blur of 6.
+const BLUR_SIDE: u32 = 160;
+const BLUR_SIGMA: f32 = 6. * BLUR_SIDE as f32 / 512.;
+
+/// Round a physical size up to the next step in a fine ladder, rather than
+/// the next power of two, which could decode up to 4x the pixels needed.
+fn size_bucket(side: u32) -> u32 {
+    const STEPS: [u32; 14] = [
+        64, 96, 128, 160, 192, 256, 320, 384, 512, 640, 768, 1024, 1536, 2048,
+    ];
+    STEPS.into_iter().find(|step| *step >= side).unwrap_or(2048)
+}
+
 fn blur_artist_image(source: &RenderImage) -> Result<Arc<RenderImage>, ImageCacheError> {
     let invalid = || ImageCacheError::Other(Arc::new(anyhow::anyhow!("invalid artist image")));
     let size = source.size(0);
@@ -595,7 +614,7 @@ fn blur_artist_image(source: &RenderImage) -> Result<Arc<RenderImage>, ImageCach
     if pixels.width() == 0 || pixels.height() == 0 {
         return Err(invalid());
     }
-    let ratio = (512. / pixels.width().max(pixels.height()) as f32).min(1.);
+    let ratio = (BLUR_SIDE as f32 / pixels.width().max(pixels.height()) as f32).min(1.);
     let width = ((pixels.width() as f32 * ratio) as u32).max(1);
     let height = ((pixels.height() as f32 * ratio) as u32).max(1);
     let reduced = image::imageops::resize(
@@ -604,7 +623,7 @@ fn blur_artist_image(source: &RenderImage) -> Result<Arc<RenderImage>, ImageCach
         height,
         image::imageops::FilterType::Triangle,
     );
-    let blurred = image::imageops::blur(&reduced, 6.);
+    let blurred = image::imageops::blur(&reduced, BLUR_SIGMA);
     // GPUI stores BGRA channels. Image operations preserve that channel order.
     Ok(Arc::new(RenderImage::new([image::Frame::new(blurred)])))
 }
@@ -741,11 +760,11 @@ mod tests {
         fixture.load(vec![(resource.clone(), 32)]);
         assert_eq!(fixture.image().size(0).width.0, 64);
         fixture.load(vec![(resource.clone(), 300)]);
-        assert_eq!(fixture.image().size(0).width.0, 512);
+        assert_eq!(fixture.image().size(0).width.0, 320);
         fixture.load(vec![(resource, 32)]);
         assert_eq!(
             fixture.image().size(0).width.0,
-            512,
+            320,
             "small views must not downgrade the cache"
         );
         assert_eq!(
@@ -756,7 +775,7 @@ mod tests {
         fixture.cx.update(|cx| {
             assert_eq!(
                 fixture.cache.read(cx).usage().0,
-                512 * 512 * 4 + encoded_size
+                320 * 320 * 4 + encoded_size
             )
         });
         fixture.clear();
@@ -1051,13 +1070,22 @@ mod tests {
     }
 
     #[test]
+    fn sizes_round_up_in_fine_steps() {
+        assert_eq!(size_bucket(1), 64);
+        assert_eq!(size_bucket(130), 160);
+        assert_eq!(size_bucket(300), 320);
+        assert_eq!(size_bucket(513), 640);
+        assert_eq!(size_bucket(5000), 2048);
+    }
+
+    #[test]
     fn artist_blur_is_static_bounded_and_preserves_channel_order() {
         let pixels = image::RgbaImage::from_pixel(1200, 800, image::Rgba([20, 80, 160, 255]));
         let original = RenderImage::new([image::Frame::new(pixels)]);
         let blurred = blur_artist_image(&original).unwrap();
         assert_eq!(blurred.frame_count(), 1);
-        assert_eq!(blurred.size(0).width.0, 512);
-        assert!(blurred.size(0).height.0 <= 512);
+        assert_eq!(blurred.size(0).width.0, BLUR_SIDE as i32);
+        assert!(blurred.size(0).height.0 <= BLUR_SIDE as i32);
         let pixel = &blurred.as_bytes(0).unwrap()[..4];
         for (actual, expected) in pixel.iter().zip([20_u8, 80, 160, 255]) {
             assert!(actual.abs_diff(expected) <= 1);
