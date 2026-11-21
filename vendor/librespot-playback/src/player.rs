@@ -515,7 +515,16 @@ impl Player {
 
             // While PlayerInternal is written as a future, it still contains blocking code.
             // It must be run by using block_on() in a dedicated thread.
-            let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+            // Cadence patch: one worker, not one per core. This thread runs the
+            // player itself, so the worker only drives I/O and timers for the
+            // track loaders; the default would park a thread per core for the
+            // life of every player.
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .thread_name("player-io")
+                .enable_all()
+                .build()
+                .expect("Failed to create Tokio runtime");
             runtime.block_on(internal);
 
             debug!("PlayerInternal thread finished.");

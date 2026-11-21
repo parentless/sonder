@@ -20,3 +20,6 @@ changes, each marked "Cadence patch" in the source:
   rubato is a dependency.
 
 Keep this patch until upstream resamples local files and accepts a resolver.
+- `src/player.rs`: the player's Tokio runtime has one worker thread instead of
+  one per CPU core. The player runs on its own thread and the worker only
+  drives I/O for the track loaders, so the extra threads only sat idle.

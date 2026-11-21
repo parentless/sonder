@@ -79,9 +79,8 @@ impl InstanceLifecycle {
     }
 
     fn start_primary(socket_path: PathBuf, listener: UnixListener) -> Result<Instance> {
-        listener
-            .set_nonblocking(true)
-            .context("could not configure lifecycle socket")?;
+        // The listener thread blocks in accept(), so it costs nothing while idle.
+        // Dropping the lifecycle connects to the socket once to wake it.
         let (activation_tx, activation_rx) = async_channel::bounded(1);
         let shutdown = Arc::new(AtomicBool::new(false));
         let listener_shutdown = shutdown.clone();
@@ -104,9 +103,7 @@ impl InstanceLifecycle {
                                 let _ = activation_tx.try_send(());
                             }
                         }
-                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(50));
-                        }
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
                         Err(_) => break,
                     }
                 }
@@ -157,8 +154,13 @@ impl Drop for InstanceLifecycle {
             return;
         }
         self.shutdown.store(true, Ordering::Relaxed);
-        let _ = UnixStream::connect(&self.socket_path);
-        if let Some(listener_thread) = self.listener_thread.take() {
+        // The connection wakes the blocked accept(). If it cannot be made, the
+        // socket path was removed and nothing can wake the thread, so leave it
+        // to end with the process rather than wait for it.
+        let woke = UnixStream::connect(&self.socket_path).is_ok();
+        if let Some(listener_thread) = self.listener_thread.take()
+            && woke
+        {
             let _ = listener_thread.join();
         }
         let _ = fs::remove_file(&self.socket_path);

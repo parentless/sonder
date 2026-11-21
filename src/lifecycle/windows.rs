@@ -28,6 +28,8 @@ pub struct InstanceLifecycle {
     _lock: Option<File>,
     activations: async_channel::Receiver<()>,
     shutdown: Arc<AtomicBool>,
+    /// Where the listener waits, so dropping can connect once to wake it.
+    address: Option<SocketAddr>,
     listener_thread: Option<JoinHandle<()>>,
 }
 
@@ -39,6 +41,7 @@ impl InstanceLifecycle {
             _lock: None,
             activations,
             shutdown: Arc::new(AtomicBool::new(false)),
+            address: None,
             listener_thread: None,
         })
     }
@@ -78,8 +81,10 @@ impl InstanceLifecycle {
             Err(TryLockError::Error(error)) => return Err(error.into()),
         }
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
-        listener.set_nonblocking(true)?;
-        let port = listener.local_addr()?.port();
+        // The listener thread blocks in accept(), so it costs nothing while
+        // idle. Dropping connects to it once to wake it.
+        let address = listener.local_addr()?;
+        let port = address.port();
         let secret = oauth2::CsrfToken::new_random().secret().clone();
         // Windows byte-range locks prevent other handles reading the locked
         // file. Publish discovery data separately while holding ownership.
@@ -94,6 +99,9 @@ impl InstanceLifecycle {
                 while !stop.load(Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
+                            if stop.load(Ordering::Relaxed) {
+                                break;
+                            }
                             let _ = stream.set_read_timeout(Some(TIMEOUT));
                             let _ = stream.set_write_timeout(Some(TIMEOUT));
                             let mut message = vec![0; expected.len()];
@@ -102,9 +110,7 @@ impl InstanceLifecycle {
                                 let _ = stream.write_all(b"ok\n");
                             }
                         }
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(50));
-                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                         Err(_) => break,
                     }
                 }
@@ -113,6 +119,7 @@ impl InstanceLifecycle {
             _lock: Some(lock),
             activations,
             shutdown,
+            address: Some(address),
             listener_thread: Some(listener_thread),
         })))
     }
@@ -151,6 +158,10 @@ fn request_activation(path: &std::path::Path) -> Result<()> {
 impl Drop for InstanceLifecycle {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Relaxed);
+        if let Some(address) = self.address {
+            // Wakes the blocked accept() so the thread sees the flag and ends.
+            let _ = TcpStream::connect_timeout(&address, TIMEOUT);
+        }
         if let Some(thread) = self.listener_thread.take() {
             let _ = thread.join();
         }
