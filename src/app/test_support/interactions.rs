@@ -2830,12 +2830,14 @@ fn clearing_artwork_cache_releases_entries_without_changing_account_or_queue() {
 }
 
 #[test]
-fn the_account_menu_lists_whats_new_while_it_is_unseen() {
+fn the_account_menu_holds_only_profile_settings_and_logout() {
     let mut fixture = Fixture::new(false);
-    fixture.update(|window, _| assert!(window.try_find("account-whats-new").is_none()));
     fixture.update(|window, cx| window.click("account", cx));
-    fixture.update(|window, _| assert!(window.try_find("account-whats-new").is_some()));
-    fixture.no_commands();
+    fixture.update(|window, _| {
+        assert!(window.try_find("account-whats-new").is_none());
+        assert!(window.try_find("account-profile").is_some());
+        assert!(window.try_find("account-settings").is_some());
+    });
 }
 
 #[cfg(target_os = "windows")]
@@ -5219,13 +5221,11 @@ fn playback_stops_after_three_songs_in_a_row_fail() {
 }
 
 #[test]
-fn whats_new_opens_from_the_account_menu_and_back_returns() {
+fn whats_new_opens_from_the_sidebar_and_back_returns() {
     let mut fixture = Fixture::new(false);
     let before = fixture.route();
-    fixture.update(|window, cx| window.click("account", cx));
-    fixture.update(|window, cx| window.click("account-whats-new", cx));
+    fixture.update(|window, cx| window.click("sidebar-whats-new", cx));
     assert_eq!(fixture.route(), Route::WhatsNew);
-    fixture.update(|window, _| assert!(window.try_find("account-menu").is_none()));
     // Older months are folded until opened.
     fixture.update(|window, _| assert!(window.try_find(("whats-new-month", 1usize)).is_some()));
     fixture.update(|window, cx| window.click("detail-back", cx));

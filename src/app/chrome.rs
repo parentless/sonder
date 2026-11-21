@@ -9,7 +9,6 @@ pub(super) enum ToolbarEvent {
     OpenAlbum(model::AlbumRef),
     Navigate(Route),
     OpenSettings,
-    OpenWhatsNew,
     Connect,
     Logout,
     /// The account menu opened, so anything else overlaying the page should go.
@@ -138,9 +137,6 @@ pub(super) struct Toolbar {
     /// The workspace's standing failure, shown under the account name.
     error: Option<SharedString>,
     _search_subscription: Subscription,
-    /// This version's notes have not been opened, so the avatar and the
-    /// account menu point at them.
-    whats_new_unseen: bool,
 }
 
 impl EventEmitter<ToolbarEvent> for Toolbar {}
@@ -170,7 +166,6 @@ impl Toolbar {
             },
         );
         Self {
-            whats_new_unseen: whats_new::unseen(),
             search_input,
             suggestions: Vec::new(),
             suggestion_query: String::new(),
@@ -191,13 +186,6 @@ impl Toolbar {
             back_target: None,
             error: None,
             _search_subscription: search_subscription,
-        }
-    }
-
-    pub(super) fn clear_whats_new_dot(&mut self, cx: &mut Context<Self>) {
-        if self.whats_new_unseen {
-            self.whats_new_unseen = false;
-            cx.notify();
         }
     }
 
@@ -918,33 +906,6 @@ impl Toolbar {
                     .child(
                         components::menu_item(
                             palette,
-                            "account-whats-new",
-                            CadenceIcon::Sparkle,
-                            "What’s new",
-                            false,
-                        )
-                        .test_support()
-                        .when(self.whats_new_unseen, |row| {
-                            row.child(
-                                div()
-                                    .ml_auto()
-                                    .px_2()
-                                    .py_0p5()
-                                    .rounded_full()
-                                    .bg(rgb(palette.text_primary))
-                                    .text_color(rgb(palette.canvas))
-                                    .text_size(tokens::CAPTION_TEXT)
-                                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                    .child("New"),
-                            )
-                        })
-                        .on_click(cx.listener(|_, _, _, cx| {
-                            cx.emit(ToolbarEvent::OpenWhatsNew);
-                        })),
-                    )
-                    .child(
-                        components::menu_item(
-                            palette,
                             "account-settings",
                             CadenceIcon::Settings,
                             "Settings",
@@ -1112,38 +1073,6 @@ impl Render for Toolbar {
                                 cx.notify();
                             })),
                     )
-                    .when(self.whats_new_unseen, |anchor| {
-                        // Reduced motion, and tests, skip the jump: it runs on the
-                        // wall clock, so it would keep frames coming for 650ms.
-                        let dot_jump = if cx.reduce_motion() || cfg!(test) {
-                            Duration::from_millis(1)
-                        } else {
-                            Duration::from_millis(650)
-                        };
-                        anchor.child(
-                            // Not a control: a press lands on the avatar beneath,
-                            // which opens the account menu.
-                            div()
-                                .absolute()
-                                .right_0()
-                                .top_0()
-                                .size_3()
-                                .rounded_full()
-                                .bg(rgb(0xF04452))
-                                .with_animation(
-                                    "whats-new-dot",
-                                    Animation::new(dot_jump),
-                                    |badge, progress| {
-                                        // One short jump on arrival, then a static dot. No repeating timer.
-                                        let jump =
-                                            (progress * std::f32::consts::PI * 2.).sin().abs()
-                                                * (1. - progress)
-                                                * 6.;
-                                        badge.top(px(-jump))
-                                    },
-                                ),
-                        )
-                    })
                     .when(self.menu_open, |anchor| {
                         anchor.child(deferred(self.account_menu(palette, cx)))
                     }),

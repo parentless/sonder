@@ -284,7 +284,6 @@ impl Workspace {
                 }
                 ToolbarEvent::Navigate(route) => this.navigate(*route, cx),
                 ToolbarEvent::OpenSettings => this.open_settings(cx),
-                ToolbarEvent::OpenWhatsNew => this.open_whats_new(cx),
                 ToolbarEvent::Connect => {
                     this.session
                         .update(cx, |session, cx| session.set_connecting(cx));

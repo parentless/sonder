@@ -140,6 +140,9 @@ pub(super) struct Sidebar {
     toggle_focus: FocusHandle,
     /// One per entry of [`NAV_ITEMS`], in the same order.
     nav_focus: [FocusHandle; NAV_ITEMS.len()],
+    whats_new_focus: FocusHandle,
+    /// This version's notes have not been opened yet.
+    whats_new_unseen: bool,
     update: Option<UpdateOffer>,
 }
 
@@ -191,7 +194,17 @@ impl Sidebar {
             transition_duration: Duration::from_millis(1),
             toggle_focus: cx.focus_handle().tab_stop(true),
             nav_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
+            whats_new_focus: cx.focus_handle().tab_stop(true),
+            whats_new_unseen: whats_new::unseen(),
             update: None,
+        }
+    }
+
+    /// Called once the notes are opened.
+    pub(super) fn clear_whats_new_badge(&mut self, cx: &mut Context<Self>) {
+        if self.whats_new_unseen {
+            self.whats_new_unseen = false;
+            cx.notify();
         }
     }
 
@@ -499,6 +512,160 @@ impl Sidebar {
             .into_any_element()
     }
 
+    /// The foot of the rail: What's new, with a pill while this version's
+    /// notes are unopened (a dot when the rail is collapsed), and the version.
+    fn whats_new_footer(
+        &self,
+        transition: &RowTransition,
+        palette: CadencePalette,
+        window: &mut Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let index = NAV_ITEMS.len();
+        let selected = self.route == Route::WhatsNew;
+        let collapsed = self.collapsed;
+        let unseen = self.whats_new_unseen;
+        let base = if selected {
+            palette.selection
+        } else {
+            palette.canvas
+        };
+        let fill_color = self
+            .hover
+            .transition(index, cx.background_executor().now())
+            .map_or_else(
+                || rgb(base),
+                |hover| hover.color(window, base, palette.control_hover, cx.reduce_motion()),
+            );
+        let focus_visible = components::is_focus_visible(&self.whats_new_focus, window);
+        let start_progress = transition.start_progress;
+        let target_progress = transition.target_progress;
+        let row_width = transition.row_width;
+        let fade = move |element: Div, delta: f32| {
+            element.opacity(start_progress + (target_progress - start_progress) * delta)
+        };
+        let fill = div()
+            .h(tokens::NAV_ROW_HEIGHT)
+            .rounded_xl()
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .gap_3()
+            .pr(NAV_ROW_PAD)
+            .bg(fill_color)
+            .when(focus_visible, |fill| {
+                fill.shadow(components::inset_focus_ring(palette))
+            })
+            .child(
+                div()
+                    .relative()
+                    .w_5()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .child(components::icon(
+                        CadenceIcon::Sparkle,
+                        tokens::CONTROL_ICON,
+                        palette.text_primary,
+                    ))
+                    .when(unseen && collapsed, |icon| {
+                        icon.child(
+                            div()
+                                .absolute()
+                                .right_0()
+                                .top_0()
+                                .size_2()
+                                .rounded_full()
+                                .bg(rgb(palette.text_primary)),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .whitespace_nowrap()
+                    .child("What’s new")
+                    .with_animation(
+                        ("nav-whats-new", transition.generation),
+                        transition.animation.clone(),
+                        fade,
+                    ),
+            )
+            .when(unseen, |row| {
+                row.child(
+                    div()
+                        .ml_auto()
+                        .px_2()
+                        .py_0p5()
+                        .rounded_full()
+                        .bg(rgb(palette.text_primary))
+                        .text_color(rgb(palette.canvas))
+                        .text_size(tokens::CAPTION_TEXT)
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .child("New")
+                        .with_animation(
+                            ("nav-whats-new-pill", transition.generation),
+                            transition.animation.clone(),
+                            fade,
+                        ),
+                )
+            })
+            .with_animation(
+                ("nav-whats-new-fill", transition.generation),
+                transition.animation.clone(),
+                move |fill, delta| {
+                    let progress = start_progress + (target_progress - start_progress) * delta;
+                    let (width, left, pad) =
+                        sidebar_fill_geometry(NAV_ROW_PAD, NAV_GLYPH_WIDTH, row_width, progress);
+                    fill.w(width).ml(left).pl(pad)
+                },
+            );
+        let row = components::bare_button("sidebar-whats-new")
+            .test_support()
+            .track_focus(&self.whats_new_focus)
+            .aria_selected(selected)
+            .w_full()
+            .h(tokens::NAV_ROW_HEIGHT)
+            .justify_start()
+            .text_color(rgb(if selected {
+                palette.text_primary
+            } else {
+                palette.text
+            }))
+            .text_sm()
+            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+            .child(fill)
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                this.hover
+                    .set(index, *hovered, cx.background_executor().now());
+                cx.notify();
+            }))
+            .when(collapsed, |row| {
+                rail_tooltip(row, "What’s new".into(), self.tooltip_anchor.clone())
+            })
+            .on_click(cx.listener(|_, _, _, cx| {
+                cx.emit(SidebarEvent::Navigate(Route::WhatsNew));
+            }));
+        div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .pt_2()
+            .border_t_1()
+            .border_color(rgb(palette.border))
+            .child(row)
+            .when(!collapsed, |footer| {
+                footer.child(
+                    div()
+                        .px_3()
+                        .pb_1()
+                        .text_size(tokens::CAPTION_TEXT)
+                        .text_color(rgb(palette.text_muted))
+                        .child(concat!("Sonder ", env!("CARGO_PKG_VERSION"))),
+                )
+            })
+            .into_any_element()
+    }
+
     fn panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
         let collapsed = self.collapsed;
@@ -537,6 +704,7 @@ impl Sidebar {
                 self.nav_item(item, focus_handle, &transition, palette, window, cx)
             })
             .collect();
+        let whats_new_footer = self.whats_new_footer(&transition, palette, window, cx);
         let library = self.library.read(cx);
         let playlists = if library.playlists().is_empty() {
             library.pinned_playlists().clone()
@@ -906,7 +1074,8 @@ impl Sidebar {
                         )
                     })
                     .when(!show_pinned, |panel| panel.child(div().flex_1()))
-                    .children(self.update_card(palette, collapsed, !cx.reduce_motion())),
+                    .children(self.update_card(palette, collapsed, !cx.reduce_motion()))
+                    .child(whats_new_footer),
             )
     }
 }
