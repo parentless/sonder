@@ -32,6 +32,8 @@ const NEW_RELEASES_CACHE_SECONDS: u64 = 12 * 60 * 60;
 const HOME_CACHE_SECONDS: u64 = 6 * 60 * 60;
 /// How long the Profile page keeps the last plays Spotify reported.
 const PROFILE_RECENT_CACHE_SECONDS: u64 = 20 * 60;
+const PROFILE_TOP_KEY: &str = "profile-top";
+const PROFILE_RECENT_KEY: &str = "profile-recent";
 /// Announced releases change daily at most.
 const UPCOMING_CACHE_SECONDS: u64 = 24 * 60 * 60;
 /// Credits change when a volunteer adds them, which is rare.
@@ -363,6 +365,11 @@ pub enum BackendCommand {
     /// The Profile page's Spotify data: top artists, follow count, last plays.
     LoadProfile {
         respond: Reply<crate::model::ProfileData>,
+    },
+    /// What the last Profile load saved, of any age, without asking Spotify.
+    /// Lets the page show something at once while `LoadProfile` refreshes it.
+    LoadProfileSaved {
+        respond: Reply<Option<crate::model::ProfileData>>,
     },
     LoadNewReleases {
         respond: Reply<Vec<Album>>,
@@ -1407,6 +1414,10 @@ impl Worker {
             BackendCommand::LoadProfile { respond } => {
                 self.catalog
                     .profile(self.spotify.clone(), self.store.clone(), respond);
+                Ok(())
+            }
+            BackendCommand::LoadProfileSaved { respond } => {
+                self.catalog.profile_saved(self.store.clone(), respond);
                 Ok(())
             }
             BackendCommand::LoadNewReleases { respond } => {
@@ -3012,6 +3023,7 @@ struct CatalogFetches {
     search: Option<tokio::task::JoinHandle<()>>,
     home: Option<tokio::task::JoinHandle<()>>,
     profile: Option<tokio::task::JoinHandle<()>>,
+    profile_saved: Option<tokio::task::JoinHandle<()>>,
     new_releases: Option<tokio::task::JoinHandle<()>>,
     upcoming: Option<tokio::task::JoinHandle<()>>,
     discover: Option<tokio::task::JoinHandle<()>>,
@@ -3079,21 +3091,23 @@ impl CatalogFetches {
     ) {
         Self::start(&mut self.profile, respond, "Spotify profile", async move {
             // Top artists move slowly, so they keep for hours. The last plays
-            // move fast, so they keep only briefly: the page opens a few times
-            // a day at most, and each answer is one request.
+            // move fast, so they keep only briefly. The two never wait on each
+            // other: the page is ready when the slower one is.
             let top = saved_or_fetch(
                 &store,
-                "profile-top".to_owned(),
+                PROFILE_TOP_KEY.to_owned(),
                 HOME_CACHE_SECONDS,
                 spotify.profile_top(),
-            )
-            .await?;
-            // A sign-in from before the permission has nothing to read, and
-            // that must not be saved as an answer.
-            let recent_hours = if spotify.can_read_recent_plays().await {
+            );
+            let recent = async {
+                // A sign-in from before the permission has nothing to read,
+                // and that must not be saved as an answer.
+                if !spotify.can_read_recent_plays().await {
+                    return None;
+                }
                 match saved_or_fetch(
                     &store,
-                    "profile-recent".to_owned(),
+                    PROFILE_RECENT_KEY.to_owned(),
                     PROFILE_RECENT_CACHE_SECONDS,
                     spotify.recent_play_hours(),
                 )
@@ -3105,11 +3119,38 @@ impl CatalogFetches {
                         Some(Vec::new())
                     }
                 }
-            } else {
-                None
             };
-            Ok(crate::model::ProfileData { top, recent_hours })
+            let (top, recent_hours) = futures::join!(top, recent);
+            Ok(crate::model::ProfileData {
+                top: top?,
+                recent_hours,
+            })
         });
+    }
+
+    /// The last saved Profile answer, however old. Reads the disk only.
+    fn profile_saved(
+        &mut self,
+        store: BlockingStore,
+        respond: Reply<Option<crate::model::ProfileData>>,
+    ) {
+        Self::start(
+            &mut self.profile_saved,
+            respond,
+            "saved Spotify profile",
+            async move {
+                let top = saved_json::<crate::model::ProfileTop>(&store, PROFILE_TOP_KEY).await;
+                let recent = saved_json::<Vec<u8>>(&store, PROFILE_RECENT_KEY).await;
+                // Without the last plays there is no way to tell "none yet"
+                // from "permission missing", so wait for the real answer.
+                Ok(top
+                    .zip(recent)
+                    .map(|(top, hours)| crate::model::ProfileData {
+                        top,
+                        recent_hours: Some(hours),
+                    }))
+            },
+        );
     }
 
     fn new_releases(&mut self, spotify: Spotify, store: BlockingStore, respond: Reply<Vec<Album>>) {
@@ -3301,6 +3342,7 @@ impl CatalogFetches {
         abort_task(&mut self.search);
         abort_task(&mut self.home);
         abort_task(&mut self.profile);
+        abort_task(&mut self.profile_saved);
         abort_task(&mut self.new_releases);
         abort_task(&mut self.upcoming);
         abort_task(&mut self.discover);
@@ -3540,6 +3582,12 @@ async fn dismiss_suggestion(store: &BlockingStore, source_id: String) {
     {
         log::warn!("could not remember a dismissed suggestion: {error:#}");
     }
+}
+
+/// A saved answer of any age, or nothing when there is none or it cannot be read.
+async fn saved_json<T: serde::de::DeserializeOwned>(store: &BlockingStore, key: &str) -> Option<T> {
+    let (_, json) = store.cached_json(key.to_owned()).await.ok().flatten()?;
+    serde_json::from_str(&json).ok()
 }
 
 async fn saved_or_fetch<T>(

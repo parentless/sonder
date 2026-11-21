@@ -5792,7 +5792,12 @@ fn profile_opens_from_the_account_menu_and_marks_the_avatar() {
         assert!(window.try_find("account-menu").is_none());
         assert!(window.try_find("profile-page").is_some());
     });
-    // One request fills the page; opening it again right away asks for nothing.
+    // Opening the menu warmed the page: the saved answer to show at once, and
+    // one request to check it. Choosing Profile then asks for nothing more.
+    assert!(matches!(
+        fixture.backend.commands.try_recv().unwrap(),
+        BackendCommand::LoadProfileSaved { .. }
+    ));
     assert!(matches!(
         fixture.backend.commands.try_recv().unwrap(),
         BackendCommand::LoadProfile { .. }

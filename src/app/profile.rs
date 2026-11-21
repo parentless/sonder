@@ -37,6 +37,8 @@ const BAR_GAP: f32 = 5.;
 struct Loaded {
     data: Arc<model::ProfileData>,
     at: Instant,
+    /// Read from disk, so a request is still on its way to check it.
+    saved: bool,
 }
 
 /// What the liked songs add up to, kept until the list or the artists change.
@@ -54,6 +56,8 @@ pub(super) struct ProfilePage {
     library: Entity<library::Library>,
     loaded: Option<Loaded>,
     task: Option<gpui_kit::Task<()>>,
+    /// The read of the last saved answer, which fills the page at once.
+    saved_task: Option<gpui_kit::Task<()>>,
     /// The saved sign-in lacks a permission the top artists need.
     permission_missing: bool,
     failed: bool,
@@ -90,6 +94,7 @@ impl ProfilePage {
             library,
             loaded: None,
             task: None,
+            saved_task: None,
             permission_missing: false,
             failed: false,
             tally: None,
@@ -102,26 +107,52 @@ impl ProfilePage {
     fn forget(&mut self, cx: &mut Context<Self>) {
         self.loaded = None;
         self.task = None;
+        self.saved_task = None;
         self.permission_missing = false;
         self.failed = false;
         self.tally = None;
         cx.notify();
     }
 
-    /// Called whenever the page is opened: back to the top, and a request
-    /// unless the page already holds a recent answer.
+    /// Called whenever the page is opened: back to the top, and the data
+    /// brought up to date.
     pub(super) fn opened(&mut self, cx: &mut Context<Self>) {
         self.scroll
             .set_offset(gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)));
+        self.warm(cx);
+    }
+
+    /// Gets the data ready: what was saved last time shows at once, and one
+    /// request checks it. Nothing is asked while the page holds a recent
+    /// answer or a request is already out, so calling this early (when the
+    /// account menu opens) costs the visit that follows nothing.
+    pub(super) fn warm(&mut self, cx: &mut Context<Self>) {
         let fresh = self
             .loaded
             .as_ref()
-            .is_some_and(|loaded| loaded.at.elapsed() < STALE_AFTER);
+            .is_some_and(|loaded| !loaded.saved && loaded.at.elapsed() < STALE_AFTER);
         if fresh || self.task.is_some() || self.permission_missing {
             cx.notify();
             return;
         }
         self.failed = false;
+        if self.loaded.is_none() && self.saved_task.is_none() {
+            let saved = catalog::request(&self.backend, |respond| {
+                BackendCommand::LoadProfileSaved { respond }
+            });
+            self.saved_task = Some(cx.spawn(async move |this, cx| {
+                let saved = saved.await;
+                let _ = this.update(cx, |page, cx| {
+                    page.saved_task = None;
+                    // The real answer may have come first; it wins.
+                    if page.loaded.is_none()
+                        && let Ok(Some(data)) = saved
+                    {
+                        page.show(data, true, cx);
+                    }
+                });
+            }));
+        }
         let reply = catalog::request(&self.backend, |respond| BackendCommand::LoadProfile {
             respond,
         });
@@ -130,11 +161,12 @@ impl ProfilePage {
             let _ = this.update(cx, |page, cx| {
                 page.task = None;
                 match result {
-                    Ok(data) => page.show(data, cx),
+                    Ok(data) => page.show(data, false, cx),
                     Err(error) => {
                         page.permission_missing =
                             error.as_str() == model::HomePermissionMissing.to_string();
-                        page.failed = !page.permission_missing;
+                        // A saved page stays as it is; only an empty one fails.
+                        page.failed = !page.permission_missing && page.loaded.is_none();
                         cx.notify();
                     }
                 }
@@ -143,19 +175,37 @@ impl ProfilePage {
         cx.notify();
     }
 
-    fn show(&mut self, data: model::ProfileData, cx: &mut Context<Self>) {
-        self.loaded = Some(Loaded {
-            data: Arc::new(data),
-            at: Instant::now(),
-        });
-        self.arrival += 1;
+    /// Shows an answer. The sections settle in only when the numbers are new:
+    /// a check that confirms what is already on screen changes nothing.
+    fn show(&mut self, data: model::ProfileData, saved: bool, cx: &mut Context<Self>) {
+        let same = self
+            .loaded
+            .as_ref()
+            .is_some_and(|loaded| *loaded.data == data);
+        if same {
+            if let Some(loaded) = self.loaded.as_mut() {
+                loaded.at = Instant::now();
+                loaded.saved = saved;
+            }
+        } else {
+            // Numbers replacing others already on screen just change in
+            // place; only a first showing animates in.
+            if self.loaded.is_none() {
+                self.arrival += 1;
+            }
+            self.loaded = Some(Loaded {
+                data: Arc::new(data),
+                at: Instant::now(),
+                saved,
+            });
+        }
         cx.notify();
     }
 
     /// Puts numbers in place without a request, for screenshots and tests.
     #[cfg(test)]
     pub(super) fn seed(&mut self, data: model::ProfileData, cx: &mut Context<Self>) {
-        self.show(data, cx);
+        self.show(data, false, cx);
     }
 
     /// Keeps the skeleton on screen, for screenshots and tests.

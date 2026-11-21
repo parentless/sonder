@@ -291,7 +291,14 @@ impl Workspace {
                     this.authenticate(cx);
                 }
                 ToolbarEvent::Logout => this.logout(cx),
-                ToolbarEvent::MenuOpened => this.close_queue(cx),
+                ToolbarEvent::MenuOpened => {
+                    this.close_queue(cx);
+                    // Opening the menu is the first step toward Profile, so
+                    // get its data moving now.
+                    if this.session.read(cx).profile().is_some() {
+                        this.profile.update(cx, |page, cx| page.warm(cx));
+                    }
+                }
             },
         ));
         let player_bar = cx.new(player_bar::PlayerBar::new);
