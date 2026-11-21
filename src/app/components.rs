@@ -441,6 +441,28 @@ pub(super) fn settings_button(
         .child(label)
 }
 
+/// A square outlined button with only an icon, named by its tooltip. It sits
+/// beside [`settings_button`] and matches its outline, fill and corner.
+pub(super) fn outlined_icon_button(
+    palette: CadencePalette,
+    id: impl Into<ElementId>,
+    glyph: CadenceIcon,
+    label: &'static str,
+) -> Stateful<Div> {
+    filled_button(palette, id)
+        .size_10()
+        .flex_none()
+        .rounded(tokens::CONTROL_RADIUS)
+        .border_1()
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.surface))
+        .hover(|style| style.bg(rgb(palette.control_hover)))
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(label).build(window, cx)
+        })
+        .child(icon(glyph, tokens::OUTLINED_ICON, palette.text_primary))
+}
+
 /// Static translucent materials reuse the already-blurred artist backdrop;
 /// no per-frame blur pass, animation, or image allocation is needed.
 fn glass_frame(frame: Div, palette: CadencePalette, menu: bool) -> Div {

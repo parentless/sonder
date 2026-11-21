@@ -18,6 +18,8 @@ pub(super) const CONTAINER_RADIUS: Rems = Rems(0.875);
 pub(super) const PANEL_RADIUS: Rems = Rems(1.25);
 
 pub(super) const CONTROL_ICON: Rems = Rems(1.0625);
+/// The glyph in a square outlined button.
+pub(super) const OUTLINED_ICON: Rems = Rems(1.125);
 pub(super) const FIELD_ICON: Rems = Rems(1.);
 pub(super) const PLAYBACK_ICON: Rems = Rems(1.);
 pub(super) const MENU_ICON: Rems = Rems(0.9375);

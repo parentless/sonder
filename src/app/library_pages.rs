@@ -257,15 +257,13 @@ impl LibraryTracksPage {
     }
 
     fn link_button(&self, palette: CadencePalette, cx: &mut Context<Self>) -> impl IntoElement {
-        components::icon_pill(
+        components::outlined_icon_button(
             palette,
             "local-files-link",
             CadenceIcon::Link,
-            "From link",
-            true,
+            "Save from a link",
         )
         .test_support()
-        .flex_none()
         .on_click(cx.listener(|this, _, window, cx| this.toggle_link_popover(window, cx)))
     }
 
@@ -471,30 +469,35 @@ impl Render for LibraryTracksPage {
         let search = (searching || !tracks.is_empty())
             .then(|| self.search_field(palette, window, cx))
             .flatten();
-        let heading = components::page_heading(palette, section.title(), detail).when(
-            section == LibrarySection::LocalFiles,
-            |heading| {
-                heading.child(
-                    div()
-                        .relative()
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .gap_2()
-                        .children(search)
-                        .child(self.link_button(palette, cx))
-                        .children(self.link_layer(window, cx))
-                        .child(
-                            components::settings_button(palette, "local-files-folders", "Folders")
+        let heading =
+            components::page_heading(palette, section.title(), detail).when(
+                section == LibrarySection::LocalFiles,
+                |heading| {
+                    heading.child(
+                        div()
+                            .relative()
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap_2()
+                            .children(search)
+                            .child(self.link_button(palette, cx))
+                            .children(self.link_layer(window, cx))
+                            .child(
+                                components::outlined_icon_button(
+                                    palette,
+                                    "local-files-folders",
+                                    CadenceIcon::Folder,
+                                    "Folders",
+                                )
                                 .test_support()
-                                .flex_none()
-                                .on_click(cx.listener(|_, _, _, cx| {
-                                    cx.emit(PageEvent::OpenLocalFilesSettings)
-                                })),
-                        ),
-                )
-            },
-        );
+                                .on_click(cx.listener(
+                                    |_, _, _, cx| cx.emit(PageEvent::OpenLocalFilesSettings),
+                                )),
+                            ),
+                    )
+                },
+            );
         components::page(section.page_id())
             .pt_3()
             .child(heading)
