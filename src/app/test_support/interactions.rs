@@ -5804,3 +5804,39 @@ fn profile_opens_from_the_account_menu_and_marks_the_avatar() {
     ));
     fixture.no_commands();
 }
+
+#[test]
+fn a_top_artist_on_the_profile_opens_that_artist() {
+    let mut fixture = Fixture::new(false);
+    let workspace = fixture.workspace.clone().unwrap();
+    fixture.update(|_, cx| {
+        let _ = workspace.update(cx, |workspace, cx| {
+            workspace.navigate(Route::Profile, cx);
+            workspace.profile.update(cx, |page, cx| {
+                let artist = model::Artist {
+                    genres: Vec::new(),
+                    provider: model::Provider::Spotify,
+                    source_id: "artist-glaive".into(),
+                    spotify_uri: None,
+                    name: "glaive".into(),
+                    artwork_url: None,
+                };
+                page.seed(
+                    model::ProfileData {
+                        top: model::ProfileTop {
+                            ranges: [Vec::new(), vec![artist], Vec::new()],
+                            followed: None,
+                        },
+                        recent_hours: Some(Vec::new()),
+                    },
+                    cx,
+                );
+            });
+        });
+    });
+    // Opening the page asked for its data; that is not what this checks.
+    while fixture.backend.commands.try_recv().is_ok() {}
+    fixture.update(|window, cx| window.click(("profile-artist", 0usize), cx));
+    assert_eq!(fixture.requested_artist(), "artist-glaive");
+    assert_eq!(fixture.route(), Route::Artist);
+}

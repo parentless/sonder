@@ -11,6 +11,7 @@
 //! the last plays (kept for twenty minutes). Revisiting within five minutes
 //! asks for nothing. The liked-song counts are worked out from the library
 //! already in memory, once per change.
+use super::page::PageEvent;
 use super::*;
 use gpui_kit::TestSupportExt as _;
 use std::{sync::Arc, time::Instant};
@@ -67,6 +68,8 @@ pub(super) struct ProfilePage {
     arrival: u64,
     _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<PageEvent> for ProfilePage {}
 
 impl ProfilePage {
     pub(super) fn new(backend: BackendHandle, cx: &mut Context<Self>) -> Self {
@@ -724,10 +727,10 @@ impl ProfilePage {
                     palette,
                     &image_cache,
                     &rows,
-                    &liked_by,
-                    shown.liked.is_some(),
+                    shown.liked.is_some().then_some(liked_by.as_slice()),
                     held,
                     accent,
+                    cx,
                 )),
                 "profile-artists",
                 arrival,
@@ -986,10 +989,11 @@ fn artists_card(
     palette: CadencePalette,
     image_cache: &Entity<image_cache::BoundedImageCache>,
     artists: &[&model::Artist],
-    liked_by: &[u32],
-    counts_known: bool,
+    // None until the library has loaded, so no count is shown.
+    liked_by: Option<&[u32]>,
     held: impl Fn(&model::Artist) -> [bool; 3],
     accent: u32,
+    cx: &mut Context<ProfilePage>,
 ) -> Div {
     card(palette)
         .child(card_title(palette, "Your top artists"))
@@ -1011,9 +1015,18 @@ fn artists_card(
             )
         })
         .children(artists.iter().enumerate().map(|(index, artist)| {
-            div()
-                .id(("profile-artist", index))
+            let target = model::ArtistRef {
+                name: artist.name.clone(),
+                source_id: Some(artist.source_id.clone()),
+                spotify_uri: artist.spotify_uri.clone(),
+            };
+            components::bare_button(("profile-artist", index))
                 .test_support()
+                .w_full()
+                .justify_start()
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(PageEvent::OpenArtist(target.clone()));
+                }))
                 .flex()
                 .items_center()
                 .gap(px(ROW_GAP))
@@ -1069,14 +1082,12 @@ fn artists_card(
                         .text_right()
                         .text_size(Rems(0.78))
                         .text_color(rgb(palette.text_muted))
-                        .child(if counts_known {
+                        .child(liked_by.map_or_else(String::new, |counts| {
                             format!(
                                 "{} liked",
-                                thousands(u64::from(liked_by.get(index).copied().unwrap_or(0)))
+                                thousands(u64::from(counts.get(index).copied().unwrap_or(0)))
                             )
-                        } else {
-                            String::new()
-                        }),
+                        })),
                 )
         }))
 }

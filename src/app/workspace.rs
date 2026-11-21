@@ -125,6 +125,7 @@ impl Workspace {
         });
         let playlists = cx.new(library_pages::PlaylistsPage::new);
         let home = cx.new(|cx| home::HomePage::new(backend.clone(), cx));
+        let profile = cx.new(|cx| profile::ProfilePage::new(backend.clone(), cx));
         let search = cx.new(|cx| catalog::SearchPage::new(backend.clone(), cx));
         let playlist = cx.new(|cx| catalog::PlaylistPage::new(backend.clone(), cx));
         let artist = cx.new(|cx| catalog::ArtistPage::new(backend.clone(), cx));
@@ -132,6 +133,7 @@ impl Workspace {
         subscriptions.extend([
             cx.subscribe(&liked_songs, Workspace::handle_page_event),
             cx.subscribe(&home, Workspace::handle_page_event),
+            cx.subscribe(&profile, Workspace::handle_page_event),
             cx.subscribe(&recent, Workspace::handle_page_event),
             cx.subscribe(&local_files, Workspace::handle_page_event),
             cx.subscribe(&playlists, Workspace::handle_page_event),
@@ -148,7 +150,6 @@ impl Workspace {
             }));
         }
         let whats_new = cx.new(|_| whats_new::WhatsNewPage::new());
-        let profile = cx.new(|cx| profile::ProfilePage::new(backend.clone(), cx));
         let settings = cx.new(|cx| settings::Settings::new(window, cx));
         subscriptions.push(cx.subscribe_in(
             &settings,
