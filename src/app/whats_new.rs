@@ -41,6 +41,34 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 21, 2026",
+                releases: &[Release {
+                    version: "0.8.65",
+                    notes: &[
+                        Note(
+                            New,
+                            "Click an artist in your Profile's top artists to open their page.",
+                        ),
+                        Note(
+                            Better,
+                            "Profile shows your last answer at once and refreshes quietly, and warms up when you open the account menu.",
+                        ),
+                        Note(
+                            Better,
+                            "What's new now lives at the foot of the sidebar, and the account menu is just Profile, Settings and Logout.",
+                        ),
+                        Note(
+                            Better,
+                            "From link and Folders in Local Files are now neat icon buttons.",
+                        ),
+                        Note(
+                            Better,
+                            "Lighter when idle: fewer background wakeups, less work for artwork, and the system media controls no longer update every second.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
                 date: "Nov 19, 2026",
                 releases: &[Release {
                     version: "0.8.64",
