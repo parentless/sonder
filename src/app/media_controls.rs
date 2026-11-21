@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Instant;
 
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
@@ -10,7 +11,32 @@ use souvlaki::{
 struct Published {
     track: Option<(model::Provider, String)>,
     playing: bool,
-    position_seconds: u64,
+}
+
+/// How far the player's position may differ from where the system has carried
+/// the one it was last told before it is told again. The system advances the
+/// position by itself while playing, so only a seek or a real stall gets
+/// past this.
+const POSITION_DRIFT_MS: u32 = 2_000;
+
+/// Whether the system's position, carried forward from `published` (the
+/// position it was told and when), now differs from the player's `anchor_ms`.
+fn position_drifted(
+    published: Option<(u32, Instant)>,
+    playing: bool,
+    now: Instant,
+    anchor_ms: u32,
+) -> bool {
+    let Some((told_ms, told_at)) = published else {
+        return true;
+    };
+    let carried = if playing {
+        let elapsed = now.saturating_duration_since(told_at).as_millis();
+        told_ms.saturating_add(u32::try_from(elapsed).unwrap_or(u32::MAX))
+    } else {
+        told_ms
+    };
+    carried.abs_diff(anchor_ms) > POSITION_DRIFT_MS
 }
 
 /// Publishes now-playing information to the operating system and accepts the transport
@@ -18,6 +44,8 @@ struct Published {
 pub(super) struct SystemMediaControls {
     controls: MediaControls,
     published: Option<Published>,
+    /// The position last sent and when, for [`position_drifted`].
+    published_position: Option<(u32, Instant)>,
     _command_forwarder: gpui_kit::Task<()>,
     #[cfg(target_os = "windows")]
     _media_window: MediaWindow,
@@ -76,6 +104,7 @@ impl SystemMediaControls {
         Some(Self {
             controls,
             published: None,
+            published_position: None,
             _command_forwarder: command_forwarder,
             #[cfg(target_os = "windows")]
             _media_window: media_window,
@@ -88,11 +117,15 @@ impl SystemMediaControls {
         let published = Published {
             track: now_playing.map(|track| (track.provider, track.source_id.clone())),
             playing: player.playing(),
-            position_seconds: u64::from(player.anchor_ms() / 1000),
         };
-        if self.published.as_ref() == Some(&published) {
+        let now = Instant::now();
+        let anchor_ms = player.anchor_ms();
+        if self.published.as_ref() == Some(&published)
+            && !position_drifted(self.published_position, published.playing, now, anchor_ms)
+        {
             return;
         }
+        self.published_position = Some((anchor_ms, now));
         let track_changed = self
             .published
             .as_ref()
@@ -212,8 +245,8 @@ impl Drop for MediaWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{MediaControlEvent, MediaPosition, Transport, transport_for};
-    use std::time::Duration;
+    use super::{MediaControlEvent, MediaPosition, Transport, position_drifted, transport_for};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn system_commands_map_to_transport_actions() {
@@ -267,5 +300,53 @@ mod tests {
     fn commands_cadence_does_not_offer_are_ignored() {
         assert_eq!(transport_for(MediaControlEvent::Raise), None);
         assert_eq!(transport_for(MediaControlEvent::SetVolume(0.5)), None);
+    }
+
+    #[test]
+    fn the_system_is_told_the_position_again_only_after_a_jump() {
+        let told_at = Instant::now();
+        let later = |seconds| told_at + Duration::from_secs(seconds);
+        // Nothing sent yet.
+        assert!(position_drifted(None, true, told_at, 0));
+        // Playing on: ten seconds on, the player reports about where the
+        // system has carried the position, so nothing is sent.
+        assert!(!position_drifted(
+            Some((30_000, told_at)),
+            true,
+            later(10),
+            40_000
+        ));
+        assert!(!position_drifted(
+            Some((30_000, told_at)),
+            true,
+            later(10),
+            41_500
+        ));
+        // A seek forward or back is sent.
+        assert!(position_drifted(
+            Some((30_000, told_at)),
+            true,
+            later(10),
+            90_000
+        ));
+        assert!(position_drifted(
+            Some((30_000, told_at)),
+            true,
+            later(10),
+            5_000
+        ));
+        // Paused: the position stays put, however long it has been.
+        assert!(!position_drifted(
+            Some((30_000, told_at)),
+            false,
+            later(60),
+            30_000
+        ));
+        assert!(position_drifted(
+            Some((30_000, told_at)),
+            false,
+            later(60),
+            90_000
+        ));
     }
 }
