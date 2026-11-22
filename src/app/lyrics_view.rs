@@ -519,7 +519,7 @@ impl Render for LyricsPane {
                 .items_center()
                 .justify_center()
                 .px_6()
-                .bg(rgb(palette.surface))
+                .bg(palette.player.color())
                 .border_t_1()
                 .border_color(rgb(palette.border))
                 .child(

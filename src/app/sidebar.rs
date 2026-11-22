@@ -426,15 +426,15 @@ impl Sidebar {
             item.icon
         };
         let base = if selected {
-            palette.selection
+            Fill::solid(palette.selection)
         } else {
-            palette.canvas
+            palette.sidebar_rest
         };
         let fill_color = self
             .hover
             .transition(index, cx.background_executor().now())
             .map_or_else(
-                || rgb(base),
+                || base.color(),
                 |hover| hover.color(window, base, palette.control_hover, cx.reduce_motion()),
             );
         let focus_visible = components::is_focus_visible(focus_handle, window);
@@ -526,15 +526,15 @@ impl Sidebar {
         let collapsed = self.collapsed;
         let unseen = self.whats_new_unseen;
         let base = if selected {
-            palette.selection
+            Fill::solid(palette.selection)
         } else {
-            palette.canvas
+            palette.sidebar_rest
         };
         let fill_color = self
             .hover
             .transition(index, cx.background_executor().now())
             .map_or_else(
-                || rgb(base),
+                || base.color(),
                 |hover| hover.color(window, base, palette.control_hover, cx.reduce_motion()),
             );
         let focus_visible = components::is_focus_visible(&self.whats_new_focus, window);
@@ -804,9 +804,9 @@ impl Sidebar {
                                     let selected = active_playlist.as_deref()
                                         == Some(playlist.source_id.as_str());
                                     let base = if selected {
-                                        palette.selection
+                                        Fill::solid(palette.selection)
                                     } else {
-                                        palette.canvas
+                                        palette.sidebar_rest
                                     };
                                     let pinned = position < pinned_count;
                                     let row = components::row_button(
@@ -825,7 +825,7 @@ impl Sidebar {
                                     .w_full()
                                     .min_w_0()
                                     .when(!collapsed, |row| row.px_3())
-                                    .bg(rgb(base))
+                                    .bg(base.color())
                                     .aria_selected(selected)
                                     .rounded_lg()
                                     .justify_start()
@@ -1012,7 +1012,7 @@ impl Sidebar {
             .h_full()
             .flex_none()
             .overflow_hidden()
-            .bg(rgb(palette.canvas))
+            .bg(palette.sidebar.color())
             .border_r_1()
             .border_color(rgb(palette.border))
             .child(
