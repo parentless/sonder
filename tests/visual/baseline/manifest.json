@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.67",
+    "cadence": "0.8.68",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "91b642426cf3670a66cb75da674b212b8fb5e615",
-    "lockfile_sha256": "41c684fb19e9837b3850d5ec2e2da0a3be6e35e4a43013d1a6d6c08130aebf68"
+    "revision": "80d9f60b58163f84db66caf87721ddbb9fa4fa6b",
+    "lockfile_sha256": "6dc792a7f762314850a44441912eaa367ce3a4ce90b83771c58be2fc99126017"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/44980814886",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/44984397322",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.67",
+      "cadence": "0.8.68",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "91b642426cf3670a66cb75da674b212b8fb5e615",
-      "lockfile_sha256": "41c684fb19e9837b3850d5ec2e2da0a3be6e35e4a43013d1a6d6c08130aebf68"
+      "revision": "80d9f60b58163f84db66caf87721ddbb9fa4fa6b",
+      "lockfile_sha256": "6dc792a7f762314850a44441912eaa367ce3a4ce90b83771c58be2fc99126017"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/44980814886"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/44984397322"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -119,6 +119,7 @@
     "0.8.64: new Profile page (profile, profile-loading, profile-empty, profile-scrolled); Settings (the version) and the What's new list changed",
     "0.8.65: the sidebar gains a What's new footer (divider, row and version caption) so every full-window scene changes; the account menu drops What's new (artist-account-menu); Local Files From link and Folders become icon-only outlined buttons; Profile top artists are clickable rows; artist backdrops blur from a smaller source; Settings (the version) and the What's new list changed",
     "0.8.66: Window style in Settings adds a Window style row under General (settings, settings-autoplay-off, settings-cache); every full-window scene only changes the sidebar version caption, and the What's new list changed",
-    "0.8.67 adds a Design setting (Classic default); Settings gains a Design row in place of the 0.8.66 Window style row and What's new gains the 0.8.67 entry; every other reference changes only in the sidebar footer version digit, so Classic is otherwise pixel-identical"
+    "0.8.67 adds a Design setting (Classic default); Settings gains a Design row in place of the 0.8.66 Window style row and What's new gains the 0.8.67 entry; every other reference changes only in the sidebar footer version digit, so Classic is otherwise pixel-identical",
+    "0.8.68 only changes the version text (sidebar footer, Settings) and adds the 0.8.68 What's new entry; the Ambient glow fix does not appear in Classic references"
   ]
 }
