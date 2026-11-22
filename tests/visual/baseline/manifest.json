@@ -1,10 +1,10 @@
 {
   "source": {
-    "cadence": "0.8.65",
+    "cadence": "0.8.69",
     "gpui-kit": "0.7.0",
     "gpui-pre": "0.3.7",
-    "revision": "86600bd72ec618895a348b23056070e0262c7150",
-    "lockfile_sha256": "c8e2ea0202b0932029db6ed4841479a249c50628291ac7bb1682210147b3c681"
+    "revision": "83d3d16d131b019528c64465edf1887dc2bdb839",
+    "lockfile_sha256": "18bfb9b3fc7a9fe42b8e87b5ec5bd2b0408aa43b00b29ae496892cd067421a9e"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/44879865295",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/44985489776",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -57,13 +57,13 @@
       "renderer": "Metal"
     },
     "source": {
-      "cadence": "0.8.65",
+      "cadence": "0.8.69",
       "gpui-kit": "0.7.0",
       "gpui-pre": "0.3.7",
-      "revision": "86600bd72ec618895a348b23056070e0262c7150",
-      "lockfile_sha256": "c8e2ea0202b0932029db6ed4841479a249c50628291ac7bb1682210147b3c681"
+      "revision": "83d3d16d131b019528c64465edf1887dc2bdb839",
+      "lockfile_sha256": "18bfb9b3fc7a9fe42b8e87b5ec5bd2b0408aa43b00b29ae496892cd067421a9e"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/44879865295"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/44985489776"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -117,6 +117,7 @@
     "0.8.62: the search dropdown has cover art, bold matches, type labels and section counts (search-live, search-cached); Settings (the version) and the What's new list changed",
     "0.8.63: only Settings (the version) and the What's new list changed; shuffle is remembered",
     "0.8.64: new Profile page (profile, profile-loading, profile-empty, profile-scrolled); Settings (the version) and the What's new list changed",
-    "0.8.65: the sidebar gains a What's new footer (divider, row and version caption) so every full-window scene changes; the account menu drops What's new (artist-account-menu); Local Files From link and Folders become icon-only outlined buttons; Profile top artists are clickable rows; artist backdrops blur from a smaller source; Settings (the version) and the What's new list changed"
+    "0.8.65: the sidebar gains a What's new footer (divider, row and version caption) so every full-window scene changes; the account menu drops What's new (artist-account-menu); Local Files From link and Folders become icon-only outlined buttons; Profile top artists are clickable rows; artist backdrops blur from a smaller source; Settings (the version) and the What's new list changed",
+    "0.8.69 returns to the 0.8.65 design: the Window style and Design settings are removed again, so every reference matches 0.8.65 apart from the version text (sidebar footer, Settings) and the new What's new entry"
   ]
 }
