@@ -130,6 +130,7 @@ struct CadencePalette {
     /// Which design this palette belongs to, so views can lay themselves out to
     /// match without a second lookup.
     design: Design,
+    dark: bool,
 }
 
 /// A colour with an alpha, for the surfaces that can be see-through.
@@ -189,6 +190,7 @@ impl CadencePalette {
         sidebar_rest: Fill::solid(0xFBFAF9),
         page_rest: Fill::solid(0xFFFFFF),
         design: Design::Classic,
+        dark: false,
     };
 
     const DARK: Self = Self {
@@ -226,6 +228,7 @@ impl CadencePalette {
         sidebar_rest: Fill::solid(0x121212),
         page_rest: Fill::solid(0x1A1A1A),
         design: Design::Classic,
+        dark: true,
     };
 
     /// The palette for a design. Classic is the base unchanged. The others change

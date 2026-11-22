@@ -426,7 +426,7 @@ impl Render for ProfilePage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
         let compact = is_compact_content_layout(window);
-        let light = palette.canvas == CadencePalette::LIGHT.canvas;
+        let light = !palette.dark;
         let accent = if light { ACCENT_LIGHT } else { ACCENT_DARK };
 
         let profile = self.session.read(cx).profile().cloned();

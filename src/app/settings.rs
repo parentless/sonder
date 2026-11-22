@@ -443,7 +443,7 @@ impl Settings {
                                     components::button(palette, ("settings-selection-color", index))
                                         .hover(|style| style.opacity(0.9))
                                         .test_support().h_9().px_3().rounded_lg()
-                                        .bg(rgb(color.fill(palette.canvas == CadencePalette::DARK.canvas)))
+                                        .bg(rgb(color.fill(palette.dark)))
                                         .border_1().border_color(rgb(if preferences.selection_color == color { palette.text_primary } else { palette.border }))
                                         .child(color.name())
                                         .on_click(move |_, window, cx| appearance::Appearance::set_selection_color(color, window, cx))

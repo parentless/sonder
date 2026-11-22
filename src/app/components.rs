@@ -466,7 +466,7 @@ pub(super) fn outlined_icon_button(
 /// Static translucent materials reuse the already-blurred artist backdrop;
 /// no per-frame blur pass, animation, or image allocation is needed.
 fn glass_frame(frame: Div, palette: CadencePalette, menu: bool) -> Div {
-    let light = palette.canvas == CadencePalette::LIGHT.canvas;
+    let light = !palette.dark;
     let (top, bottom, rim) = match (light, menu) {
         (true, _) => (0xFFFFFFEE, 0xF2F0EDE0, 0xFFFFFFCC),
         (false, true) => (0x38363EEB, 0x26252BE8, 0xFFFFFF44),
@@ -692,6 +692,28 @@ fn shaped_artwork(
                                 false,
                             ) {
                                 log::warn!("could not paint artwork: {error}");
+                            } else if palette.design != Design::Classic {
+                                // A faint ring keeps dark art from melting into the
+                                // surface behind it.
+                                window.paint_quad(
+                                    gpui_kit::outline(
+                                        bounds,
+                                        gpui_kit::hsla(0., 0., 1., 0.10),
+                                        gpui_kit::BorderStyle::Solid,
+                                    )
+                                    .corner_radii(
+                                        if flush_right {
+                                            gpui_kit::Corners {
+                                                top_left: radius,
+                                                top_right: gpui_kit::px(0.),
+                                                bottom_right: gpui_kit::px(0.),
+                                                bottom_left: radius,
+                                            }
+                                        } else {
+                                            gpui_kit::Corners::all(radius)
+                                        },
+                                    ),
+                                );
                             }
                         } else {
                             // A placeholder replaces the missing image; it is
@@ -760,9 +782,15 @@ pub(super) fn initials(name: &str) -> String {
 
 /// The large title a page opens with.
 pub(super) fn page_title(palette: CadencePalette, title: impl Into<SharedString>) -> Div {
+    // Refined sets titles a size down, so content starts higher.
+    let (size, line) = if palette.design == Design::Refined {
+        (Rems(2.125), Rems(2.375))
+    } else {
+        (tokens::PAGE_TITLE_TEXT, tokens::PAGE_TITLE_LINE_HEIGHT)
+    };
     div()
-        .text_size(tokens::PAGE_TITLE_TEXT)
-        .line_height(tokens::PAGE_TITLE_LINE_HEIGHT)
+        .text_size(size)
+        .line_height(line)
         .font_weight(gpui_kit::FontWeight::MEDIUM)
         .text_color(rgb(palette.text_primary))
         .child(title.into())

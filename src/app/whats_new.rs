@@ -858,7 +858,7 @@ impl WhatsNewPage {
 }
 
 fn tag_chip(palette: CadencePalette, tag: Tag) -> Div {
-    let light = palette.canvas == CadencePalette::LIGHT.canvas;
+    let light = !palette.dark;
     let (label, fg, bg) = match (tag, light) {
         (New, true) => ("New", 0x1558B8, 0xDFEAFC),
         (Fixed, true) => ("Fixed", 0x1D7A45, 0xDCF1E4),
