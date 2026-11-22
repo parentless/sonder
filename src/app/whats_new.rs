@@ -41,6 +41,16 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 22, 2026",
+                releases: &[Release {
+                    version: "0.8.70",
+                    notes: &[Note(
+                        New,
+                        "Equalizer in Settings > Audio. Drag five points on one smooth curve, pick a preset, compare with the original, or save your own.",
+                    )],
+                }],
+            },
+            Day {
                 date: "Nov 21, 2026",
                 releases: &[
                     Release {

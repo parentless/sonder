@@ -103,6 +103,7 @@ impl AppServices {
         crate::playback::set_normalisation(preferences.normalise_volume);
         crate::playback::set_streaming_kbps(preferences.streaming_quality.kbps());
         crate::playback::set_engine(preferences.player);
+        crate::equalizer::publish(preferences.equalizer, false);
         let (backend, events) = Backend::start();
         let handle = backend.handle();
         let player =
@@ -541,6 +542,57 @@ impl AppServices {
         {
             log::warn!("could not save the volume: {error:#}");
         }
+    }
+
+    /// Applies the equalizer to the sound now. Called on every move of a
+    /// drag, so it touches memory only; [`Self::save_equalizer`] writes the
+    /// file once the drag ends.
+    pub(super) fn apply_equalizer(
+        settings: crate::equalizer::Settings,
+        bypass: bool,
+        cx: &mut App,
+    ) {
+        cx.global_mut::<Self>().preferences.equalizer = settings;
+        crate::equalizer::publish(settings, bypass);
+    }
+
+    pub(super) fn save_equalizer(
+        settings: crate::equalizer::Settings,
+        cx: &mut App,
+    ) -> Option<anyhow::Result<()>> {
+        cx.global_mut::<Self>()
+            .store
+            .as_mut()
+            .map(|store| store.set_equalizer(settings))
+    }
+
+    /// What the settings file holds, not what is in memory: lets a test see
+    /// whether a change was really written.
+    #[cfg(test)]
+    pub(super) fn stored_equalizer(cx: &App) -> Option<crate::equalizer::Settings> {
+        cx.global::<Self>()
+            .store
+            .as_ref()
+            .and_then(|store| store.preferences().ok())
+            .map(|preferences| preferences.equalizer)
+    }
+
+    pub(super) fn equalizer_presets(cx: &App) -> Vec<crate::equalizer::CustomPreset> {
+        cx.global::<Self>()
+            .store
+            .as_ref()
+            .and_then(|store| store.equalizer_presets().ok())
+            .unwrap_or_default()
+    }
+
+    pub(super) fn save_equalizer_presets(
+        presets: &[crate::equalizer::CustomPreset],
+        cx: &mut App,
+    ) -> Option<anyhow::Result<()>> {
+        cx.global_mut::<Self>()
+            .store
+            .as_mut()
+            .map(|store| store.set_equalizer_presets(presets))
     }
 
     pub(super) fn set_autoplay(autoplay: bool, cx: &mut App) -> Option<anyhow::Result<()>> {

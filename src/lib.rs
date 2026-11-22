@@ -6,6 +6,7 @@ mod credits;
 #[cfg(target_os = "windows")]
 mod diagnostics;
 pub(crate) mod discord;
+pub mod equalizer;
 pub(crate) mod lastfm;
 pub mod lifecycle;
 mod link_download;

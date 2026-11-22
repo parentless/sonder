@@ -379,6 +379,7 @@ struct Playback {
     stream: Stream,
     writer: BufferWriter,
     converter: OutputConverter,
+    equalizer: crate::equalizer::Processor,
     output_channels: u16,
     sample_buffer: Vec<f32>,
     channel_buffer: Vec<f32>,
@@ -478,6 +479,7 @@ impl CpalSink {
         let playback = self.playback_mut()?;
         playback.clear_requested.store(true, Ordering::Release);
         playback.converter.reset();
+        playback.equalizer.reset();
         if let Err(error) = playback.stream.play() {
             playback.failed.store(true, Ordering::Release);
             return Err(SinkError::StateChange(error.to_string()));
@@ -502,6 +504,8 @@ impl CpalSink {
         playback
             .sample_buffer
             .extend(samples.iter().map(|sample| *sample as f32));
+        // Before resampling: the filters run at the decoder's fixed rate.
+        playback.equalizer.process(&mut playback.sample_buffer);
         let samples = playback
             .converter
             .convert(&playback.sample_buffer)
@@ -600,6 +604,7 @@ impl Playback {
             stream,
             writer,
             converter,
+            equalizer: crate::equalizer::Processor::new(),
             output_channels: config.channels,
             sample_buffer: Vec::new(),
             channel_buffer: Vec::new(),

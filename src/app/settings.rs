@@ -1,6 +1,8 @@
 use super::*;
 use gpui_kit::TestSupportExt as _;
 
+mod audio;
+
 /// What the settings page asks the workspace to do.
 pub(super) enum SettingsEvent {
     OpenWhatsNew,
@@ -16,6 +18,10 @@ pub(super) enum SettingsEvent {
     SetLyricsView(LyricsView),
     SetDiscord(crate::discord::Config),
     SetLastfm(crate::lastfm::Config),
+    /// Writes the equalizer to the settings file. The sound already follows
+    /// every change; this is sent when a gesture ends.
+    SaveEqualizer(crate::equalizer::Settings),
+    SaveEqualizerPresets(Vec<crate::equalizer::CustomPreset>),
 }
 
 /// Broad groups, so the page stays short without a tab for every setting.
@@ -25,17 +31,20 @@ enum SettingsTab {
     General,
     /// Spotify, Discord and Last.fm.
     Connections,
+    /// The equalizer.
+    Audio,
     /// Updates and cache.
     System,
 }
 
 impl SettingsTab {
-    const ALL: [Self; 3] = [Self::General, Self::Connections, Self::System];
+    const ALL: [Self; 4] = [Self::General, Self::Connections, Self::Audio, Self::System];
 
     fn label(self) -> &'static str {
         match self {
             Self::General => "General",
             Self::Connections => "Connections",
+            Self::Audio => "Audio",
             Self::System => "System",
         }
     }
@@ -66,6 +75,20 @@ pub(super) struct Settings {
     lastfm_busy: bool,
     cache_cleared: bool,
     local_files_error: Option<SharedString>,
+    /// Equalizer: the point being dragged, the graph's painted bounds (read
+    /// when mapping the pointer), and the keyboard focus of each point.
+    eq_drag: Option<usize>,
+    eq_graph: Rc<Cell<Bounds<Pixels>>>,
+    eq_focus: [FocusHandle; crate::equalizer::BAND_COUNT],
+    eq_switch_focus: FocusHandle,
+    eq_compare_focus: FocusHandle,
+    /// Compare plays the original while the curve stays as it is. It is not
+    /// saved and ends when the tab does.
+    eq_bypass: bool,
+    eq_presets: Vec<crate::equalizer::CustomPreset>,
+    eq_naming: bool,
+    eq_name: Entity<InputState>,
+    eq_note: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -107,6 +130,12 @@ impl Settings {
         });
         let lastfm_api_secret =
             cx.new(|cx| InputState::new(window, cx).placeholder("Last.fm shared secret"));
+        let eq_name = cx.new(|cx| InputState::new(window, cx).placeholder("Preset name"));
+        subscriptions.push(cx.subscribe(&eq_name, |this, _, event: &InputEvent, cx| {
+            if let InputEvent::PressEnter { .. } = event {
+                this.save_preset(cx);
+            }
+        }));
         if let Some(status) = updater::status(cx) {
             subscriptions.push(cx.observe(&status, |_, _, cx| cx.notify()));
         }
@@ -131,12 +160,23 @@ impl Settings {
             discord_error: None,
             cache_cleared: false,
             local_files_error: None,
+            eq_drag: None,
+            eq_graph: Rc::new(Cell::new(Bounds::default())),
+            eq_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
+            eq_switch_focus: cx.focus_handle(),
+            eq_compare_focus: cx.focus_handle(),
+            eq_bypass: false,
+            eq_presets: services::AppServices::equalizer_presets(cx),
+            eq_naming: false,
+            eq_name,
+            eq_note: None,
             _subscriptions: subscriptions,
         }
     }
 
     /// Shows the Local Files folders, the last section of the General tab.
     pub(super) fn show_local_files(&mut self, cx: &mut Context<Self>) {
+        self.end_compare(cx);
         self.tab = SettingsTab::General;
         self.scroll.scroll_to_bottom();
         cx.notify();
@@ -625,6 +665,9 @@ impl Settings {
                     .child(self.local_files_section(palette, cx))
                     .child(self.lyrics_section(palette, cx))
                     )
+                    .when(tab == SettingsTab::Audio, |content| {
+                        content.child(self.audio_tab(palette, window, cx))
+                    })
                     .when(tab == SettingsTab::Connections, |content| content
                     .child(
                         div()
@@ -771,6 +814,8 @@ impl Settings {
                             .child(tab.label())
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if this.tab != tab {
+                                    this.end_compare(cx);
+                                    this.eq_naming = false;
                                     this.tab = tab;
                                     // Each group starts at its top.
                                     this.scroll.set_offset(gpui_kit::point(

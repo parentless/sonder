@@ -187,6 +187,24 @@ impl Workspace {
                     }
                     cx.notify();
                 }
+                settings::SettingsEvent::SaveEqualizer(equalizer) => {
+                    let result = services::AppServices::save_equalizer(*equalizer, cx);
+                    let result = services::require_settings_storage(result);
+                    if let Some(error) = services::preference_save_error("equalizer", result) {
+                        this.last_error = Some(error);
+                        cx.notify();
+                    }
+                }
+                settings::SettingsEvent::SaveEqualizerPresets(presets) => {
+                    let result = services::AppServices::save_equalizer_presets(presets, cx);
+                    let result = services::require_settings_storage(result);
+                    if let Some(error) =
+                        services::preference_save_error("equalizer presets", result)
+                    {
+                        this.last_error = Some(error);
+                        cx.notify();
+                    }
+                }
                 settings::SettingsEvent::SetPlayer(player) => {
                     this.choose_player(*player, cx);
                 }
@@ -617,6 +635,11 @@ impl Render for Workspace {
             toolbar.show(route, back_target, error, cx)
         });
 
+        // Compare is for listening in the Audio tab; leaving Settings ends it.
+        if route != Route::Settings && self.settings.read(cx).comparing() {
+            self.settings
+                .update(cx, |settings, cx| settings.end_compare(cx));
+        }
         let overlay_toolbar = route == Route::Artist;
         // Lyrics show when opened, in the chosen place.
         let lyrics_preferences = services::AppServices::preferences(cx);

@@ -155,6 +155,8 @@ pub struct AppPreferences {
     /// Shows the lyrics button in the player. Off until the listener turns it
     /// on, because lyrics come from a third-party service.
     pub lyrics_view: LyricsView,
+    /// Off until the listener turns it on, so the sound is untouched.
+    pub equalizer: crate::equalizer::Settings,
 }
 
 /// Where lyrics are shown.
@@ -210,6 +212,7 @@ impl Default for AppPreferences {
             streaming_quality: StreamingQuality::default(),
             player: crate::playback::Engine::default(),
             lyrics_view: LyricsView::default(),
+            equalizer: crate::equalizer::Settings::default(),
         }
     }
 }
@@ -464,6 +467,14 @@ impl Store {
             .preference("lyrics_view")?
             .and_then(|value| LyricsView::from_key(&value))
             .unwrap_or_default();
+        let equalizer = crate::equalizer::Settings {
+            enabled: self.preference("eq_enabled")?.as_deref() == Some("true"),
+            // A damaged value falls back to flat rather than a half curve.
+            steps: self
+                .preference("eq_steps")?
+                .and_then(|value| crate::equalizer::Settings::decode_steps(&value))
+                .unwrap_or_default(),
+        };
         let selection_color = self.preference("selection_color")?;
         let ui_zoom = self
             .preference("ui_zoom")?
@@ -493,6 +504,7 @@ impl Store {
             streaming_quality,
             player,
             lyrics_view,
+            equalizer,
         })
     }
 
@@ -561,6 +573,31 @@ impl Store {
 
     pub fn set_lyrics_view(&mut self, view: LyricsView) -> Result<()> {
         self.set_preference("lyrics_view", view.key())
+    }
+
+    pub fn set_equalizer(&mut self, settings: crate::equalizer::Settings) -> Result<()> {
+        self.set_preference(
+            "eq_enabled",
+            if settings.enabled { "true" } else { "false" },
+        )?;
+        self.set_preference("eq_steps", &settings.encode_steps())
+    }
+
+    /// Curves the listener saved by name. Unreadable data is no presets.
+    pub fn equalizer_presets(&self) -> Result<Vec<crate::equalizer::CustomPreset>> {
+        let mut presets: Vec<crate::equalizer::CustomPreset> = self
+            .preference("eq_presets")?
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default();
+        presets.truncate(crate::equalizer::MAX_CUSTOM_PRESETS);
+        Ok(presets)
+    }
+
+    pub fn set_equalizer_presets(
+        &mut self,
+        presets: &[crate::equalizer::CustomPreset],
+    ) -> Result<()> {
+        self.set_preference("eq_presets", &serde_json::to_string(presets)?)
     }
 
     pub fn set_autoplay(&mut self, autoplay: bool) -> Result<()> {
@@ -1504,6 +1541,11 @@ mod tests {
         store.set_autoplay(false).unwrap();
         store.set_shuffle(true).unwrap();
         store.set_volume_percent(35).unwrap();
+        let eq = crate::equalizer::Settings {
+            enabled: true,
+            steps: [12, -3, 0, 7, -24],
+        };
+        store.set_equalizer(eq).unwrap();
         store.set_normalise_volume(true).unwrap();
         store.set_keep_in_tray(true).unwrap();
         store.set_launch_at_login(true).unwrap();
@@ -1528,6 +1570,7 @@ mod tests {
                 streaming_quality: super::StreamingQuality::High,
                 player: crate::playback::Engine::Soloist,
                 lyrics_view: super::LyricsView::Strip,
+                equalizer: eq,
             }
         );
         // Going back to the built-in player is remembered too, and anything
@@ -1542,6 +1585,38 @@ mod tests {
             store.preferences().unwrap().player,
             crate::playback::Engine::BuiltIn
         );
+    }
+
+    #[test]
+    fn the_equalizer_is_off_and_flat_until_set_and_damage_means_flat() {
+        let mut store = Store::in_memory().unwrap();
+        assert_eq!(
+            store.preferences().unwrap().equalizer,
+            crate::equalizer::Settings::default()
+        );
+        store.set_preference("eq_enabled", "true").unwrap();
+        store.set_preference("eq_steps", "1,2,three,4,5").unwrap();
+        let read = store.preferences().unwrap().equalizer;
+        assert!(read.enabled);
+        assert!(read.is_flat());
+    }
+
+    #[test]
+    fn saved_equalizer_curves_round_trip_and_are_capped() {
+        let mut store = Store::in_memory().unwrap();
+        assert!(store.equalizer_presets().unwrap().is_empty());
+        let presets: Vec<_> = (0..crate::equalizer::MAX_CUSTOM_PRESETS + 3)
+            .map(|index| crate::equalizer::CustomPreset {
+                name: format!("Mine {index}"),
+                steps: [index as i8, 0, -1, 2, 0],
+            })
+            .collect();
+        store.set_equalizer_presets(&presets).unwrap();
+        let read = store.equalizer_presets().unwrap();
+        assert_eq!(read.len(), crate::equalizer::MAX_CUSTOM_PRESETS);
+        assert_eq!(read[0], presets[0]);
+        store.set_preference("eq_presets", "not json").unwrap();
+        assert!(store.equalizer_presets().unwrap().is_empty());
     }
 
     #[test]

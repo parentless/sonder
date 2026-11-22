@@ -65,7 +65,12 @@ actions!(
         SeekBackwardLarge,
         SeekForwardLarge,
         SeekToStart,
-        SeekToEnd
+        SeekToEnd,
+        EqualizerBandUp,
+        EqualizerBandDown,
+        EqualizerBandUpLarge,
+        EqualizerBandDownLarge,
+        EqualizerBandReset
     ]
 );
 
@@ -75,6 +80,8 @@ const WORKSPACE_KEY_CONTEXT: &str = "Sonder";
 const ONBOARDING_KEY_CONTEXT: &str = "Onboarding";
 /// The key context of the focused progress slider.
 const SCRUBBER_KEY_CONTEXT: &str = "Scrubber";
+/// The key context of a focused equalizer point.
+const EQUALIZER_BAND_KEY_CONTEXT: &str = "EqualizerBand";
 /// The key context of a focused control. Space activates the control instead
 /// of toggling playback while it is set.
 const CONTROL_KEY_CONTEXT: &str = "Control";

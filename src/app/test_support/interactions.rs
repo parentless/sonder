@@ -2855,8 +2855,8 @@ fn windows_brand_and_search_share_the_same_vertical_center() {
 #[test]
 fn settings_cache_cleanup_button_is_reachable_and_does_not_send_playback_commands() {
     let mut fixture = Fixture::new(true);
-    // Cache lives under the System tab (third).
-    fixture.update(|window, cx| window.click(("settings-tab", 2usize), cx));
+    // Cache lives under the System tab (fourth).
+    fixture.update(|window, cx| window.click(("settings-tab", 3usize), cx));
     fixture.update(|window, cx| {
         let position = window.find("settings-page").bounds().center();
         window.dispatch_event(
@@ -3974,7 +3974,13 @@ fn settings_tabs_show_one_group_at_a_time() {
     });
     fixture.update(|window, cx| window.click(("settings-tab", 2usize), cx));
     fixture.update(|window, _| {
+        assert!(window.try_find("equalizer-graph").is_some());
+        assert!(window.try_find("settings-clear-cache").is_none());
+    });
+    fixture.update(|window, cx| window.click(("settings-tab", 3usize), cx));
+    fixture.update(|window, _| {
         assert!(window.try_find("settings-clear-cache").is_some());
+        assert!(window.try_find("equalizer-graph").is_none());
         assert!(window.try_find("settings-lastfm-connect").is_none());
     });
     fixture.update(|window, cx| window.click(("settings-tab", 0usize), cx));
@@ -5839,4 +5845,335 @@ fn a_top_artist_on_the_profile_opens_that_artist() {
     fixture.update(|window, cx| window.click(("profile-artist", 0usize), cx));
     assert_eq!(fixture.requested_artist(), "artist-glaive");
     assert_eq!(fixture.route(), Route::Artist);
+}
+
+// ---------------------------------------------------------------- equalizer
+
+fn audio_fixture() -> Fixture {
+    let mut fixture = Fixture::new(true);
+    fixture.update(|window, cx| window.click(("settings-tab", 2usize), cx));
+    fixture
+}
+
+impl Fixture {
+    fn equalizer(&mut self) -> crate::equalizer::Settings {
+        self.update(|_, cx| services::AppServices::preferences(cx).equalizer)
+    }
+
+    fn stored_equalizer(&mut self) -> crate::equalizer::Settings {
+        self.update(|_, cx| services::AppServices::stored_equalizer(cx).expect("settings store"))
+    }
+
+    fn comparing(&mut self) -> bool {
+        let workspace = self.workspace.clone().expect("workspace fixture");
+        self.update(|_, cx| {
+            workspace
+                .upgrade()
+                .expect("live workspace")
+                .read(cx)
+                .settings
+                .read(cx)
+                .comparing()
+        })
+    }
+
+    /// The point a band's handle sits at, in window coordinates.
+    fn band_point(&mut self, band: usize) -> Point<Pixels> {
+        self.update(|window, _| window.find(("equalizer-band", band)).bounds().center())
+    }
+
+    fn graph(&mut self) -> gpui_kit::Bounds<Pixels> {
+        self.update(|window, _| window.find("equalizer-graph").bounds())
+    }
+}
+
+#[test]
+fn the_equalizer_starts_off_and_flat_and_a_preset_turns_it_on_and_saves() {
+    let mut fixture = audio_fixture();
+    assert_eq!(fixture.equalizer(), crate::equalizer::Settings::default());
+
+    // "Bass boost" is the second built-in chip.
+    fixture.update(|window, cx| window.click(("equalizer-preset", 1usize), cx));
+    let expected = crate::equalizer::Settings {
+        enabled: true,
+        steps: [12, 6, 0, 0, 0],
+    };
+    assert_eq!(fixture.equalizer(), expected);
+    assert_eq!(fixture.stored_equalizer(), expected);
+
+    fixture.update(|window, cx| window.click(("equalizer-preset", 0usize), cx));
+    assert!(fixture.equalizer().is_flat());
+    assert!(fixture.equalizer().enabled);
+    fixture.no_commands();
+}
+
+#[test]
+fn the_switch_turns_the_equalizer_off_without_losing_the_curve() {
+    let mut fixture = audio_fixture();
+    fixture.update(|window, cx| window.click(("equalizer-preset", 2usize), cx));
+    let shaped = fixture.equalizer();
+    assert!(shaped.enabled && !shaped.is_flat());
+
+    fixture.update(|window, cx| window.click("settings-equalizer", cx));
+    let off = fixture.equalizer();
+    assert!(!off.enabled);
+    assert_eq!(off.steps, shaped.steps);
+    assert!(!fixture.stored_equalizer().enabled);
+
+    fixture.update(|window, cx| window.click("settings-equalizer", cx));
+    assert_eq!(fixture.equalizer(), shaped);
+}
+
+#[test]
+fn compare_plays_the_original_and_ends_with_the_tab() {
+    let mut fixture = audio_fixture();
+    // With the equalizer off there is nothing to compare.
+    fixture.update(|window, cx| window.click("settings-equalizer-compare", cx));
+    assert!(!fixture.comparing());
+
+    fixture.update(|window, cx| window.click(("equalizer-preset", 1usize), cx));
+    fixture.update(|window, cx| window.click("settings-equalizer-compare", cx));
+    assert!(fixture.comparing());
+    // The settings stay as they were while comparing.
+    assert_eq!(fixture.equalizer().steps, [12, 6, 0, 0, 0]);
+    assert!(fixture.equalizer().enabled);
+
+    // Shaping the sound is always heard, so it leaves Compare.
+    fixture.update(|window, cx| window.click(("equalizer-preset", 2usize), cx));
+    assert!(!fixture.comparing());
+
+    fixture.update(|window, cx| window.click("settings-equalizer-compare", cx));
+    assert!(fixture.comparing());
+    fixture.update(|window, cx| window.click(("settings-tab", 0usize), cx));
+    assert!(!fixture.comparing());
+
+    // Leaving Settings ends it too.
+    fixture.update(|window, cx| window.click(("settings-tab", 2usize), cx));
+    fixture.update(|window, cx| window.click("settings-equalizer-compare", cx));
+    assert!(fixture.comparing());
+    fixture.update(|window, cx| window.click("nav-recent", cx));
+    fixture.update(|_, _| ());
+    assert!(!fixture.comparing());
+}
+
+#[test]
+fn dragging_a_point_follows_the_pointer_and_saves_when_it_lets_go() {
+    let mut fixture = audio_fixture();
+    let graph = fixture.graph();
+    let start = fixture.band_point(2);
+    // 1 kHz: lift the middle point a third of the way up the graph.
+    let target = point(start.x, graph.origin.y + graph.size.height * 0.25);
+
+    fixture.mouse_down(start);
+    // The first move starts the drag; the ones after it are delivered to it.
+    fixture.mouse_move_to(point(start.x, graph.origin.y + graph.size.height * 0.45));
+    fixture.mouse_move_to(point(start.x, graph.origin.y + graph.size.height * 0.4));
+    let during = fixture.equalizer();
+    assert!(during.enabled && during.steps[2] > 0, "{during:?}");
+    // Nothing is written mid-drag; the sound follows, the file waits.
+    assert_eq!(
+        fixture.stored_equalizer(),
+        crate::equalizer::Settings::default()
+    );
+
+    fixture.mouse_move_to(target);
+    fixture.mouse_up(target);
+    let after = fixture.equalizer();
+    assert!(after.steps[2] > during.steps[2], "{after:?} vs {during:?}");
+    assert_eq!(fixture.stored_equalizer(), after);
+    // The other bands are untouched, and the point sits on the curve now.
+    assert_eq!(after.steps[0], 0);
+    assert_eq!(after.steps[4], 0);
+
+    // Pulling it below the graph pins it at the bottom of the range.
+    let below = point(start.x, graph.origin.y + graph.size.height + px(300.));
+    let grab = fixture.band_point(2);
+    fixture.mouse_down(grab);
+    fixture.mouse_move_to(point(grab.x, grab.y + px(20.)));
+    fixture.mouse_move_to(below);
+    fixture.mouse_up(below);
+    assert_eq!(fixture.equalizer().steps[2], -24);
+    fixture.no_commands();
+}
+
+#[test]
+fn pressing_between_points_moves_the_nearest_one() {
+    let mut fixture = audio_fixture();
+    let graph = fixture.graph();
+    // Near the 4 kHz label, well above the curve.
+    let position = point(
+        graph.origin.x + graph.size.width * 0.72,
+        graph.origin.y + graph.size.height * 0.2,
+    );
+    fixture.mouse_down(position);
+    fixture.mouse_up(position);
+    let steps = fixture.equalizer().steps;
+    assert!(steps[3] > 0, "{steps:?}");
+    assert_eq!([steps[0], steps[1], steps[2], steps[4]], [0, 0, 0, 0]);
+}
+
+#[test]
+fn a_double_press_resets_the_point() {
+    let mut fixture = audio_fixture();
+    fixture.update(|window, cx| window.click(("equalizer-preset", 1usize), cx));
+    assert!(fixture.equalizer().steps[0] > 0);
+    let position = fixture.band_point(0);
+    fixture.update(|window, cx| {
+        window.dispatch_event(
+            MouseDownEvent {
+                button: MouseButton::Left,
+                position,
+                modifiers: Default::default(),
+                click_count: 2,
+                first_mouse: false,
+            }
+            .to_platform_input(),
+            cx,
+        );
+    });
+    fixture.mouse_up(position);
+    assert_eq!(fixture.equalizer().steps[0], 0);
+    assert_eq!(fixture.stored_equalizer().steps[0], 0);
+    // The other bands kept their preset values.
+    assert_eq!(fixture.equalizer().steps[1], 6);
+}
+
+#[test]
+fn a_focused_point_moves_with_the_arrow_keys() {
+    let mut fixture = audio_fixture();
+    fixture.tab_to(("equalizer-band", 1usize));
+    fixture.press("up");
+    assert_eq!(fixture.equalizer().steps, [0, 2, 0, 0, 0]);
+    assert!(fixture.equalizer().enabled);
+    fixture.press("pageup");
+    assert_eq!(fixture.equalizer().steps[1], 8);
+    fixture.press("down");
+    assert_eq!(fixture.equalizer().steps[1], 6);
+    // Past the end stays at the end.
+    for _ in 0..20 {
+        fixture.press("pageup");
+    }
+    assert_eq!(fixture.equalizer().steps[1], 24);
+    fixture.press("home");
+    assert_eq!(fixture.equalizer().steps[1], 0);
+    assert_eq!(fixture.stored_equalizer().steps[1], 0);
+    // Other points did not move, and nothing reached playback.
+    assert_eq!(fixture.equalizer().steps, [0; 5]);
+    fixture.no_commands();
+}
+
+#[test]
+fn saved_presets_are_named_kept_and_deleted() {
+    let mut fixture = audio_fixture();
+    fixture.update(|window, cx| window.click(("equalizer-preset", 3usize), cx));
+    let curve = fixture.equalizer().steps;
+
+    fixture.update(|window, cx| window.click("equalizer-save-preset", cx));
+    let workspace = fixture.workspace.clone().expect("workspace fixture");
+    let name = |fixture: &mut Fixture, text: &'static str| {
+        let workspace = workspace.clone();
+        fixture.update(move |window, cx| {
+            let settings = workspace
+                .upgrade()
+                .expect("live workspace")
+                .read(cx)
+                .settings
+                .clone();
+            settings.update(cx, |settings, cx| {
+                settings.name_preset_for_test(text, window, cx)
+            });
+        });
+    };
+
+    // An empty name and a built-in name are refused, and nothing is saved.
+    fixture.update(|window, cx| window.click("equalizer-save-confirm", cx));
+    name(&mut fixture, "  vocal ");
+    fixture.update(|window, cx| window.click("equalizer-save-confirm", cx));
+    assert!(
+        fixture
+            .update(|_, cx| services::AppServices::equalizer_presets(cx))
+            .is_empty()
+    );
+
+    name(&mut fixture, "  My night mix  ");
+    fixture.update(|window, cx| window.click("equalizer-save-confirm", cx));
+    let saved = fixture.update(|_, cx| services::AppServices::equalizer_presets(cx));
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].name, "My night mix");
+    assert_eq!(saved[0].steps, curve);
+    fixture.update(|window, _| {
+        assert!(
+            window
+                .try_find(("equalizer-custom-preset", 0usize))
+                .is_some()
+        )
+    });
+
+    // Choosing the saved chip restores the curve after another one.
+    fixture.update(|window, cx| window.click(("equalizer-preset", 0usize), cx));
+    assert!(fixture.equalizer().is_flat());
+    fixture.update(|window, cx| window.click(("equalizer-custom-preset", 0usize), cx));
+    assert_eq!(fixture.equalizer().steps, curve);
+
+    // Saving under the same name replaces it instead of adding another.
+    fixture.update(|window, cx| window.click(("equalizer-preset", 1usize), cx));
+    fixture.update(|window, cx| window.click("equalizer-save-preset", cx));
+    name(&mut fixture, "my NIGHT mix");
+    fixture.update(|window, cx| window.click("equalizer-save-confirm", cx));
+    let saved = fixture.update(|_, cx| services::AppServices::equalizer_presets(cx));
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].steps, [12, 6, 0, 0, 0]);
+
+    fixture.update(|window, cx| window.click(("equalizer-custom-preset-delete", 0usize), cx));
+    assert!(
+        fixture
+            .update(|_, cx| services::AppServices::equalizer_presets(cx))
+            .is_empty()
+    );
+    fixture.update(|window, _| {
+        assert!(
+            window
+                .try_find(("equalizer-custom-preset", 0usize))
+                .is_none()
+        )
+    });
+}
+
+#[test]
+fn only_a_few_presets_can_be_kept() {
+    let mut fixture = audio_fixture();
+    let workspace = fixture.workspace.clone().expect("workspace fixture");
+    for index in 0..crate::equalizer::MAX_CUSTOM_PRESETS + 1 {
+        // The chips grow the card, so the button moves down the page.
+        fixture.update(|window, cx| {
+            let position = window.find("settings-page").bounds().center();
+            window.dispatch_event(
+                gpui_kit::ScrollWheelEvent {
+                    position,
+                    delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-3000.))),
+                    modifiers: Default::default(),
+                    touch_phase: gpui_kit::TouchPhase::Moved,
+                }
+                .to_platform_input(),
+                cx,
+            );
+        });
+        fixture.update(|window, cx| window.click("equalizer-save-preset", cx));
+        let workspace = workspace.clone();
+        let text = format!("Mine {index}");
+        fixture.update(move |window, cx| {
+            let settings = workspace
+                .upgrade()
+                .expect("live workspace")
+                .read(cx)
+                .settings
+                .clone();
+            settings.update(cx, |settings, cx| {
+                settings.name_preset_for_test(&text, window, cx)
+            });
+        });
+        fixture.update(|window, cx| window.click("equalizer-save-confirm", cx));
+    }
+    let saved = fixture.update(|_, cx| services::AppServices::equalizer_presets(cx));
+    assert_eq!(saved.len(), crate::equalizer::MAX_CUSTOM_PRESETS);
 }

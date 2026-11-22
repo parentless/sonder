@@ -203,6 +203,19 @@ pub(super) fn bind_keys(cx: &mut App) {
         KeyBinding::new("pageup", SeekForwardLarge, Some(SCRUBBER_KEY_CONTEXT)),
         KeyBinding::new("home", SeekToStart, Some(SCRUBBER_KEY_CONTEXT)),
         KeyBinding::new("end", SeekToEnd, Some(SCRUBBER_KEY_CONTEXT)),
+        KeyBinding::new("up", EqualizerBandUp, Some(EQUALIZER_BAND_KEY_CONTEXT)),
+        KeyBinding::new("down", EqualizerBandDown, Some(EQUALIZER_BAND_KEY_CONTEXT)),
+        KeyBinding::new(
+            "pageup",
+            EqualizerBandUpLarge,
+            Some(EQUALIZER_BAND_KEY_CONTEXT),
+        ),
+        KeyBinding::new(
+            "pagedown",
+            EqualizerBandDownLarge,
+            Some(EQUALIZER_BAND_KEY_CONTEXT),
+        ),
+        KeyBinding::new("home", EqualizerBandReset, Some(EQUALIZER_BAND_KEY_CONTEXT)),
         playback_key_binding(),
     ]);
 }

@@ -46,6 +46,8 @@ enum Scene {
     Settings,
     SettingsAutoplayOff,
     SettingsCache,
+    SettingsAudio,
+    SettingsAudioShaped,
     LocalFiles,
     LinkEmpty,
     LinkFound,
@@ -116,6 +118,8 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("playlist-zoom-large", Scene::PlaylistZoomLarge),
         ("settings", Scene::Settings),
         ("settings-cache", Scene::SettingsCache),
+        ("settings-audio", Scene::SettingsAudio),
+        ("settings-audio-shaped", Scene::SettingsAudioShaped),
         ("settings-autoplay-off", Scene::SettingsAutoplayOff),
         ("local-files", Scene::LocalFiles),
         ("local-files-link-empty", Scene::LinkEmpty),
@@ -524,8 +528,22 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                         _ => page.seed(profile_data(), cx),
                     });
                 }
-                Scene::Settings | Scene::SettingsAutoplayOff | Scene::SettingsCache => {
+                Scene::Settings
+                | Scene::SettingsAutoplayOff
+                | Scene::SettingsCache
+                | Scene::SettingsAudio
+                | Scene::SettingsAudioShaped => {
                     workspace.open_settings(cx);
+                    if matches!(scene, Scene::SettingsAudioShaped) {
+                        services::AppServices::apply_equalizer(
+                            crate::equalizer::Settings {
+                                enabled: true,
+                                steps: [10, 4, -4, 6, 8],
+                            },
+                            false,
+                            cx,
+                        );
+                    }
                     if matches!(scene, Scene::SettingsAutoplayOff) {
                         services::AppServices::set_autoplay(false, cx)
                             .expect("settings store")
@@ -739,9 +757,16 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             })
             .unwrap();
         }
-        Scene::SettingsCache => {
+        Scene::SettingsAudio | Scene::SettingsAudioShaped => {
             cx.update_window(handle.into(), |_, window, cx| {
                 window.click(("settings-tab", 2usize), cx);
+            })
+            .unwrap();
+            settle(&mut cx, handle.into());
+        }
+        Scene::SettingsCache => {
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click(("settings-tab", 3usize), cx);
             })
             .unwrap();
             settle(&mut cx, handle.into());
