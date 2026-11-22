@@ -20,39 +20,56 @@ pub enum ThemePreference {
     Dark,
 }
 
-/// How see-through the main window is. Solid is the default and the only one
-/// that leaves the window fully opaque.
+/// The overall look of the app. Classic is today's Sonder and the default;
+/// the others re-lay out and restyle the whole window. Every one runs on the
+/// same data and behaviour, so switching never reloads anything.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum WindowStyle {
+pub enum Design {
     #[default]
-    Solid,
-    /// Mostly opaque dark glass with a faint see-through.
-    Smoked,
-    /// A lightly tinted pane that shows the desktop behind it.
-    Clear,
+    Classic,
+    /// Classic with every detail corrected: concentric corners, soft depth,
+    /// larger hit areas, calmer type.
+    Refined,
+    /// The colour of what is playing washes the window, and Now Playing is
+    /// always docked on the right.
+    Ambient,
+    /// Records instead of lists: an icon dock, a crate of covers on Home and a
+    /// vinyl player.
+    Crate,
 }
 
-impl WindowStyle {
-    pub const ALL: [Self; 3] = [Self::Solid, Self::Smoked, Self::Clear];
+impl Design {
+    pub const ALL: [Self; 4] = [Self::Classic, Self::Refined, Self::Ambient, Self::Crate];
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Solid => "Solid",
-            Self::Smoked => "Smoked glass",
-            Self::Clear => "Clear glass",
+            Self::Classic => "Classic",
+            Self::Refined => "Refined",
+            Self::Ambient => "Ambient",
+            Self::Crate => "Crate",
+        }
+    }
+
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Self::Classic => "Sonder as it is today.",
+            Self::Refined => "The same layout with every detail tightened.",
+            Self::Ambient => "Colour follows the music; Now Playing stays docked.",
+            Self::Crate => "An icon dock, a crate of covers and a vinyl player.",
         }
     }
 
     fn key(self) -> &'static str {
         match self {
-            Self::Solid => "solid",
-            Self::Smoked => "smoked",
-            Self::Clear => "clear",
+            Self::Classic => "classic",
+            Self::Refined => "refined",
+            Self::Ambient => "ambient",
+            Self::Crate => "crate",
         }
     }
 
     fn from_key(key: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|style| style.key() == key)
+        Self::ALL.into_iter().find(|design| design.key() == key)
     }
 }
 
@@ -171,7 +188,7 @@ impl UiZoom {
 pub struct AppPreferences {
     pub sidebar_collapsed: bool,
     pub theme: ThemePreference,
-    pub window_style: WindowStyle,
+    pub design: Design,
     pub selection_color: SelectionColor,
     pub ui_zoom: UiZoom,
     pub autoplay: bool,
@@ -235,7 +252,7 @@ impl Default for AppPreferences {
         Self {
             sidebar_collapsed: false,
             theme: ThemePreference::default(),
-            window_style: WindowStyle::default(),
+            design: Design::default(),
             selection_color: SelectionColor::default(),
             ui_zoom: UiZoom::default(),
             // Autoplay is on unless the listener turned it off.
@@ -480,9 +497,9 @@ impl Store {
             Some("dark") => ThemePreference::Dark,
             _ => ThemePreference::System,
         };
-        let window_style = self
-            .preference("window_style")?
-            .and_then(|value| WindowStyle::from_key(&value))
+        let design = self
+            .preference("design")?
+            .and_then(|value| Design::from_key(&value))
             .unwrap_or_default();
         let autoplay = self.preference("autoplay")?.as_deref() != Some("false");
         let shuffle = self.preference("shuffle")?.as_deref() == Some("true");
@@ -522,7 +539,7 @@ impl Store {
             sidebar_collapsed,
             ui_zoom,
             theme,
-            window_style,
+            design,
             selection_color: SelectionColor::ALL
                 .into_iter()
                 .find(|color| selection_color.as_deref() == Some(color.name()))
@@ -668,8 +685,8 @@ impl Store {
         self.set_preference("theme", value)
     }
 
-    pub fn set_window_style(&mut self, style: WindowStyle) -> Result<()> {
-        self.set_preference("window_style", style.key())
+    pub fn set_design(&mut self, style: Design) -> Result<()> {
+        self.set_preference("design", style.key())
     }
 
     /// Whether the launch intro is still owed: until it has been played once,
@@ -1558,14 +1575,14 @@ mod tests {
             .set_streaming_quality(super::StreamingQuality::High)
             .unwrap();
         store.set_lyrics_view(super::LyricsView::Strip).unwrap();
-        store.set_window_style(super::WindowStyle::Clear).unwrap();
+        store.set_design(super::Design::Ambient).unwrap();
         store.set_player(crate::playback::Engine::Soloist).unwrap();
         assert_eq!(
             store.preferences().unwrap(),
             AppPreferences {
                 sidebar_collapsed: true,
                 theme: ThemePreference::Dark,
-                window_style: super::WindowStyle::Clear,
+                design: super::Design::Ambient,
                 selection_color: super::SelectionColor::default(),
                 ui_zoom: super::UiZoom::default(),
                 autoplay: false,

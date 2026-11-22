@@ -6,7 +6,7 @@ pub(super) enum SettingsEvent {
     OpenWhatsNew,
     RequestAppChange,
     SetTheme(ThemePreference),
-    SetWindowStyle(WindowStyle),
+    SetDesign(Design),
     SetZoom(UiZoom),
     SetAutoplay(bool),
     SetNormaliseVolume(bool),
@@ -412,7 +412,7 @@ impl Settings {
                     .child(
                         div()
                             .mt_5()
-                            .child(components::section_label(palette, "Window style"))
+                            .child(components::section_label(palette, "Design"))
                             .child(
                                 div()
                                     .mt_2()
@@ -421,8 +421,8 @@ impl Settings {
                                     .bg(rgb(palette.control))
                                     .flex()
                                     .gap_1()
-                                    .children(WindowStyle::ALL.into_iter().map(|style| {
-                                        Self::window_style_option(style, cx)
+                                    .children(Design::ALL.into_iter().map(|design| {
+                                        Self::design_option(design, cx)
                                     })),
                             )
                             .child(
@@ -430,9 +430,7 @@ impl Settings {
                                     .mt_2()
                                     .text_sm()
                                     .text_color(rgb(palette.text_muted))
-                                    .child(
-                                        "Glass lets your desktop show through the window. Solid leaves it fully opaque and adds nothing.",
-                                    ),
+                                    .child(appearance::Appearance::design(cx).blurb()),
                             ),
                     )
                     .child(div().mt_5().child(components::section_label(palette, "UI zoom"))
@@ -1418,13 +1416,14 @@ impl Settings {
             })
     }
 
-    fn window_style_option(style: WindowStyle, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    fn design_option(style: Design, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let palette = appearance::Appearance::palette(cx);
-        let selected = appearance::Appearance::window_style(cx) == style;
+        let selected = appearance::Appearance::design(cx) == style;
         let id = match style {
-            WindowStyle::Solid => "settings-window-style-solid",
-            WindowStyle::Smoked => "settings-window-style-smoked",
-            WindowStyle::Clear => "settings-window-style-clear",
+            Design::Classic => "settings-design-classic",
+            Design::Refined => "settings-design-refined",
+            Design::Ambient => "settings-design-ambient",
+            Design::Crate => "settings-design-crate",
         };
         components::filled_button(palette, id)
             .test_support()
@@ -1446,7 +1445,7 @@ impl Settings {
             .hover(|style| style.bg(rgb(palette.control_hover)))
             .child(style.label())
             .on_click(cx.listener(move |_, _, _, cx| {
-                cx.emit(SettingsEvent::SetWindowStyle(style));
+                cx.emit(SettingsEvent::SetDesign(style));
             }))
             .into_any_element()
     }

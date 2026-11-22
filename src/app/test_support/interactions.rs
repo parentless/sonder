@@ -2602,27 +2602,27 @@ fn playlist_scroll_jumps_directly_to_the_final_viewport_after_debounce() {
 }
 
 #[test]
-fn window_style_setting_applies_immediately_and_persists() {
-    use crate::storage::WindowStyle;
+fn design_setting_applies_immediately_and_persists() {
+    use crate::storage::Design;
     let mut fixture = Fixture::new(true);
     fixture.update(|_, cx| {
-        assert_eq!(appearance::Appearance::window_style(cx), WindowStyle::Solid);
-        assert_eq!(appearance::Appearance::palette(cx).page.alpha, 1.);
+        assert_eq!(appearance::Appearance::design(cx), Design::Classic);
+        assert_eq!(appearance::Appearance::palette(cx).design, Design::Classic);
     });
     fixture.scroll_settings_by(-100.);
-    fixture.update(|window, cx| window.click("settings-window-style-clear", cx));
-    fixture.update(|_, cx| {
-        assert_eq!(appearance::Appearance::window_style(cx), WindowStyle::Clear);
-        assert_eq!(
-            services::AppServices::preferences(cx).window_style,
-            WindowStyle::Clear
-        );
-        assert!(appearance::Appearance::palette(cx).page.alpha < 1.);
-    });
-    fixture.update(|window, cx| window.click("settings-window-style-solid", cx));
-    fixture.update(|_, cx| {
-        assert_eq!(appearance::Appearance::palette(cx).page.alpha, 1.);
-    });
+    for (id, design) in [
+        ("settings-design-refined", Design::Refined),
+        ("settings-design-ambient", Design::Ambient),
+        ("settings-design-crate", Design::Crate),
+        ("settings-design-classic", Design::Classic),
+    ] {
+        fixture.update(|window, cx| window.click(id, cx));
+        fixture.update(|_, cx| {
+            assert_eq!(appearance::Appearance::design(cx), design);
+            assert_eq!(appearance::Appearance::palette(cx).design, design);
+            assert_eq!(services::AppServices::preferences(cx).design, design);
+        });
+    }
     fixture.no_commands();
 }
 

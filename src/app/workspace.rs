@@ -65,7 +65,6 @@ impl Workspace {
         let preferences = services::AppServices::preferences(cx);
         let focus_handle = cx.focus_handle();
         appearance::Appearance::attach(window, cx);
-        appearance::Appearance::apply_window_background(window, cx);
         let appearance_subscription = cx.observe_window_appearance(window, |this, window, cx| {
             this.update_system_appearance(window, cx);
         });
@@ -161,9 +160,7 @@ impl Workspace {
                 settings::SettingsEvent::SetTheme(preference) => {
                     this.set_theme_preference(*preference, window, cx)
                 }
-                settings::SettingsEvent::SetWindowStyle(style) => {
-                    this.set_window_style(*style, window, cx)
-                }
+                settings::SettingsEvent::SetDesign(style) => this.set_design(*style, window, cx),
                 settings::SettingsEvent::SetZoom(zoom) => {
                     if let Err(error) = appearance::Appearance::set_ui_zoom(*zoom, cx) {
                         this.last_error = Some(format!("Could not save UI zoom: {error}").into());
@@ -421,14 +418,9 @@ impl Workspace {
         cx.notify();
     }
 
-    fn set_window_style(
-        &mut self,
-        style: WindowStyle,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        appearance::Appearance::set_window_style(style, window, cx);
-        if let Some(result) = services::AppServices::set_window_style(style, cx)
+    fn set_design(&mut self, style: Design, window: &mut Window, cx: &mut Context<Self>) {
+        appearance::Appearance::set_design(style, window, cx);
+        if let Some(result) = services::AppServices::set_design(style, cx)
             && let Some(error) = services::preference_save_error("window style", result)
         {
             self.last_error = Some(error);

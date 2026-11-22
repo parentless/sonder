@@ -483,13 +483,10 @@ impl AppServices {
             .map(|store| store.set_theme_preference(preference))
     }
 
-    pub(super) fn set_window_style(style: WindowStyle, cx: &mut App) -> Option<anyhow::Result<()>> {
+    pub(super) fn set_design(style: Design, cx: &mut App) -> Option<anyhow::Result<()>> {
         let services = cx.global_mut::<Self>();
-        services.preferences.window_style = style;
-        services
-            .store
-            .as_mut()
-            .map(|store| store.set_window_style(style))
+        services.preferences.design = style;
+        services.store.as_mut().map(|store| store.set_design(style))
     }
 
     pub(super) fn set_sidebar_collapsed(
