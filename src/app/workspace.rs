@@ -622,8 +622,10 @@ impl Render for Workspace {
 
         let scrim = self.signed_out_scrim(palette, cx);
         let playback_help = self.playback_help(palette, window, cx);
+        let dock = palette.design == Design::Crate;
         self.sidebar.update(cx, |sidebar, cx| {
-            sidebar.set_compact_layout(compact_layout, cx)
+            sidebar.set_compact_layout(compact_layout, cx);
+            sidebar.set_dock(dock, cx);
         });
         let route = self.router.route();
         let back_target = self.router.back_target();
@@ -633,6 +635,7 @@ impl Render for Workspace {
         });
 
         let ambient = palette.design == Design::Ambient;
+        let floating = palette.design == Design::Crate;
         let overlay_toolbar = route == Route::Artist;
         // Lyrics show when opened, in the chosen place.
         let lyrics_preferences = services::AppServices::preferences(cx);
@@ -701,6 +704,8 @@ impl Render for Workspace {
                             .flex()
                             .flex_col()
                             .bg(palette.page.color())
+                            // Leaves room for the floating player.
+                            .when(floating, |body| body.pb(Rems(6.)))
                             .when(!overlay_toolbar, |body| body.child(self.toolbar.clone()))
                             .child(
                                 div()
@@ -734,7 +739,27 @@ impl Render for Workspace {
             .when(lyrics_view == Some(LyricsView::Strip), |root| {
                 root.child(self.lyrics.clone())
             })
-            .when(!ambient, |root| root.child(self.player_bar.clone()))
+            .when(!ambient && !floating, |root| {
+                root.child(self.player_bar.clone())
+            })
+            .when(floating, |root| {
+                root.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom_4()
+                        .px_6()
+                        .flex()
+                        .justify_center()
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(Rems(64.))
+                                .child(self.player_bar.clone()),
+                        ),
+                )
+            })
             .when_some(self.intro.clone(), |root, intro| root.child(intro))
             .when_some(scrim, |root, scrim| root.child(deferred(scrim)))
             .when_some(action_notice, |root, notice| root.child(notice))

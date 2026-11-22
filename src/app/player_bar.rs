@@ -258,9 +258,10 @@ impl PlayerBar {
                 )
                 .into_any_element();
         }
+        let pill = palette.design == Design::Crate;
         div()
             .relative()
-            .h_24()
+            .h(if pill { Rems(5.) } else { Rems(6.) })
             .w_full()
             .flex_none()
             .flex()
@@ -269,8 +270,19 @@ impl PlayerBar {
             .gap_6()
             .px_6()
             .bg(palette.player.color())
-            .border_t_1()
             .border_color(rgb(palette.border))
+            .when(!pill, |bar| bar.border_t_1())
+            .when(pill, |bar| {
+                bar.rounded_full()
+                    .border_1()
+                    .shadow(vec![gpui_kit::BoxShadow {
+                        color: gpui_kit::hsla(0., 0., 0., 0.45),
+                        offset: gpui_kit::point(px(0.), px(12.)),
+                        blur_radius: px(32.),
+                        spread_radius: px(0.),
+                        inset: false,
+                    }])
+            })
             .child(
                 div()
                     .w(if compact {
@@ -838,7 +850,20 @@ impl Render for PlayerMetadata {
             .flex()
             .items_center()
             .gap_3()
-            .child(self.artwork_link(palette, track.as_deref(), tokens::PLAYER_ARTWORK, cx))
+            .child(self.artwork_link(
+                palette,
+                track.as_deref(),
+                // Crate plays from a record: the cover is a disc.
+                if palette.design == Design::Crate {
+                    tokens::ArtworkSize {
+                        size: tokens::PLAYER_ARTWORK.size,
+                        radius: tokens::PLAYER_ARTWORK.size / 2.,
+                    }
+                } else {
+                    tokens::PLAYER_ARTWORK
+                },
+                cx,
+            ))
             .child(
                 div()
                     .flex_1()

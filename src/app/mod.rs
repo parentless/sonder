@@ -290,6 +290,9 @@ impl CadencePalette {
                 self.tile_hover = Fill::glass(0xFFFFFF, 0.10);
                 self.sidebar_rest = none;
                 self.page_rest = none;
+                if crate_ {
+                    self.player = Fill::glass(0x1C1A22, 0.94);
+                }
             }
             (Design::Ambient | Design::Crate, false) => {
                 let none = Fill::glass(0, 0.);
@@ -301,6 +304,9 @@ impl CadencePalette {
                 self.tile_hover = Fill::glass(0x000000, 0.07);
                 self.sidebar_rest = none;
                 self.page_rest = none;
+                if design == Design::Crate {
+                    self.player = Fill::glass(0xFFFFFF, 0.94);
+                }
             }
         }
         self
@@ -771,9 +777,12 @@ mod design_tests {
         for design in [Design::Ambient, Design::Crate] {
             for dark in [false, true] {
                 let p = base(dark).with_design(design, dark);
-                for fill in [p.sidebar, p.page, p.player, p.sidebar_rest, p.page_rest] {
+                for fill in [p.sidebar, p.page, p.sidebar_rest, p.page_rest] {
                     assert_eq!(fill.alpha, 0.);
                 }
+                // Ambient's player is see-through; Crate's floating pill is
+                // a near-opaque glass so its controls stay legible.
+                assert_eq!(p.player.alpha == 0., design == Design::Ambient);
                 assert!(p.tile.alpha > 0. && p.tile.alpha < 1.);
             }
         }
