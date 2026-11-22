@@ -576,7 +576,7 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cache = services::AppServices::image_cache(cx);
-        let dark = palette.dark;
+        let dark = palette.canvas == CadencePalette::DARK.canvas;
         let cover: AnyElement = match (shortcut.url.as_deref(), shortcut.tint) {
             (None, Some(hue)) => div()
                 .size_full()
@@ -624,46 +624,6 @@ impl HomePage {
                 shortcut.icon,
             ),
         };
-        // Refined insets the cover in the tile, with corners concentric to it:
-        // tile 14 = cover 10 + 4 padding.
-        let refined = palette.design == Design::Refined;
-        let cover: AnyElement = if refined {
-            let inner: AnyElement = match (shortcut.url.as_deref(), shortcut.tint) {
-                (None, Some(hue)) => div()
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(rem(10.))
-                    .bg(gpui_kit::Hsla {
-                        h: hue / 360.,
-                        s: if dark { 0.18 } else { 0.30 },
-                        l: if dark { 0.34 } else { 0.86 },
-                        a: 1.,
-                    })
-                    .child(div().opacity(0.55).child(components::icon(
-                        shortcut.icon,
-                        Rems(1.5),
-                        palette.text_primary,
-                    )))
-                    .into_any_element(),
-                _ => components::artwork(
-                    palette,
-                    &cache,
-                    shortcut.url.as_deref(),
-                    tokens::ArtworkSize {
-                        size: Rems(3.25),
-                        radius: Rems(if shortcut.round { 1.625 } else { 0.625 }),
-                    },
-                    shortcut.icon,
-                ),
-            };
-            div().size_full().p(rem(4.)).child(inner).into_any_element()
-        } else {
-            cover
-        };
-        let tile_size = if refined { 60. } else { 64. };
-        let tile_radius = if refined { 14. } else { TILE_RADIUS };
         let group = format!("home-tile-{index}");
         let playable = shortcut.play.is_some();
         let play = shortcut.play.map(|tracks| {
@@ -698,13 +658,13 @@ impl HomePage {
             .relative()
             .w_full()
             .min_w_0()
-            .h(rem(tile_size))
+            .h(rem(64.))
             .justify_start()
             .overflow_hidden()
-            .rounded(rem(tile_radius))
-            .bg(palette.tile.color())
-            .hover(|style| style.bg(palette.tile_hover.color()))
-            .child(div().size(rem(tile_size)).flex_none().child(cover))
+            .rounded(rem(TILE_RADIUS))
+            .bg(rgb(palette.card))
+            .hover(|style| style.bg(rgb(palette.card_hover)))
+            .child(div().size(rem(64.)).flex_none().child(cover))
             .child(
                 row_text(palette, shortcut.title, shortcut.detail)
                     .ml(rem(12.))
@@ -777,25 +737,7 @@ impl HomePage {
                 .flex()
                 .gap(rem(16.))
                 .rounded(rem(CARD_RADIUS))
-                .bg(palette.tile.color())
-                .when(palette.design == Design::Refined, |card| {
-                    card.shadow(vec![
-                        gpui_kit::BoxShadow {
-                            color: gpui_kit::hsla(0., 0., 0., 0.20),
-                            offset: gpui_kit::point(px(0.), px(1.)),
-                            blur_radius: px(1.),
-                            spread_radius: px(0.),
-                            inset: false,
-                        },
-                        gpui_kit::BoxShadow {
-                            color: gpui_kit::hsla(0., 0., 0., 0.28),
-                            offset: gpui_kit::point(px(0.), px(8.)),
-                            blur_radius: px(24.),
-                            spread_radius: px(0.),
-                            inset: false,
-                        },
-                    ])
-                })
+                .bg(rgb(palette.card))
                 .child(art)
                 .child(
                     div()
@@ -841,7 +783,7 @@ impl HomePage {
                                                 .h(rem(5.))
                                                 .mt(rem(4.))
                                                 .rounded_full()
-                                                .bg(palette.tile_hover.color())
+                                                .bg(rgb(palette.card_hover))
                                                 .child(
                                                     div()
                                                         .h_full()
@@ -908,7 +850,7 @@ impl HomePage {
                         div()
                             .size(size.size)
                             .rounded(size.radius)
-                            .bg(palette.tile.color())
+                            .bg(rgb(palette.card))
                     }))
                     .into_any_element()
             });
@@ -1005,7 +947,7 @@ impl HomePage {
                 .flex()
                 .items_center()
                 .rounded(rem(TILE_RADIUS))
-                .bg(palette.tile.color())
+                .bg(rgb(palette.card))
         };
         let artist_row = if let Some(suggestion) = self
             .discover
@@ -1030,7 +972,7 @@ impl HomePage {
                             .h_full()
                             .justify_start()
                             .rounded(rem(TILE_RADIUS))
-                            .hover(|style| style.bg(palette.tile_hover.color()))
+                            .hover(|style| style.bg(rgb(palette.card_hover)))
                             .child(div().ml(rem(10.)).child(components::artwork(
                                 palette,
                                 &cache,
@@ -1097,7 +1039,7 @@ impl HomePage {
                             .flex_none()
                             .size(rem(40.))
                             .rounded(rem(TILE_RADIUS - 10.))
-                            .bg(palette.tile_hover.color())
+                            .bg(rgb(palette.card_hover))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -1266,7 +1208,7 @@ impl Render for HomePage {
             .id("home-page")
             .size_full()
             .min_h_0()
-            .bg(palette.page.color())
+            .bg(rgb(palette.surface))
             .text_color(rgb(palette.text))
             .child(
                 div()

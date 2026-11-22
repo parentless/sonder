@@ -7,7 +7,6 @@ use gpui_kit::component::theme::ThemeColor;
 /// theme change reaches all of them without any of them going stale.
 pub(super) struct Appearance {
     preference: ThemePreference,
-    design: Design,
     palette: CadencePalette,
 }
 
@@ -19,11 +18,10 @@ impl Appearance {
     /// rather than resetting it to whatever was on disk at launch.
     pub(super) fn attach(window: &mut Window, cx: &mut App) {
         if !cx.has_global::<Self>() {
-            let preferences = services::AppServices::preferences(cx);
+            let preference = services::AppServices::preferences(cx).theme;
             cx.set_global(Self {
-                preference: preferences.theme,
-                design: preferences.design,
-                palette: palette_for(false, preferences.design),
+                preference,
+                palette: palette_for(false),
             });
         }
         let dark_mode = resolve_dark_mode(Self::preference(cx), window.appearance());
@@ -36,19 +34,6 @@ impl Appearance {
 
     pub(super) fn preference(cx: &App) -> ThemePreference {
         cx.global::<Self>().preference
-    }
-
-    pub(super) fn design(cx: &App) -> Design {
-        cx.global::<Self>().design
-    }
-
-    /// Switches the whole design. The palette and every view that lays itself out
-    /// by design read it at render time, so one refresh repaints the lot.
-    pub(super) fn set_design(design: Design, window: &mut Window, cx: &mut App) {
-        cx.global_mut::<Self>().design = design;
-        let dark_mode = resolve_dark_mode(Self::preference(cx), window.appearance());
-        apply_dark_mode(dark_mode, cx);
-        cx.refresh_windows();
     }
 
     pub(super) fn set_ui_zoom(zoom: UiZoom, cx: &mut App) -> anyhow::Result<()> {
@@ -88,19 +73,18 @@ impl Appearance {
     }
 }
 
-fn palette_for(dark_mode: bool, design: Design) -> CadencePalette {
+fn palette_for(dark_mode: bool) -> CadencePalette {
     if dark_mode {
         CadencePalette::DARK
     } else {
         CadencePalette::LIGHT
     }
-    .with_design(design, dark_mode)
 }
 
 /// Makes `dark_mode`'s palette the one every view reads and projects it onto
 /// the component library's theme.
 fn apply_dark_mode(dark_mode: bool, cx: &mut App) {
-    let mut palette = palette_for(dark_mode, cx.global::<Appearance>().design);
+    let mut palette = palette_for(dark_mode);
     palette.selection = services::AppServices::preferences(cx)
         .selection_color
         .fill(dark_mode);

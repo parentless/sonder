@@ -13,8 +13,8 @@ use crate::{
     model,
     spotify::{self, ClientIdSource, valid_client_id},
     storage::{
-        AppPreferences, Design, LyricsView, SelectionColor, Store, StreamingQuality,
-        ThemePreference, UiZoom,
+        AppPreferences, LyricsView, SelectionColor, Store, StreamingQuality, ThemePreference,
+        UiZoom,
     },
 };
 use gpui_kit::base::FocusableExt as _;
@@ -40,7 +40,6 @@ use icons::CadenceIcon;
 use library_pages::LibrarySection;
 use workspace::Workspace;
 
-mod ambient;
 mod disk_cache;
 mod home;
 mod http;
@@ -101,7 +100,8 @@ struct CadencePalette {
     surface_hover: u32,
     control: u32,
     control_hover: u32,
-    /// What a card on the page turns on hover (the card fill itself is `tile`).
+    /// The fill of a card sitting on the page, and what it turns on hover.
+    card: u32,
     card_hover: u32,
     selection: u32,
     text_primary: u32,
@@ -116,43 +116,6 @@ struct CadencePalette {
     link: u32,
     accent_hover: u32,
     on_accent: u32,
-    /// The big structural fills. Solid, they are the plain roles above; the
-    /// see-through designs give them an alpha so the desktop shows through.
-    window: Fill,
-    sidebar: Fill,
-    page: Fill,
-    player: Fill,
-    tile: Fill,
-    tile_hover: Fill,
-    /// What a sidebar row or a list row rests on. Transparent in glass, so rows
-    /// do not paint dark strips over the see-through surface.
-    sidebar_rest: Fill,
-    page_rest: Fill,
-    /// Which design this palette belongs to, so views can lay themselves out to
-    /// match without a second lookup.
-    design: Design,
-    dark: bool,
-}
-
-/// A colour with an alpha, for the surfaces that can be see-through.
-#[derive(Clone, Copy, PartialEq)]
-struct Fill {
-    rgb: u32,
-    alpha: f32,
-}
-
-impl Fill {
-    const fn solid(rgb: u32) -> Self {
-        Self { rgb, alpha: 1. }
-    }
-
-    const fn glass(rgb: u32, alpha: f32) -> Self {
-        Self { rgb, alpha }
-    }
-
-    fn color(self) -> gpui_kit::Hsla {
-        gpui_kit::Hsla::from(rgb(self.rgb)).opacity(self.alpha)
-    }
 }
 
 impl CadencePalette {
@@ -163,6 +126,7 @@ impl CadencePalette {
         surface_hover: 0xF8F7F4,
         control: 0xF6F4EF,
         control_hover: 0xEAE6DD,
+        card: 0xF6F4EF,
         card_hover: 0xECECF0,
         selection: 0xD8ECFC,
         text_primary: 0x171717,
@@ -182,16 +146,6 @@ impl CadencePalette {
         link: 0x0066CC,
         accent_hover: 0x121212,
         on_accent: 0xFFFFFF,
-        window: Fill::solid(0xFBFAF9),
-        sidebar: Fill::solid(0xFBFAF9),
-        page: Fill::solid(0xFFFFFF),
-        player: Fill::solid(0xFFFFFF),
-        tile: Fill::solid(0xF6F4EF),
-        tile_hover: Fill::solid(0xECECF0),
-        sidebar_rest: Fill::solid(0xFBFAF9),
-        page_rest: Fill::solid(0xFFFFFF),
-        design: Design::Classic,
-        dark: false,
     };
 
     const DARK: Self = Self {
@@ -201,6 +155,7 @@ impl CadencePalette {
         surface_hover: 0x242424,
         control: 0x303030,
         control_hover: 0x404040,
+        card: 0x242426,
         card_hover: 0x39393D,
         selection: 0x183B56,
         text_primary: 0xF5F3EF,
@@ -220,97 +175,7 @@ impl CadencePalette {
         link: 0x2997FF,
         accent_hover: 0xFFFFFF,
         on_accent: 0x171717,
-        window: Fill::solid(0x121212),
-        sidebar: Fill::solid(0x121212),
-        page: Fill::solid(0x1A1A1A),
-        player: Fill::solid(0x1A1A1A),
-        tile: Fill::solid(0x242426),
-        tile_hover: Fill::solid(0x39393D),
-        sidebar_rest: Fill::solid(0x121212),
-        page_rest: Fill::solid(0x1A1A1A),
-        design: Design::Classic,
-        dark: true,
     };
-
-    /// The palette for a design. Classic is the base unchanged. The others change
-    /// the colours and the big structural fills; small controls, menus and
-    /// dialogs keep opaque roles so text on them never depends on what is
-    /// behind.
-    fn with_design(mut self, design: Design, dark: bool) -> Self {
-        self.design = design;
-        match (design, dark) {
-            (Design::Classic, _) => {}
-            (Design::Refined, true) => {
-                self.canvas = 0x101012;
-                self.surface = 0x161618;
-                self.surface_raised = 0x222226;
-                self.surface_hover = 0x1F1F23;
-                self.control = 0x26262A;
-                self.control_hover = 0x303034;
-                self.card_hover = 0x26262A;
-                self.text_primary = 0xF1EFEB;
-                self.text = 0xC9C7C3;
-                self.text_muted = 0x8D8B88;
-                self.border = 0x2A2A2E;
-                self.window = Fill::solid(0x101012);
-                self.sidebar = Fill::solid(0x101012);
-                self.page = Fill::solid(0x161618);
-                self.player = Fill::solid(0x101012);
-                self.tile = Fill::solid(0x1E1E21);
-                self.tile_hover = Fill::solid(0x26262A);
-                self.sidebar_rest = Fill::solid(0x101012);
-                self.page_rest = Fill::solid(0x161618);
-            }
-            (Design::Refined, false) => {
-                self.canvas = 0xF7F6F4;
-                self.window = Fill::solid(0xF7F6F4);
-                self.sidebar = Fill::solid(0xF7F6F4);
-                self.sidebar_rest = Fill::solid(0xF7F6F4);
-            }
-            (Design::Ambient | Design::Crate, true) => {
-                let crate_ = design == Design::Crate;
-                let base = if crate_ { 0x0F0E12 } else { 0x121114 };
-                self.canvas = base;
-                self.surface = base;
-                self.surface_raised = 0x232027;
-                self.surface_hover = 0x1D1A21;
-                self.control = 0x2A2730;
-                self.control_hover = 0x36323D;
-                self.card_hover = 0x36323D;
-                self.text_primary = 0xF3F1F4;
-                self.text = 0xCDC9D2;
-                self.text_muted = if crate_ { 0x9D98A6 } else { 0xA8A3AE };
-                self.border = 0x2A2730;
-                let none = Fill::glass(0, 0.);
-                self.window = Fill::solid(base);
-                self.sidebar = none;
-                self.page = none;
-                self.player = none;
-                self.tile = Fill::glass(0xFFFFFF, if crate_ { 0.05 } else { 0.06 });
-                self.tile_hover = Fill::glass(0xFFFFFF, 0.10);
-                self.sidebar_rest = none;
-                self.page_rest = none;
-                if crate_ {
-                    self.player = Fill::glass(0x1C1A22, 0.94);
-                }
-            }
-            (Design::Ambient | Design::Crate, false) => {
-                let none = Fill::glass(0, 0.);
-                self.window = Fill::solid(self.surface);
-                self.sidebar = none;
-                self.page = none;
-                self.player = none;
-                self.tile = Fill::glass(0x000000, 0.04);
-                self.tile_hover = Fill::glass(0x000000, 0.07);
-                self.sidebar_rest = none;
-                self.page_rest = none;
-                if design == Design::Crate {
-                    self.player = Fill::glass(0xFFFFFF, 0.94);
-                }
-            }
-        }
-        self
-    }
 }
 
 fn is_dark_appearance(appearance: WindowAppearance) -> bool {
@@ -724,67 +589,5 @@ mod tests {
 
         let (width, left, pad) = sidebar_fill_geometry(NAV_ROW_PAD, NAV_GLYPH_WIDTH, row_width, 1.);
         assert_eq!((width, left, pad), (row_width, Rems::ZERO, NAV_ROW_PAD));
-    }
-}
-
-#[cfg(test)]
-mod design_tests {
-    use super::*;
-
-    fn base(dark: bool) -> CadencePalette {
-        if dark {
-            CadencePalette::DARK
-        } else {
-            CadencePalette::LIGHT
-        }
-    }
-
-    #[test]
-    fn classic_is_the_base_palette_and_fully_opaque() {
-        for dark in [false, true] {
-            let classic = base(dark).with_design(Design::Classic, dark);
-            for fill in [
-                classic.window,
-                classic.sidebar,
-                classic.page,
-                classic.player,
-                classic.tile,
-                classic.tile_hover,
-                classic.sidebar_rest,
-                classic.page_rest,
-            ] {
-                assert_eq!(fill.alpha, 1.);
-            }
-            assert!(classic.page == base(dark).page && classic.canvas == base(dark).canvas);
-            assert!(classic.design == Design::Classic);
-        }
-    }
-
-    #[test]
-    fn every_design_keeps_text_readable_on_its_own_surface() {
-        let luminance =
-            |rgb: u32| ((rgb >> 16) & 255) * 2126 + ((rgb >> 8) & 255) * 7152 + (rgb & 255) * 722;
-        for design in Design::ALL {
-            let p = base(true).with_design(design, true);
-            assert!(luminance(p.text_primary) > luminance(p.surface) * 3);
-            assert!(luminance(p.text_muted) > luminance(p.surface) * 2);
-            assert!(p.design == design);
-        }
-    }
-
-    #[test]
-    fn ambient_and_crate_surfaces_are_see_through_over_their_backdrop() {
-        for design in [Design::Ambient, Design::Crate] {
-            for dark in [false, true] {
-                let p = base(dark).with_design(design, dark);
-                for fill in [p.sidebar, p.page, p.sidebar_rest, p.page_rest] {
-                    assert_eq!(fill.alpha, 0.);
-                }
-                // Ambient's player is see-through; Crate's floating pill is
-                // a near-opaque glass so its controls stay legible.
-                assert_eq!(p.player.alpha == 0., design == Design::Ambient);
-                assert!(p.tile.alpha > 0. && p.tile.alpha < 1.);
-            }
-        }
     }
 }

@@ -44,30 +44,10 @@ const MONTHS: &[Month] = &[
                 date: "Nov 21, 2026",
                 releases: &[
                     Release {
-                        version: "0.8.68",
+                        version: "0.8.69",
                         notes: &[Note(
-                            Fixed,
-                            "Ambient's cover glow is softer and fades out before it reaches the page, so tiles and text stay clean.",
-                        )],
-                    },
-                    Release {
-                        version: "0.8.67",
-                        notes: &[
-                            Note(
-                                New,
-                                "Design in Settings: Refined tightens every detail, Ambient docks Now Playing and glows with the cover, Crate swaps in an icon dock and a floating player. Classic, the default, is exactly as before.",
-                            ),
-                            Note(
-                                Better,
-                                "The Window style setting from 0.8.66 is gone; Design replaces it.",
-                            ),
-                        ],
-                    },
-                    Release {
-                        version: "0.8.66",
-                        notes: &[Note(
-                            New,
-                            "Window style in Settings: Smoked glass or Clear glass lets your desktop show through Sonder. Solid, the default, is exactly as before and adds nothing.",
+                            Better,
+                            "Back to Sonder as it was in 0.8.65. The Window style and Design settings from 0.8.66 to 0.8.68 are removed.",
                         )],
                     },
                     Release {
@@ -878,7 +858,7 @@ impl WhatsNewPage {
 }
 
 fn tag_chip(palette: CadencePalette, tag: Tag) -> Div {
-    let light = !palette.dark;
+    let light = palette.canvas == CadencePalette::LIGHT.canvas;
     let (label, fg, bg) = match (tag, light) {
         (New, true) => ("New", 0x1558B8, 0xDFEAFC),
         (Fixed, true) => ("Fixed", 0x1D7A45, 0xDCF1E4),

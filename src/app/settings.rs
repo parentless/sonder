@@ -6,7 +6,6 @@ pub(super) enum SettingsEvent {
     OpenWhatsNew,
     RequestAppChange,
     SetTheme(ThemePreference),
-    SetDesign(Design),
     SetZoom(UiZoom),
     SetAutoplay(bool),
     SetNormaliseVolume(bool),
@@ -409,30 +408,6 @@ impl Settings {
                                     )),
                             ),
                     )
-                    .child(
-                        div()
-                            .mt_5()
-                            .child(components::section_label(palette, "Design"))
-                            .child(
-                                div()
-                                    .mt_2()
-                                    .p_1()
-                                    .rounded(tokens::CONTAINER_RADIUS)
-                                    .bg(rgb(palette.control))
-                                    .flex()
-                                    .gap_1()
-                                    .children(Design::ALL.into_iter().map(|design| {
-                                        Self::design_option(design, cx)
-                                    })),
-                            )
-                            .child(
-                                div()
-                                    .mt_2()
-                                    .text_sm()
-                                    .text_color(rgb(palette.text_muted))
-                                    .child(appearance::Appearance::design(cx).blurb()),
-                            ),
-                    )
                     .child(div().mt_5().child(components::section_label(palette, "UI zoom"))
                         .child(Self::zoom_scale(palette, preferences.ui_zoom, cx))
                     )
@@ -443,7 +418,7 @@ impl Settings {
                                     components::button(palette, ("settings-selection-color", index))
                                         .hover(|style| style.opacity(0.9))
                                         .test_support().h_9().px_3().rounded_lg()
-                                        .bg(rgb(color.fill(palette.dark)))
+                                        .bg(rgb(color.fill(palette.canvas == CadencePalette::DARK.canvas)))
                                         .border_1().border_color(rgb(if preferences.selection_color == color { palette.text_primary } else { palette.border }))
                                         .child(color.name())
                                         .on_click(move |_, window, cx| appearance::Appearance::set_selection_color(color, window, cx))
@@ -1414,40 +1389,6 @@ impl Settings {
                     ),
                 )
             })
-    }
-
-    fn design_option(style: Design, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        let palette = appearance::Appearance::palette(cx);
-        let selected = appearance::Appearance::design(cx) == style;
-        let id = match style {
-            Design::Classic => "settings-design-classic",
-            Design::Refined => "settings-design-refined",
-            Design::Ambient => "settings-design-ambient",
-            Design::Crate => "settings-design-crate",
-        };
-        components::filled_button(palette, id)
-            .test_support()
-            .h_11()
-            .flex_1()
-            .rounded(tokens::CONTROL_RADIUS)
-            .bg(if selected {
-                rgb(palette.selection)
-            } else {
-                rgb(palette.control)
-            })
-            .text_sm()
-            .font_weight(if selected {
-                gpui_kit::FontWeight::SEMIBOLD
-            } else {
-                gpui_kit::FontWeight::MEDIUM
-            })
-            .text_color(rgb(palette.text_primary))
-            .hover(|style| style.bg(rgb(palette.control_hover)))
-            .child(style.label())
-            .on_click(cx.listener(move |_, _, _, cx| {
-                cx.emit(SettingsEvent::SetDesign(style));
-            }))
-            .into_any_element()
     }
 
     fn appearance_option(

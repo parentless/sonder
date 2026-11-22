@@ -12,12 +12,6 @@ const MIN_VISIBLE_THUMB_SIZE: Pixels = px(0.5);
 const HIT_HEIGHT: Pixels = px(24.);
 const VOLUME_TRACK_HEIGHT: Rems = Rems(0.25);
 const VOLUME_THUMB_SIZE: Rems = Rems(0.75);
-/// Ambient's docked panel: 22rem wide, 1.5rem padding, square cover.
-const AMBIENT_PANEL_WIDTH: Rems = Rems(22.);
-const AMBIENT_ARTWORK: tokens::ArtworkSize = tokens::ArtworkSize {
-    size: Rems(19.),
-    radius: Rems(1.),
-};
 const GROW_DURATION: Duration = Duration::from_millis(160);
 
 const ARROW_STEP_MS: u32 = 5_000;
@@ -204,7 +198,7 @@ impl PlayerBar {
             }))
     }
 
-    fn bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
         let viewport_width = window.viewport_size().width;
         let rem_size = window.rem_size();
@@ -244,24 +238,9 @@ impl PlayerBar {
             CadenceIcon::Speaker
         };
         let duration_ms = now_playing.as_deref().map_or(0, |track| track.duration_ms);
-        if palette.design == Design::Ambient {
-            return self
-                .ambient_panel(
-                    palette,
-                    playing,
-                    shuffle,
-                    position_ms,
-                    duration_ms,
-                    duration,
-                    window,
-                    cx,
-                )
-                .into_any_element();
-        }
-        let pill = palette.design == Design::Crate;
         div()
             .relative()
-            .h(if pill { Rems(5.) } else { Rems(6.) })
+            .h_24()
             .w_full()
             .flex_none()
             .flex()
@@ -269,20 +248,9 @@ impl PlayerBar {
             .justify_between()
             .gap_6()
             .px_6()
-            .bg(palette.player.color())
+            .bg(rgb(palette.surface))
+            .border_t_1()
             .border_color(rgb(palette.border))
-            .when(!pill, |bar| bar.border_t_1())
-            .when(pill, |bar| {
-                bar.rounded_full()
-                    .border_1()
-                    .shadow(vec![gpui_kit::BoxShadow {
-                        color: gpui_kit::hsla(0., 0., 0., 0.45),
-                        offset: gpui_kit::point(px(0.), px(12.)),
-                        blur_radius: px(32.),
-                        spread_radius: px(0.),
-                        inset: false,
-                    }])
-            })
             .child(
                 div()
                     .w(if compact {
@@ -476,198 +444,6 @@ impl PlayerBar {
                         )
                     }),
             )
-            .into_any_element()
-    }
-
-    /// Ambient's docked Now Playing panel: cover, title, scrubber and
-    /// transport in one column, with queue and volume underneath.
-    #[allow(clippy::too_many_arguments)]
-    fn ambient_panel(
-        &mut self,
-        palette: CadencePalette,
-        playing: bool,
-        shuffle: bool,
-        position_ms: u32,
-        duration_ms: u32,
-        duration: SharedString,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let volume = self.player.read(cx).volume();
-        let volume_icon = if volume == 0. {
-            CadenceIcon::SpeakerMuted
-        } else {
-            CadenceIcon::Speaker
-        };
-        let up_next: Vec<AnyElement> = {
-            let cache = self.metadata.read(cx).image_cache.clone();
-            self.player
-                .read(cx)
-                .context()
-                .iter()
-                .skip(1)
-                .take(3)
-                .enumerate()
-                .map(|(index, track)| {
-                    div()
-                        .id(("up-next", index))
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .gap_3()
-                        .child(components::artwork(
-                            palette,
-                            &cache,
-                            track.artwork_url.as_deref(),
-                            tokens::ArtworkSize {
-                                size: Rems(2.5),
-                                radius: Rems(0.5),
-                            },
-                            CadenceIcon::MusicNote,
-                        ))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .child(
-                                    div()
-                                        .truncate()
-                                        .text_sm()
-                                        .text_color(rgb(palette.text_primary))
-                                        .child(track.title.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .truncate()
-                                        .text_xs()
-                                        .text_color(rgb(palette.text_muted))
-                                        .child(track.artist.clone()),
-                                ),
-                        )
-                        .into_any_element()
-                })
-                .collect()
-        };
-        let inner = AMBIENT_PANEL_WIDTH - Rems(3.);
-        let slider = inner - PROGRESS_TIME_WIDTH * 2. - PROGRESS_GAP * 2.;
-        div()
-            .relative()
-            .w(AMBIENT_PANEL_WIDTH)
-            .h_full()
-            .flex_none()
-            .overflow_hidden()
-            .flex()
-            .flex_col()
-            .gap_5()
-            .p_6()
-            .bg(palette.player.color())
-            .child(self.metadata.clone().cached(gpui_kit::StyleRefinement {
-                size: gpui_kit::SizeRefinement {
-                    width: Some(gpui_kit::relative(1.).into()),
-                    height: Some((AMBIENT_ARTWORK.size + Rems(3.75)).into()),
-                },
-                ..Default::default()
-            }))
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .gap(PROGRESS_GAP)
-                    .text_size(tokens::CAPTION_TEXT)
-                    .text_color(rgb(palette.text_muted))
-                    .child(div().w(PROGRESS_TIME_WIDTH).flex_none().text_right().child(
-                        format_duration(self.scrubber.displayed_ms(position_ms, duration_ms)),
-                    ))
-                    .child(self.seek_bar(palette, position_ms, duration_ms, slider, window, cx))
-                    .child(div().w(PROGRESS_TIME_WIDTH).flex_none().child(duration)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap_2()
-                    .child(components::press_feedback(
-                        "shuffle-feedback",
-                        components::icon_button(palette, "shuffle", CadenceIcon::Shuffle)
-                            .when(shuffle, |button| button.bg(rgb(palette.selection)))
-                            .test_support()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.player
-                                    .update(cx, |player, cx| player.toggle_shuffle(cx));
-                            })),
-                    ))
-                    .child(components::press_feedback(
-                        "previous-feedback",
-                        components::icon_button(palette, "previous", CadenceIcon::SkipBack)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.player.update(cx, |player, cx| player.previous(cx));
-                            })),
-                    ))
-                    .child(components::press_feedback(
-                        "play-toggle-feedback",
-                        components::filled_button(palette, "play-toggle")
-                            .aria_label(if playing { "Pause" } else { "Play" })
-                            .hover(|style| style.opacity(0.9))
-                            .size_12()
-                            .rounded_full()
-                            .bg(rgb(palette.text_primary))
-                            .child(components::icon(
-                                if playing {
-                                    CadenceIcon::Pause
-                                } else {
-                                    CadenceIcon::Play
-                                },
-                                tokens::PLAYBACK_ICON,
-                                palette.on_accent,
-                            ))
-                            .test_support()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.player.update(cx, |player, cx| player.toggle(cx));
-                            })),
-                    ))
-                    .child(components::press_feedback(
-                        "next-feedback",
-                        components::icon_button(palette, "next", CadenceIcon::SkipForward)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.player.update(cx, |player, cx| player.next(cx));
-                            })),
-                    ))
-                    .child(self.lyrics_button(palette, window, cx)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap_2()
-                    .child(self.queue_button(palette, window, cx))
-                    .child(
-                        components::icon_button(palette, "volume", volume_icon)
-                            .test_support()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.player.update(cx, |player, cx| player.toggle_mute(cx));
-                            })),
-                    ),
-            )
-            .when(!up_next.is_empty(), |panel| {
-                panel.child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_xs()
-                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                .text_color(rgb(palette.text_muted))
-                                .child("Up next"),
-                        )
-                        .children(up_next),
-                )
-            })
     }
 }
 
@@ -702,13 +478,12 @@ impl PlayerMetadata {
         &self,
         palette: CadencePalette,
         track: Option<&model::Track>,
-        art: tokens::ArtworkSize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(track) = track else {
             return div()
-                .size(art.size)
-                .rounded(art.radius)
+                .size(tokens::PLAYER_ARTWORK.size)
+                .rounded(tokens::PLAYER_ARTWORK.radius)
                 .bg(rgb(palette.surface_raised))
                 .into_any_element();
         };
@@ -716,7 +491,7 @@ impl PlayerMetadata {
             palette,
             &self.image_cache,
             track.artwork_url.as_deref(),
-            art,
+            tokens::PLAYER_ARTWORK,
             CadenceIcon::MusicNote,
         );
         match playing_album(Some(track)) {
@@ -742,7 +517,6 @@ impl PlayerMetadata {
     fn title_line(
         palette: CadencePalette,
         track: Option<&model::Track>,
-        large: bool,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -753,8 +527,7 @@ impl PlayerMetadata {
         let text = div()
             .min_w_0()
             .truncate()
-            .when(large, |text| text.text_size(Rems(1.375)))
-            .when(!large, |text| text.text_sm())
+            .text_sm()
             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
             .text_color(rgb(palette.text_primary))
             .child(title);
@@ -821,63 +594,20 @@ impl Render for PlayerMetadata {
         }
         let palette = appearance::Appearance::palette(cx);
         let track = self.track.clone();
-        // Ambient docks Now Playing in a side panel: big cover, then text.
-        if palette.design == Design::Ambient {
-            return div()
-                .w_full()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap_4()
-                .child(self.artwork_link(palette, track.as_deref(), AMBIENT_ARTWORK, cx))
-                .child(
-                    div()
-                        .min_w_0()
-                        .child(Self::title_line(
-                            palette,
-                            track.as_deref(),
-                            true,
-                            window,
-                            cx,
-                        ))
-                        .child(Self::credits_line(palette, track.as_deref(), window, cx).text_sm()),
-                )
-                .into_any_element();
-        }
         div()
             .w_full()
             .min_w_0()
             .flex()
             .items_center()
             .gap_3()
-            .child(self.artwork_link(
-                palette,
-                track.as_deref(),
-                // Crate plays from a record: the cover is a disc.
-                if palette.design == Design::Crate {
-                    tokens::ArtworkSize {
-                        size: tokens::PLAYER_ARTWORK.size,
-                        radius: tokens::PLAYER_ARTWORK.size / 2.,
-                    }
-                } else {
-                    tokens::PLAYER_ARTWORK
-                },
-                cx,
-            ))
+            .child(self.artwork_link(palette, track.as_deref(), cx))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(Self::title_line(
-                        palette,
-                        track.as_deref(),
-                        false,
-                        window,
-                        cx,
-                    ))
+                    .child(Self::title_line(palette, track.as_deref(), window, cx))
                     .child(Self::credits_line(palette, track.as_deref(), window, cx)),
             )
-            .into_any_element()
     }
 }
 

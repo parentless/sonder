@@ -426,7 +426,7 @@ impl Render for ProfilePage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
         let compact = is_compact_content_layout(window);
-        let light = !palette.dark;
+        let light = palette.canvas == CadencePalette::LIGHT.canvas;
         let accent = if light { ACCENT_LIGHT } else { ACCENT_DARK };
 
         let profile = self.session.read(cx).profile().cloned();
@@ -778,7 +778,7 @@ fn card(palette: CadencePalette) -> Div {
         .rounded_2xl()
         .px_5()
         .py(Rems(1.125))
-        .bg(palette.tile.color())
+        .bg(rgb(palette.card))
 }
 
 fn card_title(palette: CadencePalette, title: &'static str) -> Div {
@@ -921,7 +921,7 @@ fn personality_card(palette: CadencePalette, by_hour: &[u32; 24], plays: usize, 
         .bg(gpui_kit::linear_gradient(
             160.,
             gpui_kit::linear_color_stop(rgb(tint), 0.),
-            gpui_kit::linear_color_stop(palette.tile.color(), 0.8),
+            gpui_kit::linear_color_stop(rgb(palette.card), 0.8),
         ))
         .child(caption(palette, "You are a"))
         .child(
@@ -1033,7 +1033,7 @@ fn artists_card(
                 .px(px(ROW_INSET))
                 .py(px(7.))
                 .rounded(px(10.))
-                .hover(|row| row.bg(palette.tile_hover.color()))
+                .hover(|row| row.bg(rgb(palette.card_hover)))
                 .child(
                     div()
                         .w(px(18.))

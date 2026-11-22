@@ -23,13 +23,6 @@ pub(super) fn initialize(cx: &mut App, theme: ThemePreference) -> BackendProbe {
         backend,
         AppPreferences {
             theme,
-            // Lets a developer render every scene in another design.
-            design: match std::env::var("CADENCE_DESIGN").as_deref() {
-                Ok("refined") => crate::storage::Design::Refined,
-                Ok("ambient") => crate::storage::Design::Ambient,
-                Ok("crate") => crate::storage::Design::Crate,
-                _ => crate::storage::Design::Classic,
-            },
             ..AppPreferences::default()
         },
     );

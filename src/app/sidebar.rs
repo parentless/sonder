@@ -131,8 +131,6 @@ pub(super) struct Sidebar {
     compact_layout: bool,
     hover: components::HoverHighlight,
     collapsed: bool,
-    /// Crate shows the rail as an icon dock whatever the saved preference.
-    dock: bool,
     transition_generation: u64,
     visual_width: Rems,
     transition_from: Rems,
@@ -190,7 +188,6 @@ impl Sidebar {
             compact_layout: false,
             hover: components::HoverHighlight::default(),
             collapsed,
-            dock: false,
             transition_generation: 0,
             visual_width: width,
             transition_from: width,
@@ -378,29 +375,6 @@ impl Sidebar {
         }
     }
 
-    fn shows_collapsed(&self) -> bool {
-        self.collapsed || self.dock
-    }
-
-    /// The Crate design pins the rail to icons; the saved preference is kept.
-    pub(super) fn set_dock(&mut self, dock: bool, cx: &mut Context<Self>) {
-        if self.dock == dock {
-            return;
-        }
-        let from = self.visual_width;
-        let target = if dock || self.collapsed {
-            COLLAPSED_SIDEBAR_WIDTH
-        } else {
-            expanded_sidebar_width(self.compact_layout)
-        };
-        self.transition_from = from;
-        self.transition_duration =
-            sidebar_transition_duration(from, target, expanded_sidebar_width(self.compact_layout));
-        self.dock = dock;
-        self.transition_generation = self.transition_generation.wrapping_add(1);
-        cx.notify();
-    }
-
     pub(super) fn set_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
         if self.collapsed == collapsed {
             return;
@@ -452,15 +426,15 @@ impl Sidebar {
             item.icon
         };
         let base = if selected {
-            Fill::solid(palette.selection)
+            palette.selection
         } else {
-            palette.sidebar_rest
+            palette.canvas
         };
         let fill_color = self
             .hover
             .transition(index, cx.background_executor().now())
             .map_or_else(
-                || base.color(),
+                || rgb(base),
                 |hover| hover.color(window, base, palette.control_hover, cx.reduce_motion()),
             );
         let focus_visible = components::is_focus_visible(focus_handle, window);
@@ -531,7 +505,7 @@ impl Sidebar {
                     .set(index, *hovered, cx.background_executor().now());
                 cx.notify();
             }))
-            .when(self.shows_collapsed(), |row| {
+            .when(self.collapsed, |row| {
                 rail_tooltip(row, item_label(index).into(), self.tooltip_anchor.clone())
             })
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(SidebarEvent::Navigate(target))))
@@ -549,18 +523,18 @@ impl Sidebar {
     ) -> AnyElement {
         let index = NAV_ITEMS.len();
         let selected = self.route == Route::WhatsNew;
-        let collapsed = self.shows_collapsed();
+        let collapsed = self.collapsed;
         let unseen = self.whats_new_unseen;
         let base = if selected {
-            Fill::solid(palette.selection)
+            palette.selection
         } else {
-            palette.sidebar_rest
+            palette.canvas
         };
         let fill_color = self
             .hover
             .transition(index, cx.background_executor().now())
             .map_or_else(
-                || base.color(),
+                || rgb(base),
                 |hover| hover.color(window, base, palette.control_hover, cx.reduce_motion()),
             );
         let focus_visible = components::is_focus_visible(&self.whats_new_focus, window);
@@ -694,7 +668,7 @@ impl Sidebar {
 
     fn panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
-        let collapsed = self.shows_collapsed();
+        let collapsed = self.collapsed;
         let pinned_origin = self.pinned_origin;
         let expanded_width = expanded_sidebar_width(self.compact_layout);
         let target_width = if collapsed {
@@ -830,9 +804,9 @@ impl Sidebar {
                                     let selected = active_playlist.as_deref()
                                         == Some(playlist.source_id.as_str());
                                     let base = if selected {
-                                        Fill::solid(palette.selection)
+                                        palette.selection
                                     } else {
-                                        palette.sidebar_rest
+                                        palette.canvas
                                     };
                                     let pinned = position < pinned_count;
                                     let row = components::row_button(
@@ -851,7 +825,7 @@ impl Sidebar {
                                     .w_full()
                                     .min_w_0()
                                     .when(!collapsed, |row| row.px_3())
-                                    .bg(base.color())
+                                    .bg(rgb(base))
                                     .aria_selected(selected)
                                     .rounded_lg()
                                     .justify_start()
@@ -1029,9 +1003,6 @@ impl Sidebar {
                 .build(window, cx)
             })
             .on_click(cx.listener(|this, _, _, cx| {
-                if this.dock {
-                    return;
-                }
                 let collapsed = !this.collapsed;
                 this.set_collapsed(collapsed, cx);
             }));
@@ -1041,7 +1012,7 @@ impl Sidebar {
             .h_full()
             .flex_none()
             .overflow_hidden()
-            .bg(palette.sidebar.color())
+            .bg(rgb(palette.canvas))
             .border_r_1()
             .border_color(rgb(palette.border))
             .child(

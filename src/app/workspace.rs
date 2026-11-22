@@ -32,8 +32,6 @@ pub(super) struct Workspace {
     pub(super) sidebar: Entity<sidebar::Sidebar>,
     pub(super) toolbar: Entity<chrome::Toolbar>,
     pub(super) player_bar: Entity<player_bar::PlayerBar>,
-    /// Mounted only while the Ambient design is selected.
-    ambient_glow: Entity<ambient::AmbientGlow>,
     pub(super) queue_drawer: Entity<player_bar::QueueDrawer>,
     pub(super) lyrics: Entity<lyrics_view::LyricsPane>,
     pub(super) focus_handle: FocusHandle,
@@ -162,7 +160,6 @@ impl Workspace {
                 settings::SettingsEvent::SetTheme(preference) => {
                     this.set_theme_preference(*preference, window, cx)
                 }
-                settings::SettingsEvent::SetDesign(style) => this.set_design(*style, window, cx),
                 settings::SettingsEvent::SetZoom(zoom) => {
                     if let Err(error) = appearance::Appearance::set_ui_zoom(*zoom, cx) {
                         this.last_error = Some(format!("Could not save UI zoom: {error}").into());
@@ -304,7 +301,6 @@ impl Workspace {
                 }
             },
         ));
-        let ambient_glow = cx.new(|cx| ambient::AmbientGlow::new(&player, cx));
         let player_bar = cx.new(player_bar::PlayerBar::new);
         subscriptions.push(cx.subscribe(&player_bar, Workspace::handle_page_event));
         subscriptions.push(cx.subscribe(
@@ -390,7 +386,6 @@ impl Workspace {
             sidebar,
             toolbar,
             player_bar,
-            ambient_glow,
             queue_drawer,
             lyrics,
             focus_handle,
@@ -419,16 +414,6 @@ impl Workspace {
             self.last_error = Some(error);
         }
         self.close_account_menu(cx);
-        cx.notify();
-    }
-
-    fn set_design(&mut self, style: Design, window: &mut Window, cx: &mut Context<Self>) {
-        appearance::Appearance::set_design(style, window, cx);
-        if let Some(result) = services::AppServices::set_design(style, cx)
-            && let Some(error) = services::preference_save_error("design", result)
-        {
-            self.last_error = Some(error);
-        }
         cx.notify();
     }
 
@@ -622,10 +607,8 @@ impl Render for Workspace {
 
         let scrim = self.signed_out_scrim(palette, cx);
         let playback_help = self.playback_help(palette, window, cx);
-        let dock = palette.design == Design::Crate;
         self.sidebar.update(cx, |sidebar, cx| {
-            sidebar.set_compact_layout(compact_layout, cx);
-            sidebar.set_dock(dock, cx);
+            sidebar.set_compact_layout(compact_layout, cx)
         });
         let route = self.router.route();
         let back_target = self.router.back_target();
@@ -634,8 +617,6 @@ impl Render for Workspace {
             toolbar.show(route, back_target, error, cx)
         });
 
-        let ambient = palette.design == Design::Ambient;
-        let floating = palette.design == Design::Crate;
         let overlay_toolbar = route == Route::Artist;
         // Lyrics show when opened, in the chosen place.
         let lyrics_preferences = services::AppServices::preferences(cx);
@@ -684,10 +665,9 @@ impl Render for Workspace {
             .relative()
             .flex()
             .flex_col()
-            .bg(palette.window.color())
+            .bg(rgb(palette.canvas))
             .font_family("Inter")
             .text_color(rgb(palette.text))
-            .when(ambient, |root| root.child(self.ambient_glow.clone()))
             .child(smooth_scroll::input(self.wheel_scroll.clone()))
             .child(
                 div()
@@ -703,9 +683,7 @@ impl Render for Workspace {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .bg(palette.page.color())
-                            // Leaves room for the floating player.
-                            .when(floating, |body| body.pb(Rems(6.)))
+                            .bg(rgb(palette.surface))
                             .when(!overlay_toolbar, |body| body.child(self.toolbar.clone()))
                             .child(
                                 div()
@@ -728,7 +706,6 @@ impl Render for Workspace {
                                 body.child(self.lyrics.clone())
                             }),
                     )
-                    .when(ambient, |row| row.child(self.player_bar.clone()))
                     .when(self.player_bar.read(cx).queue_open(), |root| {
                         root.child(self.queue_drawer.clone())
                     })
@@ -739,27 +716,7 @@ impl Render for Workspace {
             .when(lyrics_view == Some(LyricsView::Strip), |root| {
                 root.child(self.lyrics.clone())
             })
-            .when(!ambient && !floating, |root| {
-                root.child(self.player_bar.clone())
-            })
-            .when(floating, |root| {
-                root.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .bottom_4()
-                        .px_6()
-                        .flex()
-                        .justify_center()
-                        .child(
-                            div()
-                                .w_full()
-                                .max_w(Rems(64.))
-                                .child(self.player_bar.clone()),
-                        ),
-                )
-            })
+            .child(self.player_bar.clone())
             .when_some(self.intro.clone(), |root, intro| root.child(intro))
             .when_some(scrim, |root, scrim| root.child(deferred(scrim)))
             .when_some(action_notice, |root, notice| root.child(notice))
