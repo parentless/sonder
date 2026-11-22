@@ -662,8 +662,8 @@ impl HomePage {
             .justify_start()
             .overflow_hidden()
             .rounded(rem(TILE_RADIUS))
-            .bg(palette.tile.color())
-            .hover(|style| style.bg(palette.tile_hover.color()))
+            .bg(rgb(palette.card))
+            .hover(|style| style.bg(rgb(palette.card_hover)))
             .child(div().size(rem(64.)).flex_none().child(cover))
             .child(
                 row_text(palette, shortcut.title, shortcut.detail)
@@ -737,7 +737,7 @@ impl HomePage {
                 .flex()
                 .gap(rem(16.))
                 .rounded(rem(CARD_RADIUS))
-                .bg(palette.tile.color())
+                .bg(rgb(palette.card))
                 .child(art)
                 .child(
                     div()
@@ -783,7 +783,7 @@ impl HomePage {
                                                 .h(rem(5.))
                                                 .mt(rem(4.))
                                                 .rounded_full()
-                                                .bg(palette.tile_hover.color())
+                                                .bg(rgb(palette.card_hover))
                                                 .child(
                                                     div()
                                                         .h_full()
@@ -850,7 +850,7 @@ impl HomePage {
                         div()
                             .size(size.size)
                             .rounded(size.radius)
-                            .bg(palette.tile.color())
+                            .bg(rgb(palette.card))
                     }))
                     .into_any_element()
             });
@@ -947,7 +947,7 @@ impl HomePage {
                 .flex()
                 .items_center()
                 .rounded(rem(TILE_RADIUS))
-                .bg(palette.tile.color())
+                .bg(rgb(palette.card))
         };
         let artist_row = if let Some(suggestion) = self
             .discover
@@ -972,7 +972,7 @@ impl HomePage {
                             .h_full()
                             .justify_start()
                             .rounded(rem(TILE_RADIUS))
-                            .hover(|style| style.bg(palette.tile_hover.color()))
+                            .hover(|style| style.bg(rgb(palette.card_hover)))
                             .child(div().ml(rem(10.)).child(components::artwork(
                                 palette,
                                 &cache,
@@ -1039,7 +1039,7 @@ impl HomePage {
                             .flex_none()
                             .size(rem(40.))
                             .rounded(rem(TILE_RADIUS - 10.))
-                            .bg(palette.tile_hover.color())
+                            .bg(rgb(palette.card_hover))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -1208,7 +1208,7 @@ impl Render for HomePage {
             .id("home-page")
             .size_full()
             .min_h_0()
-            .bg(palette.page.color())
+            .bg(rgb(palette.surface))
             .text_color(rgb(palette.text))
             .child(
                 div()

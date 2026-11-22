@@ -20,42 +20,6 @@ pub enum ThemePreference {
     Dark,
 }
 
-/// How see-through the main window is. Solid is the default and the only one
-/// that leaves the window fully opaque.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum WindowStyle {
-    #[default]
-    Solid,
-    /// Mostly opaque dark glass with a faint see-through.
-    Smoked,
-    /// A lightly tinted pane that shows the desktop behind it.
-    Clear,
-}
-
-impl WindowStyle {
-    pub const ALL: [Self; 3] = [Self::Solid, Self::Smoked, Self::Clear];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Solid => "Solid",
-            Self::Smoked => "Smoked glass",
-            Self::Clear => "Clear glass",
-        }
-    }
-
-    fn key(self) -> &'static str {
-        match self {
-            Self::Solid => "solid",
-            Self::Smoked => "smoked",
-            Self::Clear => "clear",
-        }
-    }
-
-    fn from_key(key: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|style| style.key() == key)
-    }
-}
-
 /// Spotify's three streaming bitrates. Very high is the default.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum StreamingQuality {
@@ -171,7 +135,6 @@ impl UiZoom {
 pub struct AppPreferences {
     pub sidebar_collapsed: bool,
     pub theme: ThemePreference,
-    pub window_style: WindowStyle,
     pub selection_color: SelectionColor,
     pub ui_zoom: UiZoom,
     pub autoplay: bool,
@@ -235,7 +198,6 @@ impl Default for AppPreferences {
         Self {
             sidebar_collapsed: false,
             theme: ThemePreference::default(),
-            window_style: WindowStyle::default(),
             selection_color: SelectionColor::default(),
             ui_zoom: UiZoom::default(),
             // Autoplay is on unless the listener turned it off.
@@ -480,10 +442,6 @@ impl Store {
             Some("dark") => ThemePreference::Dark,
             _ => ThemePreference::System,
         };
-        let window_style = self
-            .preference("window_style")?
-            .and_then(|value| WindowStyle::from_key(&value))
-            .unwrap_or_default();
         let autoplay = self.preference("autoplay")?.as_deref() != Some("false");
         let shuffle = self.preference("shuffle")?.as_deref() == Some("true");
         let volume_percent = self
@@ -522,7 +480,6 @@ impl Store {
             sidebar_collapsed,
             ui_zoom,
             theme,
-            window_style,
             selection_color: SelectionColor::ALL
                 .into_iter()
                 .find(|color| selection_color.as_deref() == Some(color.name()))
@@ -666,10 +623,6 @@ impl Store {
             ThemePreference::Dark => "dark",
         };
         self.set_preference("theme", value)
-    }
-
-    pub fn set_window_style(&mut self, style: WindowStyle) -> Result<()> {
-        self.set_preference("window_style", style.key())
     }
 
     /// Whether the launch intro is still owed: until it has been played once,
@@ -1558,14 +1511,12 @@ mod tests {
             .set_streaming_quality(super::StreamingQuality::High)
             .unwrap();
         store.set_lyrics_view(super::LyricsView::Strip).unwrap();
-        store.set_window_style(super::WindowStyle::Clear).unwrap();
         store.set_player(crate::playback::Engine::Soloist).unwrap();
         assert_eq!(
             store.preferences().unwrap(),
             AppPreferences {
                 sidebar_collapsed: true,
                 theme: ThemePreference::Dark,
-                window_style: super::WindowStyle::Clear,
                 selection_color: super::SelectionColor::default(),
                 ui_zoom: super::UiZoom::default(),
                 autoplay: false,

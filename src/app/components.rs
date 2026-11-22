@@ -934,10 +934,10 @@ impl HoverTransition {
     pub(super) fn color(
         self,
         window: &mut Window,
-        base: Fill,
+        base: u32,
         highlight: u32,
         reduce_motion: bool,
-    ) -> gpui_kit::Hsla {
+    ) -> gpui_kit::Rgba {
         if !reduce_motion && !self.remaining.is_zero() {
             let view = window.current_view();
             window.on_next_frame(move |_, cx| cx.notify(view));
@@ -948,23 +948,18 @@ impl HoverTransition {
             self.from
         };
         let channel = |shift: u32| {
-            let a = ((base.rgb >> shift) & 255u32) as f32;
+            let a = ((base >> shift) & 255u32) as f32;
             let b = ((highlight >> shift) & 255u32) as f32;
             (a + (b - a) * alpha).round() as u32
         };
-        // A see-through rest fades in to the opaque highlight.
-        let fill = Fill::glass(
-            (channel(16) << 16) | (channel(8) << 8) | channel(0),
-            base.alpha + (1. - base.alpha) * alpha,
-        );
-        fill.color()
+        rgb((channel(16) << 16) | (channel(8) << 8) | channel(0))
     }
 
     pub(super) fn apply<T: Styled + IntoElement + 'static>(
         self,
         row: T,
         window: &mut Window,
-        base: Fill,
+        base: u32,
         highlight: u32,
         reduce_motion: bool,
     ) -> AnyElement {

@@ -7,7 +7,6 @@ use gpui_kit::component::theme::ThemeColor;
 /// theme change reaches all of them without any of them going stale.
 pub(super) struct Appearance {
     preference: ThemePreference,
-    style: WindowStyle,
     palette: CadencePalette,
 }
 
@@ -19,11 +18,10 @@ impl Appearance {
     /// rather than resetting it to whatever was on disk at launch.
     pub(super) fn attach(window: &mut Window, cx: &mut App) {
         if !cx.has_global::<Self>() {
-            let preferences = services::AppServices::preferences(cx);
+            let preference = services::AppServices::preferences(cx).theme;
             cx.set_global(Self {
-                preference: preferences.theme,
-                style: preferences.window_style,
-                palette: palette_for(false, preferences.window_style),
+                preference,
+                palette: palette_for(false),
             });
         }
         let dark_mode = resolve_dark_mode(Self::preference(cx), window.appearance());
@@ -36,31 +34,6 @@ impl Appearance {
 
     pub(super) fn preference(cx: &App) -> ThemePreference {
         cx.global::<Self>().preference
-    }
-
-    pub(super) fn window_style(cx: &App) -> WindowStyle {
-        cx.global::<Self>().style
-    }
-
-    /// Switches the main window's material. Solid leaves the window opaque, so
-    /// the compositor does no extra work; the glass styles ask for a blurred
-    /// backdrop behind it.
-    pub(super) fn set_window_style(style: WindowStyle, window: &mut Window, cx: &mut App) {
-        cx.global_mut::<Self>().style = style;
-        let dark_mode = resolve_dark_mode(Self::preference(cx), window.appearance());
-        apply_dark_mode(dark_mode, cx);
-        Self::apply_window_background(window, cx);
-        cx.refresh_windows();
-    }
-
-    /// Tells the platform whether this window is opaque or shows the desktop.
-    pub(super) fn apply_window_background(window: &mut Window, cx: &App) {
-        window.set_background_appearance(match Self::window_style(cx) {
-            WindowStyle::Solid => gpui_kit::WindowBackgroundAppearance::Opaque,
-            WindowStyle::Smoked | WindowStyle::Clear => {
-                gpui_kit::WindowBackgroundAppearance::Blurred
-            }
-        });
     }
 
     pub(super) fn set_ui_zoom(zoom: UiZoom, cx: &mut App) -> anyhow::Result<()> {
@@ -100,19 +73,18 @@ impl Appearance {
     }
 }
 
-fn palette_for(dark_mode: bool, style: WindowStyle) -> CadencePalette {
+fn palette_for(dark_mode: bool) -> CadencePalette {
     if dark_mode {
         CadencePalette::DARK
     } else {
         CadencePalette::LIGHT
     }
-    .with_window_style(style, dark_mode)
 }
 
 /// Makes `dark_mode`'s palette the one every view reads and projects it onto
 /// the component library's theme.
 fn apply_dark_mode(dark_mode: bool, cx: &mut App) {
-    let mut palette = palette_for(dark_mode, cx.global::<Appearance>().style);
+    let mut palette = palette_for(dark_mode);
     palette.selection = services::AppServices::preferences(cx)
         .selection_color
         .fill(dark_mode);

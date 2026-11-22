@@ -300,9 +300,9 @@ impl RenderOnce for TrackRow {
         let menu_position = self.menu_position;
         let rem_size = window.rem_size();
         let base = if self.current {
-            Fill::solid(palette.selection)
+            palette.selection
         } else {
-            palette.page_rest
+            palette.surface
         };
         let artists = self.artist_line(window);
         let album_text = ellipsized_line()
@@ -346,11 +346,11 @@ impl RenderOnce for TrackRow {
             .px_3()
             .rounded_lg()
             .justify_start()
-            .bg(if self.current {
-                rgb(palette.selection).into()
+            .bg(rgb(if self.current {
+                palette.selection
             } else {
-                palette.page_rest.color()
-            })
+                palette.surface
+            }))
             .when_some(self.on_hover, |row, handler| row.on_hover(handler))
             .child(
                 div()

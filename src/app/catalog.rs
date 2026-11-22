@@ -2044,7 +2044,7 @@ impl Render for SearchPage {
             .size_full()
             .min_h_0()
             .relative()
-            .bg(palette.page.color())
+            .bg(rgb(palette.surface))
             .text_color(rgb(palette.text))
             .child(
                 div()
@@ -2210,7 +2210,7 @@ impl Render for PlaylistPage {
         let playback_tracks = tracks;
 
         components::page("playlist-page")
-            .bg(palette.page.color())
+            .bg(rgb(palette.surface))
             .text_color(rgb(palette.text))
             .pt(DETAIL_HEADER_PADDING)
             .child(
@@ -2505,7 +2505,7 @@ impl Render for ArtistPage {
             .min_h_0()
             .flex()
             .flex_col()
-            .bg(palette.page.color())
+            .bg(rgb(palette.surface))
             .text_color(rgb(palette.text))
             .child(
                 div()
@@ -2690,7 +2690,7 @@ impl Render for AlbumPage {
         let playback_tracks = tracks;
 
         components::page("album-page")
-            .bg(palette.page.color())
+            .bg(rgb(palette.surface))
             .text_color(rgb(palette.text))
             .pt(DETAIL_HEADER_PADDING)
             .child(
