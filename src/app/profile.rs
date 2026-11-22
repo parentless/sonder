@@ -778,7 +778,7 @@ fn card(palette: CadencePalette) -> Div {
         .rounded_2xl()
         .px_5()
         .py(Rems(1.125))
-        .bg(rgb(palette.card))
+        .bg(palette.tile.color())
 }
 
 fn card_title(palette: CadencePalette, title: &'static str) -> Div {
@@ -921,7 +921,7 @@ fn personality_card(palette: CadencePalette, by_hour: &[u32; 24], plays: usize, 
         .bg(gpui_kit::linear_gradient(
             160.,
             gpui_kit::linear_color_stop(rgb(tint), 0.),
-            gpui_kit::linear_color_stop(rgb(palette.card), 0.8),
+            gpui_kit::linear_color_stop(palette.tile.color(), 0.8),
         ))
         .child(caption(palette, "You are a"))
         .child(
@@ -1033,7 +1033,7 @@ fn artists_card(
                 .px(px(ROW_INSET))
                 .py(px(7.))
                 .rounded(px(10.))
-                .hover(|row| row.bg(rgb(palette.card_hover)))
+                .hover(|row| row.bg(palette.tile_hover.color()))
                 .child(
                     div()
                         .w(px(18.))

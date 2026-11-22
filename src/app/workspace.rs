@@ -65,6 +65,7 @@ impl Workspace {
         let preferences = services::AppServices::preferences(cx);
         let focus_handle = cx.focus_handle();
         appearance::Appearance::attach(window, cx);
+        appearance::Appearance::apply_window_background(window, cx);
         let appearance_subscription = cx.observe_window_appearance(window, |this, window, cx| {
             this.update_system_appearance(window, cx);
         });
@@ -159,6 +160,9 @@ impl Workspace {
                 settings::SettingsEvent::OpenWhatsNew => this.open_whats_new(cx),
                 settings::SettingsEvent::SetTheme(preference) => {
                     this.set_theme_preference(*preference, window, cx)
+                }
+                settings::SettingsEvent::SetWindowStyle(style) => {
+                    this.set_window_style(*style, window, cx)
                 }
                 settings::SettingsEvent::SetZoom(zoom) => {
                     if let Err(error) = appearance::Appearance::set_ui_zoom(*zoom, cx) {
@@ -417,6 +421,21 @@ impl Workspace {
         cx.notify();
     }
 
+    fn set_window_style(
+        &mut self,
+        style: WindowStyle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        appearance::Appearance::set_window_style(style, window, cx);
+        if let Some(result) = services::AppServices::set_window_style(style, cx)
+            && let Some(error) = services::preference_save_error("window style", result)
+        {
+            self.last_error = Some(error);
+        }
+        cx.notify();
+    }
+
     /// The page for the route the listener is on.
     fn page(&self) -> AnyElement {
         match self.router.route() {
@@ -665,7 +684,7 @@ impl Render for Workspace {
             .relative()
             .flex()
             .flex_col()
-            .bg(rgb(palette.canvas))
+            .bg(palette.window.color())
             .font_family("Inter")
             .text_color(rgb(palette.text))
             .child(smooth_scroll::input(self.wheel_scroll.clone()))
@@ -683,7 +702,7 @@ impl Render for Workspace {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .bg(rgb(palette.surface))
+                            .bg(palette.page.color())
                             .when(!overlay_toolbar, |body| body.child(self.toolbar.clone()))
                             .child(
                                 div()

@@ -14,7 +14,7 @@ use crate::{
     spotify::{self, ClientIdSource, valid_client_id},
     storage::{
         AppPreferences, LyricsView, SelectionColor, Store, StreamingQuality, ThemePreference,
-        UiZoom,
+        UiZoom, WindowStyle,
     },
 };
 use gpui_kit::base::FocusableExt as _;
@@ -100,8 +100,7 @@ struct CadencePalette {
     surface_hover: u32,
     control: u32,
     control_hover: u32,
-    /// The fill of a card sitting on the page, and what it turns on hover.
-    card: u32,
+    /// What a card on the page turns on hover (the card fill itself is `tile`).
     card_hover: u32,
     selection: u32,
     text_primary: u32,
@@ -116,6 +115,39 @@ struct CadencePalette {
     link: u32,
     accent_hover: u32,
     on_accent: u32,
+    /// The big structural fills. Solid, they are the plain roles above; the
+    /// glass window styles give them an alpha so the desktop shows through.
+    window: Fill,
+    sidebar: Fill,
+    page: Fill,
+    player: Fill,
+    tile: Fill,
+    tile_hover: Fill,
+    /// What a sidebar row or a list row rests on. Transparent in glass, so rows
+    /// do not paint dark strips over the see-through surface.
+    sidebar_rest: Fill,
+    page_rest: Fill,
+}
+
+/// A colour with an alpha, for the surfaces that can be see-through.
+#[derive(Clone, Copy, PartialEq)]
+struct Fill {
+    rgb: u32,
+    alpha: f32,
+}
+
+impl Fill {
+    const fn solid(rgb: u32) -> Self {
+        Self { rgb, alpha: 1. }
+    }
+
+    const fn glass(rgb: u32, alpha: f32) -> Self {
+        Self { rgb, alpha }
+    }
+
+    fn color(self) -> gpui_kit::Hsla {
+        gpui_kit::Hsla::from(rgb(self.rgb)).opacity(self.alpha)
+    }
 }
 
 impl CadencePalette {
@@ -126,7 +158,6 @@ impl CadencePalette {
         surface_hover: 0xF8F7F4,
         control: 0xF6F4EF,
         control_hover: 0xEAE6DD,
-        card: 0xF6F4EF,
         card_hover: 0xECECF0,
         selection: 0xD8ECFC,
         text_primary: 0x171717,
@@ -146,6 +177,14 @@ impl CadencePalette {
         link: 0x0066CC,
         accent_hover: 0x121212,
         on_accent: 0xFFFFFF,
+        window: Fill::solid(0xFBFAF9),
+        sidebar: Fill::solid(0xFBFAF9),
+        page: Fill::solid(0xFFFFFF),
+        player: Fill::solid(0xFFFFFF),
+        tile: Fill::solid(0xF6F4EF),
+        tile_hover: Fill::solid(0xECECF0),
+        sidebar_rest: Fill::solid(0xFBFAF9),
+        page_rest: Fill::solid(0xFFFFFF),
     };
 
     const DARK: Self = Self {
@@ -155,7 +194,6 @@ impl CadencePalette {
         surface_hover: 0x242424,
         control: 0x303030,
         control_hover: 0x404040,
-        card: 0x242426,
         card_hover: 0x39393D,
         selection: 0x183B56,
         text_primary: 0xF5F3EF,
@@ -175,7 +213,63 @@ impl CadencePalette {
         link: 0x2997FF,
         accent_hover: 0xFFFFFF,
         on_accent: 0x171717,
+        window: Fill::solid(0x121212),
+        sidebar: Fill::solid(0x121212),
+        page: Fill::solid(0x1A1A1A),
+        player: Fill::solid(0x1A1A1A),
+        tile: Fill::solid(0x242426),
+        tile_hover: Fill::solid(0x39393D),
+        sidebar_rest: Fill::solid(0x121212),
+        page_rest: Fill::solid(0x1A1A1A),
     };
+
+    /// The palette for a window style. Solid leaves every fill opaque; the glass
+    /// styles drop the window fill and give the big surfaces an alpha, tinted
+    /// to the light or dark base. Small controls, menus and dialogs keep their
+    /// opaque roles so text on them never depends on the desktop behind.
+    fn with_window_style(mut self, style: WindowStyle, dark: bool) -> Self {
+        let clear = Fill::glass(0, 0.);
+        let (sidebar, page, player, tile, tile_hover) = match (style, dark) {
+            (WindowStyle::Solid, _) => return self,
+            (WindowStyle::Smoked, true) => (
+                Fill::glass(0x0E0E10, 0.82),
+                Fill::glass(0x1A1A1C, 0.78),
+                Fill::glass(0x121214, 0.86),
+                Fill::glass(0xFFFFFF, 0.055),
+                Fill::glass(0xFFFFFF, 0.09),
+            ),
+            (WindowStyle::Clear, true) => (
+                Fill::glass(0x0A0C14, 0.42),
+                Fill::glass(0x0C0E16, 0.30),
+                Fill::glass(0x0A0C14, 0.46),
+                Fill::glass(0xFFFFFF, 0.10),
+                Fill::glass(0xFFFFFF, 0.16),
+            ),
+            (WindowStyle::Smoked, false) => (
+                Fill::glass(0xF3F1EE, 0.80),
+                Fill::glass(0xFFFFFF, 0.72),
+                Fill::glass(0xF7F5F2, 0.84),
+                Fill::glass(0x000000, 0.04),
+                Fill::glass(0x000000, 0.07),
+            ),
+            (WindowStyle::Clear, false) => (
+                Fill::glass(0xFFFFFF, 0.46),
+                Fill::glass(0xFFFFFF, 0.34),
+                Fill::glass(0xFFFFFF, 0.52),
+                Fill::glass(0xFFFFFF, 0.40),
+                Fill::glass(0xFFFFFF, 0.60),
+            ),
+        };
+        self.window = clear;
+        self.sidebar = sidebar;
+        self.page = page;
+        self.player = player;
+        self.tile = tile;
+        self.tile_hover = tile_hover;
+        self.sidebar_rest = Fill::glass(0, 0.);
+        self.page_rest = Fill::glass(0, 0.);
+        self
+    }
 }
 
 fn is_dark_appearance(appearance: WindowAppearance) -> bool {
@@ -589,5 +683,73 @@ mod tests {
 
         let (width, left, pad) = sidebar_fill_geometry(NAV_ROW_PAD, NAV_GLYPH_WIDTH, row_width, 1.);
         assert_eq!((width, left, pad), (row_width, Rems::ZERO, NAV_ROW_PAD));
+    }
+}
+
+#[cfg(test)]
+mod window_style_tests {
+    use super::*;
+
+    #[test]
+    fn solid_leaves_every_fill_opaque_and_unchanged() {
+        for dark in [false, true] {
+            let base = if dark {
+                CadencePalette::DARK
+            } else {
+                CadencePalette::LIGHT
+            };
+            let solid = base.with_window_style(WindowStyle::Solid, dark);
+            for fill in [
+                solid.window,
+                solid.sidebar,
+                solid.page,
+                solid.player,
+                solid.tile,
+                solid.tile_hover,
+                solid.sidebar_rest,
+                solid.page_rest,
+            ] {
+                assert_eq!(fill.alpha, 1.);
+            }
+            assert!(solid.page == base.page && solid.window == base.window);
+        }
+    }
+
+    #[test]
+    fn glass_clears_the_window_and_lets_surfaces_show_through() {
+        for style in [WindowStyle::Smoked, WindowStyle::Clear] {
+            for dark in [false, true] {
+                let base = if dark {
+                    CadencePalette::DARK
+                } else {
+                    CadencePalette::LIGHT
+                };
+                let glass = base.with_window_style(style, dark);
+                assert_eq!(glass.window.alpha, 0.);
+                assert_eq!(glass.sidebar_rest.alpha, 0.);
+                assert_eq!(glass.page_rest.alpha, 0.);
+                for fill in [glass.sidebar, glass.page, glass.player] {
+                    assert!(fill.alpha > 0. && fill.alpha < 1.);
+                }
+                // Text colours never depend on the desktop behind.
+                assert_eq!(glass.text_primary, base.text_primary);
+            }
+        }
+    }
+
+    #[test]
+    fn clear_is_more_see_through_than_smoked() {
+        for dark in [false, true] {
+            let base = if dark {
+                CadencePalette::DARK
+            } else {
+                CadencePalette::LIGHT
+            };
+            let smoked = base.with_window_style(WindowStyle::Smoked, dark);
+            let clear = base.with_window_style(WindowStyle::Clear, dark);
+            assert!(clear.page.alpha < smoked.page.alpha);
+            assert!(clear.sidebar.alpha < smoked.sidebar.alpha);
+            assert!(clear.player.alpha < smoked.player.alpha);
+        }
     }
 }

@@ -248,7 +248,7 @@ impl PlayerBar {
             .justify_between()
             .gap_6()
             .px_6()
-            .bg(rgb(palette.surface))
+            .bg(palette.player.color())
             .border_t_1()
             .border_color(rgb(palette.border))
             .child(

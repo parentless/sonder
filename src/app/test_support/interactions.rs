@@ -214,6 +214,24 @@ impl Fixture {
     }
 
     /// Scrolls Settings to its last section, where the lyrics switch is.
+    /// Wheels the settings page by `dy` logical pixels (negative scrolls down).
+    fn scroll_settings_by(&mut self, dy: f32) {
+        self.update(|window, cx| {
+            let position = window.find("settings-page").bounds().center();
+            window.dispatch_event(
+                gpui_kit::ScrollWheelEvent {
+                    position,
+                    delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(dy))),
+                    modifiers: Default::default(),
+                    touch_phase: gpui_kit::TouchPhase::Moved,
+                }
+                .to_platform_input(),
+                cx,
+            );
+        });
+        self.cx.run_until_parked();
+    }
+
     fn scroll_settings_to_the_end(&mut self) {
         let workspace = self.workspace.clone().expect("workspace fixture");
         self.update(|_, cx| {
@@ -629,6 +647,7 @@ fn client_id_validation_keeps_focus_and_only_submits_valid_input() {
 #[test]
 fn autoplay_switch_updates_preferences_and_rendered_state() {
     let mut fixture = Fixture::new(true);
+    fixture.scroll_settings_by(-200.);
     fixture.update(|window, cx| {
         assert_eq!(window.find("settings-autoplay").checked(), Some(true));
         window.click("settings-autoplay", cx);
@@ -680,6 +699,7 @@ fn streaming_quality_starts_very_high_and_follows_the_choice() {
             crate::storage::StreamingQuality::VeryHigh
         );
     });
+    fixture.scroll_settings_by(-200.);
     fixture.update(|window, cx| window.click(("settings-streaming-quality", 160usize), cx));
     fixture.update(|_, cx| {
         assert_eq!(
@@ -2578,6 +2598,31 @@ fn playlist_scroll_jumps_directly_to_the_final_viewport_after_debounce() {
         panic!()
     };
     assert_eq!((tracks.len(), index, next_offset), (10, 9, None));
+    fixture.no_commands();
+}
+
+#[test]
+fn window_style_setting_applies_immediately_and_persists() {
+    use crate::storage::WindowStyle;
+    let mut fixture = Fixture::new(true);
+    fixture.update(|_, cx| {
+        assert_eq!(appearance::Appearance::window_style(cx), WindowStyle::Solid);
+        assert_eq!(appearance::Appearance::palette(cx).page.alpha, 1.);
+    });
+    fixture.scroll_settings_by(-100.);
+    fixture.update(|window, cx| window.click("settings-window-style-clear", cx));
+    fixture.update(|_, cx| {
+        assert_eq!(appearance::Appearance::window_style(cx), WindowStyle::Clear);
+        assert_eq!(
+            services::AppServices::preferences(cx).window_style,
+            WindowStyle::Clear
+        );
+        assert!(appearance::Appearance::palette(cx).page.alpha < 1.);
+    });
+    fixture.update(|window, cx| window.click("settings-window-style-solid", cx));
+    fixture.update(|_, cx| {
+        assert_eq!(appearance::Appearance::palette(cx).page.alpha, 1.);
+    });
     fixture.no_commands();
 }
 
