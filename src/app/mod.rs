@@ -117,7 +117,7 @@ struct CadencePalette {
     accent_hover: u32,
     on_accent: u32,
     /// The big structural fills. Solid, they are the plain roles above; the
-    /// glass window styles give them an alpha so the desktop shows through.
+    /// see-through designs give them an alpha so the desktop shows through.
     window: Fill,
     sidebar: Fill,
     page: Fill,

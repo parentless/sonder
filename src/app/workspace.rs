@@ -425,7 +425,7 @@ impl Workspace {
     fn set_design(&mut self, style: Design, window: &mut Window, cx: &mut Context<Self>) {
         appearance::Appearance::set_design(style, window, cx);
         if let Some(result) = services::AppServices::set_design(style, cx)
-            && let Some(error) = services::preference_save_error("window style", result)
+            && let Some(error) = services::preference_save_error("design", result)
         {
             self.last_error = Some(error);
         }

@@ -44,6 +44,19 @@ const MONTHS: &[Month] = &[
                 date: "Nov 21, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.67",
+                        notes: &[
+                            Note(
+                                New,
+                                "Design in Settings: Refined tightens every detail, Ambient docks Now Playing and glows with the cover, Crate swaps in an icon dock and a floating player. Classic, the default, is exactly as before.",
+                            ),
+                            Note(
+                                Better,
+                                "The Window style setting from 0.8.66 is gone; Design replaces it.",
+                            ),
+                        ],
+                    },
+                    Release {
                         version: "0.8.66",
                         notes: &[Note(
                             New,
