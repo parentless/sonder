@@ -32,6 +32,8 @@ pub(super) struct Workspace {
     pub(super) sidebar: Entity<sidebar::Sidebar>,
     pub(super) toolbar: Entity<chrome::Toolbar>,
     pub(super) player_bar: Entity<player_bar::PlayerBar>,
+    /// Mounted only while the Ambient design is selected.
+    ambient_glow: Entity<ambient::AmbientGlow>,
     pub(super) queue_drawer: Entity<player_bar::QueueDrawer>,
     pub(super) lyrics: Entity<lyrics_view::LyricsPane>,
     pub(super) focus_handle: FocusHandle,
@@ -302,6 +304,7 @@ impl Workspace {
                 }
             },
         ));
+        let ambient_glow = cx.new(|cx| ambient::AmbientGlow::new(&player, cx));
         let player_bar = cx.new(player_bar::PlayerBar::new);
         subscriptions.push(cx.subscribe(&player_bar, Workspace::handle_page_event));
         subscriptions.push(cx.subscribe(
@@ -387,6 +390,7 @@ impl Workspace {
             sidebar,
             toolbar,
             player_bar,
+            ambient_glow,
             queue_drawer,
             lyrics,
             focus_handle,
@@ -680,6 +684,7 @@ impl Render for Workspace {
             .bg(palette.window.color())
             .font_family("Inter")
             .text_color(rgb(palette.text))
+            .when(ambient, |root| root.child(self.ambient_glow.clone()))
             .child(smooth_scroll::input(self.wheel_scroll.clone()))
             .child(
                 div()

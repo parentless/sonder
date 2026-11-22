@@ -487,6 +487,55 @@ impl PlayerBar {
         } else {
             CadenceIcon::Speaker
         };
+        let up_next: Vec<AnyElement> = {
+            let cache = self.metadata.read(cx).image_cache.clone();
+            self.player
+                .read(cx)
+                .context()
+                .iter()
+                .skip(1)
+                .take(3)
+                .enumerate()
+                .map(|(index, track)| {
+                    div()
+                        .id(("up-next", index))
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .child(components::artwork(
+                            palette,
+                            &cache,
+                            track.artwork_url.as_deref(),
+                            tokens::ArtworkSize {
+                                size: Rems(2.5),
+                                radius: Rems(0.5),
+                            },
+                            CadenceIcon::MusicNote,
+                        ))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_sm()
+                                        .text_color(rgb(palette.text_primary))
+                                        .child(track.title.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_xs()
+                                        .text_color(rgb(palette.text_muted))
+                                        .child(track.artist.clone()),
+                                ),
+                        )
+                        .into_any_element()
+                })
+                .collect()
+        };
         let inner = AMBIENT_PANEL_WIDTH - Rems(3.);
         let slider = inner - PROGRESS_TIME_WIDTH * 2. - PROGRESS_GAP * 2.;
         div()
@@ -494,6 +543,7 @@ impl PlayerBar {
             .w(AMBIENT_PANEL_WIDTH)
             .h_full()
             .flex_none()
+            .overflow_hidden()
             .flex()
             .flex_col()
             .gap_5()
@@ -589,6 +639,23 @@ impl PlayerBar {
                             })),
                     ),
             )
+            .when(!up_next.is_empty(), |panel| {
+                panel.child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .text_color(rgb(palette.text_muted))
+                                .child("Up next"),
+                        )
+                        .children(up_next),
+                )
+            })
     }
 }
 

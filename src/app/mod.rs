@@ -40,6 +40,7 @@ use icons::CadenceIcon;
 use library_pages::LibrarySection;
 use workspace::Workspace;
 
+mod ambient;
 mod disk_cache;
 mod home;
 mod http;
