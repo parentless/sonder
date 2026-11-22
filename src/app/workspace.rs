@@ -628,6 +628,7 @@ impl Render for Workspace {
             toolbar.show(route, back_target, error, cx)
         });
 
+        let ambient = palette.design == Design::Ambient;
         let overlay_toolbar = route == Route::Artist;
         // Lyrics show when opened, in the chosen place.
         let lyrics_preferences = services::AppServices::preferences(cx);
@@ -717,6 +718,7 @@ impl Render for Workspace {
                                 body.child(self.lyrics.clone())
                             }),
                     )
+                    .when(ambient, |row| row.child(self.player_bar.clone()))
                     .when(self.player_bar.read(cx).queue_open(), |root| {
                         root.child(self.queue_drawer.clone())
                     })
@@ -727,7 +729,7 @@ impl Render for Workspace {
             .when(lyrics_view == Some(LyricsView::Strip), |root| {
                 root.child(self.lyrics.clone())
             })
-            .child(self.player_bar.clone())
+            .when(!ambient, |root| root.child(self.player_bar.clone()))
             .when_some(self.intro.clone(), |root, intro| root.child(intro))
             .when_some(scrim, |root, scrim| root.child(deferred(scrim)))
             .when_some(action_notice, |root, notice| root.child(notice))

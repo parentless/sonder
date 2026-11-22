@@ -292,6 +292,7 @@ impl CadencePalette {
             }
             (Design::Ambient | Design::Crate, false) => {
                 let none = Fill::glass(0, 0.);
+                self.window = Fill::solid(self.surface);
                 self.sidebar = none;
                 self.page = none;
                 self.player = none;

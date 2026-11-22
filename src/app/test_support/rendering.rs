@@ -82,6 +82,18 @@ enum Scene {
 }
 
 fn scenes() -> Vec<(&'static str, Scene)> {
+    let all = all_scenes();
+    // A developer can render a few scenes: CADENCE_SCENES=home,settings.
+    if let Ok(only) = std::env::var("CADENCE_SCENES") {
+        return all
+            .into_iter()
+            .filter(|(name, _)| only.split(',').any(|wanted| wanted == *name))
+            .collect();
+    }
+    all
+}
+
+fn all_scenes() -> Vec<(&'static str, Scene)> {
     vec![
         ("artist", Scene::Artist),
         ("artist-popular-more", Scene::ArtistManyPopular),
