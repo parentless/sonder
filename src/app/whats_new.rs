@@ -44,6 +44,13 @@ const MONTHS: &[Month] = &[
                 date: "Nov 21, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.68",
+                        notes: &[Note(
+                            Fixed,
+                            "Ambient's cover glow is softer and fades out before it reaches the page, so tiles and text stay clean.",
+                        )],
+                    },
+                    Release {
                         version: "0.8.67",
                         notes: &[
                             Note(

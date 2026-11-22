@@ -47,22 +47,37 @@ impl Render for AmbientGlow {
             return base;
         };
         let cache = self.image_cache.clone();
+        // The glow sits low on the left and fades out to the right and the
+        // top, so no hard edge of the cover reaches the page or its text.
         let glow = img(move |window: &mut Window, cx: &mut App| {
             cache.update(cx, |cache, cx| cache.artist_backdrop(&url, window, cx))
         })
         .absolute()
-        .left(gpui_kit::relative(-0.15))
-        .bottom(gpui_kit::relative(-0.25))
-        .w(gpui_kit::relative(0.9))
-        .h(gpui_kit::relative(1.))
+        .inset_0()
+        .size_full()
         .object_fit(gpui_kit::ObjectFit::Cover)
-        .opacity(0.5);
-        base.child(glow)
-            // Keeps text contrast whatever the cover looks like.
-            .child(div().absolute().inset_0().bg(gpui_kit::linear_gradient(
-                180.,
-                gpui_kit::linear_color_stop(rgb(palette.canvas).opacity(0.92), 0.),
-                gpui_kit::linear_color_stop(rgb(palette.canvas).opacity(0.35), 1.),
-            )))
+        .opacity(0.42);
+        let canvas = rgb(palette.canvas);
+        base.child(
+            div()
+                .absolute()
+                .left_0()
+                .bottom_0()
+                .w(gpui_kit::relative(0.7))
+                .h(gpui_kit::relative(0.8))
+                .overflow_hidden()
+                .child(glow)
+                // Fade across, then up: the cover's own border never shows.
+                .child(div().absolute().inset_0().bg(gpui_kit::linear_gradient(
+                    90.,
+                    gpui_kit::linear_color_stop(canvas.opacity(0.), 0.),
+                    gpui_kit::linear_color_stop(canvas, 0.85),
+                )))
+                .child(div().absolute().inset_0().bg(gpui_kit::linear_gradient(
+                    180.,
+                    gpui_kit::linear_color_stop(canvas, 0.),
+                    gpui_kit::linear_color_stop(canvas.opacity(0.), 0.7),
+                ))),
+        )
     }
 }
