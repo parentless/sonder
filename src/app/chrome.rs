@@ -439,7 +439,7 @@ impl Toolbar {
             .gap(px(12.))
             .rounded(px(9.))
             .justify_start()
-            .when(selected, |row| row.bg(rgb(palette.control)))
+            .when(selected, |row| row.bg(rgb(palette.control_hover)))
             .hover(|style| style.bg(rgb(palette.surface_hover)))
             .child(art)
             .child(
@@ -732,7 +732,7 @@ impl Toolbar {
                     .gap(px(10.))
                     .rounded(px(9.))
                     .justify_start()
-                    .when(selected, |row| row.bg(rgb(palette.control)))
+                    .when(selected, |row| row.bg(rgb(palette.control_hover)))
                     .hover(|style| style.bg(rgb(palette.surface_hover)))
                     .child(components::icon(
                         CadenceIcon::Search,
