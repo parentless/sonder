@@ -387,8 +387,12 @@ impl Sidebar {
             expanded_width
         };
         self.transition_from = current_width;
-        self.transition_duration =
-            sidebar_transition_duration(current_width, target_width, expanded_width);
+        // Reduced motion snaps to the new width.
+        self.transition_duration = if cx.reduce_motion() {
+            Duration::from_millis(1)
+        } else {
+            sidebar_transition_duration(current_width, target_width, expanded_width)
+        };
         self.collapsed = collapsed;
         self.transition_generation = self.transition_generation.wrapping_add(1);
         if let Some(result) = services::AppServices::set_sidebar_collapsed(collapsed, cx)
@@ -679,8 +683,8 @@ impl Sidebar {
         let start_width = self.transition_from;
         let animation_id = self.transition_generation as usize;
         let animation_duration = self.transition_duration;
-        // Reflow the page once to its final width. Only local rail labels and
-        // fills animate, rather than repeatedly measuring the whole content grid.
+        // `rendered_width` is the final width. The panel itself slides to it
+        // below, and the page glides along as it gives up or takes the space.
         self.visual_width = target_width;
         let width_range = expanded_width - COLLAPSED_SIDEBAR_WIDTH;
         let start_progress =
@@ -1008,7 +1012,6 @@ impl Sidebar {
             }));
 
         div()
-            .w(target_width)
             .h_full()
             .flex_none()
             .overflow_hidden()
@@ -1074,6 +1077,11 @@ impl Sidebar {
                     .when(!show_pinned, |panel| panel.child(div().flex_1()))
                     .children(self.update_card(palette, collapsed, !cx.reduce_motion()))
                     .child(whats_new_footer),
+            )
+            .with_animation(
+                ("sidebar-slide", animation_id),
+                row_animation,
+                move |panel, delta| panel.w(start_width + (target_width - start_width) * delta),
             )
     }
 }
