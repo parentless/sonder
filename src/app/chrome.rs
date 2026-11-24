@@ -137,6 +137,7 @@ pub(super) struct Toolbar {
     /// The workspace's standing failure, shown under the account name.
     error: Option<SharedString>,
     _search_subscription: Subscription,
+    _library_events: Subscription,
 }
 
 impl EventEmitter<ToolbarEvent> for Toolbar {}
@@ -165,6 +166,17 @@ impl Toolbar {
                 _ => {}
             },
         );
+        let library = services::AppServices::library(cx);
+        // A like made from the dropdown fills its heart once Spotify agrees.
+        let library_events = cx.observe(&library, |this: &mut Toolbar, _, cx| {
+            if this
+                .live
+                .iter()
+                .any(|found| matches!(found, LiveResult::Track(_)))
+            {
+                cx.notify();
+            }
+        });
         Self {
             search_input,
             suggestions: Vec::new(),
@@ -177,7 +189,7 @@ impl Toolbar {
             backend,
             suggestion_task: None,
             search_bounds: Rc::default(),
-            library: services::AppServices::library(cx),
+            library,
             artist_header: None,
             menu_open: false,
             session: services::AppServices::session(cx),
@@ -186,6 +198,7 @@ impl Toolbar {
             back_target: None,
             error: None,
             _search_subscription: search_subscription,
+            _library_events: library_events,
         }
     }
 
@@ -225,7 +238,8 @@ impl Toolbar {
                 artwork_url: None,
                 track_count: None,
             }],
-            tracks: Vec::new(),
+            // Not in Liked Songs, so its heart shows empty.
+            tracks: vec![test_support::track(100)],
         });
         self.search_row = true;
         self.suggestion_selection = Some(1);
@@ -415,6 +429,7 @@ impl Toolbar {
         title: gpui_kit::AnyElement,
         detail: SharedString,
         tag: &'static str,
+        like: Option<gpui_kit::AnyElement>,
         selected: bool,
     ) -> Stateful<Div> {
         components::button(palette, id)
@@ -424,7 +439,7 @@ impl Toolbar {
             .gap(px(12.))
             .rounded(px(9.))
             .justify_start()
-            .when(selected, |row| row.bg(rgb(palette.selection)))
+            .when(selected, |row| row.bg(rgb(palette.control)))
             .hover(|style| style.bg(rgb(palette.surface_hover)))
             .child(art)
             .child(
@@ -448,14 +463,70 @@ impl Toolbar {
                             .child(detail),
                     ),
             )
-            .child(
-                div()
+            .child(match like {
+                // A heart already says "Song", so it takes the label's place.
+                Some(like) => like,
+                None => div()
                     .flex_none()
                     .text_size(px(11.5))
                     .text_color(rgb(palette.text_muted))
                     .opacity(0.8)
-                    .child(tag),
+                    .child(tag)
+                    .into_any_element(),
+            })
+    }
+
+    /// The heart on a Spotify song in the dropdown. Songs already in the
+    /// library are not offered one: they sit under "In library" and are
+    /// liked or not by the page they came from.
+    fn like_button(
+        &self,
+        palette: CadencePalette,
+        index: usize,
+        track: &model::Track,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let library = self.library.read(cx);
+        let liked = library.is_spotify_liked(track);
+        let busy = library.spotify_like_busy();
+        let label = if liked {
+            "Remove from Liked Songs"
+        } else {
+            "Add to Liked Songs"
+        };
+        let track = track.clone();
+        gpui_kit::base::Button::new(("live-like", index))
+            .cursor_pointer()
+            .accessibility_label(label)
+            .tab_stop(false)
+            .size_8()
+            .flex_none()
+            .rounded_lg()
+            .when(busy, |button| button.opacity(0.6))
+            .hover(|style| style.bg(rgb(palette.control)))
+            .active(|style| style.bg(rgb(palette.control_hover)))
+            .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
+                // Keep the typing cursor in the field while the heart is pressed.
+                window.prevent_default();
+            })
+            .child(if liked {
+                components::icon(CadenceIcon::HeartFilled, tokens::LIKE_ICON, palette.liked)
+            } else {
+                components::icon(CadenceIcon::Heart, tokens::LIKE_ICON, palette.text_muted)
+            })
+            .on_click(
+                cx.listener(move |this, event: &gpui_kit::ClickEvent, _, cx| {
+                    // Liking is not opening: the row behind must not play the song.
+                    cx.stop_propagation();
+                    if event.is_keyboard() || event.click_count() == 1 {
+                        let liked = this.library.read(cx).is_spotify_liked(&track);
+                        this.library.update(cx, |library, cx| {
+                            library.set_spotify_liked(track.clone(), !liked, cx)
+                        });
+                    }
+                }),
             )
+            .into_any_element()
     }
 
     fn suggestion_heading(palette: CadencePalette, label: &'static str, count: usize) -> Div {
@@ -565,6 +636,7 @@ impl Toolbar {
                     highlighted(&track.title, &query, palette),
                     track.artist.clone(),
                     "In library",
+                    None,
                     self.suggestion_selection == Some(index),
                 )
                 .test_support()
@@ -581,6 +653,10 @@ impl Toolbar {
             for (index, found) in self.live.iter().enumerate() {
                 let parts = found.parts();
                 let selected = self.suggestion_selection == Some(self.suggestions.len() + index);
+                let like = match found {
+                    LiveResult::Track(track) => Some(self.like_button(palette, index, track, cx)),
+                    _ => None,
+                };
                 group = group.child(
                     self.suggestion_row(
                         palette,
@@ -589,6 +665,7 @@ impl Toolbar {
                         highlighted(&parts.title, &query, palette),
                         parts.detail,
                         parts.tag,
+                        like,
                         selected,
                     )
                     .test_support()
@@ -655,7 +732,7 @@ impl Toolbar {
                     .gap(px(10.))
                     .rounded(px(9.))
                     .justify_start()
-                    .when(selected, |row| row.bg(rgb(palette.selection)))
+                    .when(selected, |row| row.bg(rgb(palette.control)))
                     .hover(|style| style.bg(rgb(palette.surface_hover)))
                     .child(components::icon(
                         CadenceIcon::Search,

@@ -419,6 +419,49 @@ fn the_dropdown_asks_spotify_after_a_pause_and_opens_a_result() {
 }
 
 #[test]
+fn only_spotify_songs_in_the_dropdown_get_a_heart_that_likes_without_playing() {
+    let mut fixture = cached_search_fixture();
+    fixture.update(|window, cx| window.input("Song", cx));
+    fixture.cx.advance_clock(Duration::from_millis(130));
+    fixture.wait_for(|window, _| window.try_find("cached-search-suggestions").is_some());
+    fixture.no_commands();
+    fixture.cx.advance_clock(Duration::from_millis(500));
+    fixture.cx.run_until_parked();
+    let BackendCommand::SearchCatalog { respond, .. } =
+        fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected one live search")
+    };
+    respond
+        .send(Ok(model::CatalogSearchResults {
+            artists: vec![],
+            albums: vec![],
+            tracks: vec![track(100)],
+        }))
+        .unwrap();
+    fixture.cx.run_until_parked();
+    fixture.update(|window, _| {
+        // Library songs keep their "In library" label; the Spotify song gets a heart.
+        assert!(window.try_find(("cached-search-track", 0usize)).is_some());
+        assert!(window.try_find(("live-search", 0usize)).is_some());
+        assert!(window.try_find(("live-like", 0usize)).is_some());
+        assert!(window.try_find(("live-like", 1usize)).is_none());
+    });
+    // The heart likes the song. The row behind it must not start playback.
+    fixture.update(|window, cx| window.click(("live-like", 0usize), cx));
+    let BackendCommand::SetSpotifyLiked {
+        track: sent, liked, ..
+    } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a Spotify like")
+    };
+    assert_eq!(sent, track(100));
+    assert!(liked);
+    fixture.no_commands();
+    fixture.update(|window, _| assert!(window.try_find("cached-search-suggestions").is_some()));
+}
+
+#[test]
 fn the_dropdown_does_not_ask_spotify_for_a_short_query() {
     let mut fixture = cached_search_fixture();
     fixture.update(|window, cx| window.input("So", cx));
@@ -2190,7 +2233,7 @@ fn artist_tracks_scroll_into_virtualized_discography_and_albums_still_open() {
         let portrait = window.find("artist-portrait").bounds();
         assert_eq!(
             portrait.size.width,
-            gpui_kit::Rems(10.).to_pixels(window.rem_size())
+            gpui_kit::Rems(12.).to_pixels(window.rem_size())
         );
         window.dispatch_event(
             gpui_kit::ScrollWheelEvent {
@@ -2284,7 +2327,7 @@ fn short_artist_pages_fully_dock_and_back_works_after_switching_artists() {
         fixture.update(|window, _| {
             assert_eq!(
                 window.find("artist-portrait").bounds().size.width,
-                gpui_kit::Rems(10.).to_pixels(window.rem_size()),
+                gpui_kit::Rems(12.).to_pixels(window.rem_size()),
                 "new artist resets the header"
             );
         });
@@ -6176,4 +6219,64 @@ fn only_a_few_presets_can_be_kept() {
     }
     let saved = fixture.update(|_, cx| services::AppServices::equalizer_presets(cx));
     assert_eq!(saved.len(), crate::equalizer::MAX_CUSTOM_PRESETS);
+}
+
+#[test]
+fn the_player_bar_heart_likes_and_unlikes_the_playing_spotify_song() {
+    let mut fixture = Fixture::new(false);
+    fixture.play(track(1));
+    fixture.no_commands();
+    fixture.update(|window, _| {
+        assert!(window.find("player-like").bounds().size.width > px(0.));
+    });
+    // Song 1 is already liked, so the heart removes it.
+    fixture.update(|window, cx| window.click("player-like", cx));
+    let BackendCommand::SetSpotifyLiked {
+        track: sent,
+        liked,
+        respond,
+    } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("Spotify write")
+    };
+    assert_eq!(sent, track(1));
+    assert!(!liked);
+    // Pending: a second click is ignored until Spotify answers.
+    fixture.update(|window, cx| window.click("player-like", cx));
+    fixture.no_commands();
+    respond.send(Ok(())).unwrap();
+    fixture.update(|_, _| {});
+    fixture.update(|_, cx| {
+        assert!(
+            !services::AppServices::library(cx)
+                .read(cx)
+                .is_spotify_liked(&track(1))
+        );
+    });
+    // Now it likes the song again.
+    fixture.update(|window, cx| window.click("player-like", cx));
+    let BackendCommand::SetSpotifyLiked { liked, respond, .. } =
+        fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("Spotify write")
+    };
+    assert!(liked);
+    respond.send(Ok(())).unwrap();
+    fixture.update(|_, _| {});
+    fixture.update(|_, cx| {
+        assert!(
+            services::AppServices::library(cx)
+                .read(cx)
+                .is_spotify_liked(&track(1))
+        );
+    });
+}
+
+#[test]
+fn local_songs_have_no_player_bar_heart() {
+    let mut fixture = Fixture::new(false);
+    fixture.play(local_track("Local song"));
+    fixture.update(|window, _| {
+        assert!(window.try_find("player-like").is_none());
+    });
 }

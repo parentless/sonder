@@ -1283,8 +1283,10 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
     ) {
         cx.update_window(handle.into(), |_, window, _| {
             let bounds = window.find("artist-portrait").bounds();
-            assert_eq!(bounds.size.width, Rems(10.).to_pixels(window.rem_size()));
-            assert_eq!(bounds.size.height, Rems(10.).to_pixels(window.rem_size()));
+            // Fractional zoom levels round layout to half pixels.
+            let expected = Rems(12.).to_pixels(window.rem_size());
+            assert!((bounds.size.width - expected).abs() <= px(1.));
+            assert!((bounds.size.height - expected).abs() <= px(1.));
             let popular = window.find("artist-popular-heading").bounds();
             let last_track = window.find(("spotify-track", 2usize)).bounds();
             assert!(popular.origin.y < last_track.origin.y);

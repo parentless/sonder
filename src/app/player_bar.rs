@@ -80,7 +80,16 @@ impl PlayerBar {
                 &image_cache,
                 |_, _, _: &image_cache::ArtworkInvalidated, cx| cx.notify(),
             );
+            let library = services::AppServices::library(cx);
+            let library_events = cx.observe(&library, |this: &mut PlayerMetadata, _, cx| {
+                if this.heart_state != this.read_heart(cx) {
+                    cx.notify();
+                }
+            });
             PlayerMetadata {
+                library,
+                heart_state: (false, false),
+                _library_events: library_events,
                 track: None,
                 #[cfg(test)]
                 renders: 0,
@@ -457,6 +466,11 @@ impl Render for PlayerBar {
 /// controls. A clock tick retains one Arc instead of copying Track/artist Vecs.
 struct PlayerMetadata {
     _artwork_events: Subscription,
+    library: Entity<library::Library>,
+    /// What the heart last showed: (liked, busy). The library notifies for
+    /// many reasons, so only a change here repaints the song info.
+    heart_state: (bool, bool),
+    _library_events: Subscription,
     #[cfg(test)]
     renders: usize,
     track: Option<Arc<model::Track>>,
@@ -464,6 +478,67 @@ struct PlayerMetadata {
 }
 impl EventEmitter<page::PageEvent> for PlayerMetadata {}
 impl PlayerMetadata {
+    /// Whether the playing song is liked, and whether a like change is in flight.
+    fn read_heart(&self, cx: &App) -> (bool, bool) {
+        let library = self.library.read(cx);
+        let liked = self
+            .track
+            .as_deref()
+            .is_some_and(|track| library.is_spotify_liked(track));
+        (liked, library.spotify_like_busy())
+    }
+
+    /// The heart beside the song info. Only Spotify songs can be liked.
+    fn like_button(
+        &mut self,
+        palette: CadencePalette,
+        track: &model::Track,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if track.provider != model::Provider::Spotify {
+            return None;
+        }
+        let (liked, busy) = self.read_heart(cx);
+        self.heart_state = (liked, busy);
+        let label = if liked {
+            "Remove from Liked Songs"
+        } else {
+            "Add to Liked Songs"
+        };
+        let track = track.clone();
+        Some(
+            gpui_kit::base::Button::new("player-like")
+                .key_context(CONTROL_KEY_CONTEXT)
+                .cursor_pointer()
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
+                    // Like the other player buttons, a click leaves Space to playback.
+                    window.prevent_default();
+                })
+                .accessibility_label(label)
+                .size_8()
+                .flex_none()
+                .rounded_lg()
+                .line_height(window.text_style().line_height)
+                .when(busy, |button| button.opacity(0.6))
+                .hover(|style| style.bg(rgb(palette.control)))
+                .active(|style| style.bg(rgb(palette.control_hover)))
+                .focus_visible(|style| style.border_2().border_color(rgb(palette.focus_ring)))
+                .child(if liked {
+                    components::icon(CadenceIcon::HeartFilled, tokens::LIKE_ICON, palette.liked)
+                } else {
+                    components::icon(CadenceIcon::Heart, tokens::LIKE_ICON, palette.text_muted)
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let liked = this.read_heart(cx).0;
+                    this.library.update(cx, |library, cx| {
+                        library.set_spotify_liked(track.clone(), !liked, cx)
+                    });
+                }))
+                .into_any_element(),
+        )
+    }
+
     fn navigate_on_click(
         event: page::PageEvent,
         cx: &mut Context<Self>,
@@ -594,6 +669,9 @@ impl Render for PlayerMetadata {
         }
         let palette = appearance::Appearance::palette(cx);
         let track = self.track.clone();
+        let heart = track
+            .as_deref()
+            .and_then(|track| self.like_button(palette, track, window, cx));
         div()
             .w_full()
             .min_w_0()
@@ -602,12 +680,14 @@ impl Render for PlayerMetadata {
             .gap_3()
             .child(self.artwork_link(palette, track.as_deref(), cx))
             .child(
+                // Sized to its text, shrinking (and truncating) only when the
+                // bar is narrow, so the heart sits right after the song info.
                 div()
-                    .flex_1()
                     .min_w_0()
                     .child(Self::title_line(palette, track.as_deref(), window, cx))
                     .child(Self::credits_line(palette, track.as_deref(), window, cx)),
             )
+            .children(heart)
     }
 }
 

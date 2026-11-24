@@ -2410,7 +2410,7 @@ impl ArtistPage {
             .child(
                 div()
                     .absolute()
-                    .left(Rems(13.5))
+                    .left(artist_header::NAME_LEFT)
                     .bottom(DETAIL_HEADER_PADDING)
                     .child(components::page_detail(palette, detail)),
             );

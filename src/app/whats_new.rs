@@ -41,6 +41,22 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 24, 2026",
+                releases: &[Release {
+                    version: "0.8.71",
+                    notes: &[
+                        Note(
+                            New,
+                            "A heart beside the playing song to like or unlike it, and one on Spotify songs in the search dropdown.",
+                        ),
+                        Note(
+                            Better,
+                            "The highlighted search row is neutral grey instead of blue, and artist photos are larger.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
                 date: "Nov 22, 2026",
                 releases: &[Release {
                     version: "0.8.70",

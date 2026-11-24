@@ -18,6 +18,16 @@ pub(super) struct ArtistHeader {
     changed: Instant,
 }
 
+/// Left edge of the artist name and detail, clear of the portrait and a gap.
+pub(super) const NAME_LEFT: Rems = Rems(2. + tokens::ARTIST_ARTWORK.size.0 + 1.5);
+/// Extra line height above and below the big name. Truncating clips to the
+/// line box, and the font's descenders reach past a 2.75rem line, which cut
+/// the tail off letters like g and y. The box grows both ways, so the text
+/// itself does not move.
+const NAME_LEAD: f32 = 0.25;
+/// Scroll distance, in rems, over which the portrait gives way to the dock.
+const DOCK_DISTANCE: f32 = tokens::ARTIST_ARTWORK.size.0 + 6.25;
+
 impl ArtistHeader {
     pub fn new(cx: &App) -> Self {
         Self {
@@ -36,7 +46,7 @@ impl ArtistHeader {
     }
 
     pub fn scroll(&mut self, offset: f32, available: f32, cx: &mut Context<Self>) {
-        let distance = available.min(16.25);
+        let distance = available.min(DOCK_DISTANCE);
         let target = if distance > 0. {
             (offset / distance).clamp(0., 1.)
         } else {
@@ -138,10 +148,7 @@ impl Render for ArtistHeader {
                             palette,
                             &self.cache,
                             self.artwork.as_deref(),
-                            tokens::ArtworkSize {
-                                size: Rems(10.),
-                                radius: Rems(1.),
-                            },
+                            tokens::ARTIST_ARTWORK,
                             CadenceIcon::Person,
                         )),
                 )
@@ -150,15 +157,15 @@ impl Render for ArtistHeader {
                         .id("artist-moving-name")
                         .test_support()
                         .absolute()
-                        .left(unit(13.5))
-                        .top(unit(14.) - hero_scroll)
+                        .left(NAME_LEFT.to_pixels(rem))
+                        .top(unit(4. + tokens::ARTIST_ARTWORK.size.0 - NAME_LEAD) - hero_scroll)
                         .opacity(hero_opacity)
-                        .w((self.viewport_width - unit(15.5))
+                        .w((self.viewport_width - NAME_LEFT.to_pixels(rem) - unit(2.))
                             .max(unit(1.))
                             .min(unit(30.)))
                         .truncate()
                         .text_size(px(40.) * (rem / px(16.)))
-                        .line_height(unit(2.75))
+                        .line_height(unit(2.75 + 2. * NAME_LEAD))
                         .font_weight(gpui_kit::FontWeight::MEDIUM)
                         .text_color(rgb(palette.text_primary))
                         .child(self.name.clone()),
