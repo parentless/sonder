@@ -14,6 +14,8 @@ pub(super) const PAGE_TITLE_LINE_HEIGHT: Rems = Rems(2.75);
 
 pub(super) const CONTROL_RADIUS: Rems = Rems(0.625);
 /// A surface that wraps controls, concentric with the control radius inside it.
+/// How far the page's left corners curve in toward the sidebar.
+pub(super) const PAGE_CORNER_RADIUS: Rems = Rems(1.75);
 pub(super) const CONTAINER_RADIUS: Rems = Rems(0.875);
 pub(super) const PANEL_RADIUS: Rems = Rems(1.25);
 

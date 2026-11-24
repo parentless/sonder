@@ -421,6 +421,47 @@ fn text_menu_row(row: Stateful<Div>, label: &'static str, color: u32) -> Statefu
         .child(label)
 }
 
+/// A left corner of the page, curved in toward the sidebar. Pages paint their
+/// own square backgrounds, so the curve is made by covering the corner with
+/// the sidebar's colour, cut away by a quarter circle.
+pub(super) fn page_corner(palette: CadencePalette, window: &Window, bottom: bool) -> Div {
+    let radius = tokens::PAGE_CORNER_RADIUS.to_pixels(window.rem_size());
+    let color = rgb(palette.canvas);
+    let corner = div().absolute().left_0().size(radius);
+    let corner = if bottom {
+        corner.bottom_0()
+    } else {
+        corner.top_0()
+    };
+    corner.child(
+        gpui_kit::canvas(
+            |_, _, _| (),
+            move |bounds, (), window, _| {
+                let at = |x: Pixels, y: Pixels| {
+                    gpui_kit::point(bounds.origin.x + x, bounds.origin.y + y)
+                };
+                let r = radius;
+                let mut path = gpui_kit::PathBuilder::fill();
+                // The square's own corner, then the quarter circle that stays page.
+                if bottom {
+                    path.move_to(at(px(0.), r));
+                    path.line_to(at(px(0.), px(0.)));
+                    path.arc_to(gpui_kit::point(r, r), px(0.), false, false, at(r, r));
+                } else {
+                    path.move_to(at(px(0.), px(0.)));
+                    path.line_to(at(r, px(0.)));
+                    path.arc_to(gpui_kit::point(r, r), px(0.), false, false, at(px(0.), r));
+                }
+                path.close();
+                if let Ok(path) = path.build() {
+                    window.paint_path(path, color);
+                }
+            },
+        )
+        .size_full(),
+    )
+}
+
 /// The outlined secondary button used by the setup screens and settings.
 pub(super) fn settings_button(
     palette: CadencePalette,

@@ -1013,8 +1013,6 @@ impl Sidebar {
             .flex_none()
             .overflow_hidden()
             .bg(rgb(palette.canvas))
-            .border_r_1()
-            .border_color(rgb(palette.border))
             .child(
                 div()
                     .w(target_width)

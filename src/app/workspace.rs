@@ -727,7 +727,10 @@ impl Render for Workspace {
                             })
                             .when(lyrics_view == Some(LyricsView::Page), |body| {
                                 body.child(self.lyrics.clone())
-                            }),
+                            })
+                            // The page curves in toward the sidebar, which has no border.
+                            .child(components::page_corner(palette, window, false))
+                            .child(components::page_corner(palette, window, true)),
                     )
                     .when(self.player_bar.read(cx).queue_open(), |root| {
                         root.child(self.queue_drawer.clone())
