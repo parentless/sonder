@@ -5622,7 +5622,9 @@ fn credits_open_from_a_songs_menu_show_who_made_it_and_close_with_escape() {
         assert!(window.try_find(("credits-role", 2usize)).is_none());
     });
     fixture.update(|window, cx| window.press("escape", cx));
-    fixture.update(|window, _| assert!(window.try_find("credits-dialog").is_none()));
+    // The dialog leaves over 140ms: still drawn at first, gone once it ends.
+    fixture.update(|window, _| assert!(window.try_find("credits-dialog").is_some()));
+    fixture.wait_for(|window, _| window.try_find("credits-dialog").is_none());
     fixture.no_commands();
 }
 
@@ -5650,7 +5652,9 @@ fn credits_say_so_when_nothing_is_listed_and_retry_after_a_failure() {
     });
     // Closing from the button leaves nothing asked.
     fixture.update(|window, cx| window.click("credits-close", cx));
-    fixture.update(|window, _| assert!(window.try_find("credits-dialog").is_none()));
+    // The dialog leaves over 140ms: still drawn at first, gone once it ends.
+    fixture.update(|window, _| assert!(window.try_find("credits-dialog").is_some()));
+    fixture.wait_for(|window, _| window.try_find("credits-dialog").is_none());
 }
 
 #[test]
@@ -5661,7 +5665,9 @@ fn pressing_the_dim_area_closes_the_credits() {
         assert!(window.try_find("credits-dialog").is_some());
         window.click_at("credits-scrim", point(px(4.), px(4.)), cx);
     });
-    fixture.update(|window, _| assert!(window.try_find("credits-dialog").is_none()));
+    // The dialog leaves over 140ms: still drawn at first, gone once it ends.
+    fixture.update(|window, _| assert!(window.try_find("credits-dialog").is_some()));
+    fixture.wait_for(|window, _| window.try_find("credits-dialog").is_none());
 }
 
 fn suggestion(name: &str, id: &str, percent: u8) -> model::ArtistSuggestion {

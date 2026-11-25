@@ -286,6 +286,7 @@ impl Workspace {
                 this.close_credits(cx);
             });
         self.credits_opened += 1;
+        self.credits_leaving = None;
         self.credits = Some(workspace::CreditsOpen {
             dialog,
             _subscription: subscription,
@@ -381,8 +382,10 @@ impl Workspace {
 
     /// Closes the credits, returning whether they were open.
     pub(super) fn close_credits(&mut self, cx: &mut Context<Self>) -> bool {
-        let was_open = self.credits.take().is_some();
+        let leaving = self.credits.take();
+        let was_open = leaving.is_some();
         if was_open {
+            self.credits_leaving = leaving;
             cx.notify();
         }
         was_open

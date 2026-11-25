@@ -41,6 +41,9 @@ pub(super) struct Workspace {
     pub(super) credits: Option<CreditsOpen>,
     /// Counts openings of the credits, so each plays its own entrance.
     pub(super) credits_opened: u32,
+    /// The dialog that was just closed, kept drawn until its exit finishes.
+    pub(super) credits_leaving: Option<CreditsOpen>,
+    pub(super) credits_motion: gpui_motion_kit::MotionState,
     /// Setting up Spotify's own player, while that dialog is open.
     pub(super) soloist_setup: Option<SoloistSetupOpen>,
     wheel_scroll: Rc<std::cell::RefCell<smooth_scroll::WheelScroll>>,
@@ -380,6 +383,8 @@ impl Workspace {
             intro,
             credits: None,
             credits_opened: 0,
+            credits_leaving: None,
+            credits_motion: Default::default(),
             soloist_setup: None,
             last_error: None,
             action_notice: None,
@@ -555,15 +560,39 @@ impl Workspace {
     }
 
     /// The credits dialog: the window dims and the card sits in its middle.
-    fn credits_layer(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let open = self.credits.as_ref()?;
-        Some(components::dialog_layer(
+    fn credits_layer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use gpui_motion_kit::core::{Bezier, Easing, Motion, Target, Transition};
+        let open = self.credits.is_some();
+        // Arrive from 14px below over 220ms; leave 8px down over 140ms. Both
+        // use ease-out-quint, and the exit is the quicker of the two.
+        let ease = Easing::Bezier(Bezier::new(0.23, 1., 0.32, 1.).ok()?);
+        let motion = Motion::new(Target::default())
+            .initial(Target::default().y(14.).opacity(0.))
+            .exit(Target::default().y(8.).opacity(0.))
+            .transition(Transition::Tween(
+                Duration::from_millis(if open { 220 } else { 140 }),
+                ease,
+            ))
+            .present(open);
+        let frame = self.credits_motion.frame(motion, window, cx);
+        if !frame.is_mounted() {
+            self.credits_leaving = None;
+            return None;
+        }
+        let dialog = self
+            .credits
+            .as_ref()
+            .or(self.credits_leaving.as_ref())?
+            .dialog
+            .clone();
+        let target = frame.target();
+        Some(components::dialog_layer_driven(
             "credits-scrim",
-            ("credits-card", "credits-dim"),
-            self.credits_opened,
+            target.alpha(),
+            target.y_px(),
             window,
             cx,
-            open.dialog.clone(),
+            dialog,
             cx.listener(|this, _, _, cx| {
                 this.close_credits(cx);
             }),

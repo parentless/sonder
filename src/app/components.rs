@@ -57,6 +57,44 @@ pub(super) fn dialog_layer(
     deferred(anchored().position(point(px(0.), px(0.))).child(content)).into_any_element()
 }
 
+/// Like [`dialog_layer`], but the caller drives the motion, so the dialog can
+/// leave as well as arrive. `alpha` and `lift` come from a sampled motion frame
+/// (1.0 and 0.0 when settled); the dim follows `alpha`.
+pub(super) fn dialog_layer_driven(
+    scrim_id: &'static str,
+    alpha: f32,
+    lift: f32,
+    window: &Window,
+    cx: &App,
+    card: impl IntoElement,
+    close: impl Fn(&gpui_kit::MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    use gpui_kit::TestSupportExt as _;
+    let size = window.viewport_size();
+    let scrim = appearance::Appearance::palette(cx).scrim;
+    let dialog = div()
+        .relative()
+        .top(px(lift))
+        .opacity(alpha)
+        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+            cx.stop_propagation()
+        })
+        .child(card);
+    let backdrop = div()
+        .id(scrim_id)
+        .test_support()
+        .w(size.width)
+        .h(size.height)
+        .occlude()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(scrim.opacity(alpha))
+        .on_mouse_down(gpui_kit::MouseButton::Left, close)
+        .child(dialog);
+    deferred(anchored().position(point(px(0.), px(0.))).child(backdrop)).into_any_element()
+}
+
 /// The keyboard focus ring's stroke, the same physical width as `border_2`.
 const FOCUS_RING_WIDTH: Pixels = px(2.);
 
