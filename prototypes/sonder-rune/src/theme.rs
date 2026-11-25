@@ -51,3 +51,11 @@ pub fn tint(seed: &str) -> Color {
         .fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
     c(TINTS[hash as usize % TINTS.len()])
 }
+
+/// Sonder's type: Inter, with its weights (titles and body semibold, secondary medium).
+pub mod type_ {
+    use rune::tok::TextStyle;
+    pub const BODY: TextStyle = TextStyle::new(13.0, 600.0);
+    pub const LABEL: TextStyle = TextStyle::new(12.0, 500.0);
+    pub const TITLE: TextStyle = TextStyle::new(13.0, 700.0);
+}

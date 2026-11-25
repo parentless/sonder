@@ -3,8 +3,9 @@
 
 use std::borrow::Cow;
 
+use crate::theme::type_;
 use cadence::model::Track;
-use rune::tok::{motion, type_};
+use rune::tok::motion;
 use rune::{
     Color, Cx, El, ScrollSpec, SurfaceFit, Transition, col, el, row, spacer, text, text_input,
 };

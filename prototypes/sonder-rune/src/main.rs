@@ -8,6 +8,7 @@
 mod art;
 mod bridge;
 mod icons;
+mod memory;
 mod sample;
 mod theme;
 mod ui;
@@ -440,11 +441,21 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
 }
 
 fn main() {
+    memory::gpu_policy();
+    memory::start();
     rune::run(AppSpec::<State> {
         scenes: sample::SCENES,
         setup: Some(setup),
         poll: Some(poll),
         min_size: Some((900.0, 560.0)),
+        // Sonder's own Inter files, so the letters match the GPUI app.
+        fonts: &[
+            include_bytes!("../../../assets/fonts/Inter-Variable.ttf"),
+            include_bytes!("../../../assets/fonts/Inter-Medium.ttf"),
+            include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf"),
+            include_bytes!("../../../assets/fonts/Inter-Bold.ttf"),
+        ],
+        families: ("Inter", "ui-monospace"),
         ..AppSpec::new("Sonder", (1180.0, 760.0), State::default, view)
     });
 }
