@@ -5,6 +5,7 @@
 //! (as Sonder does when hidden) once the first screen has settled.
 
 #[cfg(windows)]
+#[allow(unsafe_code)]
 pub fn start() {
     use std::io::Write;
     use std::time::Duration;

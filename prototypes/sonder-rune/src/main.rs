@@ -3,7 +3,7 @@
 //! Design A (refined layout) with design B's Now Playing morph. Run it with
 //! `cargo run --release`; headless pictures: `-- --snap out.png --scene liked`.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 mod art;
 mod bridge;
