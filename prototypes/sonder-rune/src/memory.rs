@@ -1,8 +1,8 @@
 //! Memory diagnostics for Windows, where the numbers that matter live.
 //!
 //! `SONDER_MEMLOG=1` writes working set and private bytes to `sonder-rune-memory.txt`
-//! in the temp folder every few seconds. `SONDER_TRIM=1` also trims the working set
-//! (as Sonder does when hidden) once the first screen has settled.
+//! in the temp folder every few seconds. The working set is trimmed once the first
+//! screen has settled, as Sonder does when idle; `SONDER_TRIM=0` turns that off.
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -32,7 +32,7 @@ pub fn start() {
     }
 
     let log = std::env::var_os("SONDER_MEMLOG").is_some();
-    let trim = std::env::var_os("SONDER_TRIM").is_some();
+    let trim = std::env::var("SONDER_TRIM").map_or(true, |v| v != "0");
     if !log && !trim {
         return;
     }

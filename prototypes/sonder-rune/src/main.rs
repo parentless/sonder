@@ -7,6 +7,7 @@
 
 mod art;
 mod bridge;
+mod disk;
 mod icons;
 mod memory;
 mod sample;

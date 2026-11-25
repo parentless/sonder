@@ -1,5 +1,6 @@
 //! Album covers: asked for while a view draws, fetched off-thread, decoded small,
-//! and kept under a fixed cap so scrolling a huge library cannot grow memory.
+//! and kept under Sonder's 128-cover budget so scrolling a huge library cannot
+//! grow memory. Originals are not kept: the disk cache holds them.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ const THUMB_PT: f32 = 56.0;
 const BIG_PT: f32 = 360.0;
 const SCALE: f32 = 2.0;
 /// The most covers kept decoded; past it the least recently drawn go.
-const KEEP: usize = 320;
+const KEEP: usize = 128;
 
 enum Slot {
     Wanted,

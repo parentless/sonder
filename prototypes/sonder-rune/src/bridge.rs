@@ -155,22 +155,32 @@ impl Bridge {
 
     /// Fetches an album cover. Four at a time at most; the rest wait their turn.
     pub fn fetch_art(&self, url: String) {
-        static GATE: Gate = Gate::new(4);
+        // Two at a time, like Sonder's two image workers.
+        static GATE: Gate = Gate::new(2);
         let (tx, wake) = (self.outbox.clone(), self.waker.clone());
         thread::spawn(move || {
             let _slot = GATE.enter();
-            let bytes = ureq::get(&url).call().ok().and_then(|response| {
-                response
-                    .into_body()
-                    .with_config()
-                    .limit(4 << 20)
-                    .read_to_vec()
-                    .ok()
+            let bytes = crate::disk::load(&url).or_else(|| {
+                let bytes = agent().get(&url).call().ok().and_then(|r| {
+                    r.into_body()
+                        .with_config()
+                        .limit(4 << 20)
+                        .read_to_vec()
+                        .ok()
+                })?;
+                crate::disk::store(&url, &bytes);
+                Some(bytes)
             });
             let _ = tx.send(Msg::Art { url, bytes });
             wake();
         });
     }
+}
+
+/// One HTTP client for every cover, so its TLS setup and sockets are built once.
+fn agent() -> &'static ureq::Agent {
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT.get_or_init(ureq::Agent::new_with_defaults)
 }
 
 /// A tiny counting semaphore, so a screenful of covers does not open a screenful of sockets.
