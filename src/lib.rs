@@ -1,3 +1,6 @@
+#![cfg_attr(not(feature = "ui"), allow(dead_code, unused_imports))]
+
+#[cfg(feature = "ui")]
 mod app;
 mod audio_output;
 pub mod backend;
@@ -27,6 +30,7 @@ pub mod spotify;
 pub mod storage;
 mod trash;
 
+#[cfg(feature = "ui")]
 pub use app::run;
 
 #[cfg(any(target_os = "windows", test))]

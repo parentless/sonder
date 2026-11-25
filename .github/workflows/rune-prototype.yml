@@ -1,12 +1,12 @@
-name: Rune prototype
+name: Sonder on Rune
 
-# Builds prototypes/rune-library for Windows so it can be tried by hand.
+# Builds prototypes/sonder-rune for Windows so it can be tried by hand.
 # It runs on pushes to the prototype branch only; nothing here touches releases.
 on:
   push:
     branches: [rune-prototype]
     paths:
-      - "prototypes/rune-library/**"
+      - "prototypes/sonder-rune/**"
       - ".github/workflows/rune-prototype.yml"
   workflow_dispatch:
 
@@ -18,7 +18,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: prototypes/rune-library
+        working-directory: prototypes/sonder-rune
     steps:
       - uses: actions/checkout@v4
       - name: Install the Rust version Rune pins
@@ -29,5 +29,5 @@ jobs:
       - run: cargo build --release --locked
       - uses: actions/upload-artifact@v4
         with:
-          name: rune-library-windows
-          path: prototypes/rune-library/target/release/rune-library.exe
+          name: sonder-rune-windows
+          path: prototypes/sonder-rune/target/release/sonder-rune.exe

@@ -7,6 +7,17 @@ repository = "https://github.com/parentless/sonder"
 description = "A native Rust and GPUI Spotify client for Windows and macOS"
 rust-version = "1.97"
 
+[features]
+# The GPUI interface. Off, the crate is the backend alone (Spotify, playback,
+# storage), which other front ends such as prototypes/sonder-rune build on.
+default = ["ui"]
+ui = ["dep:gpui-motion-kit"]
+
+[[bin]]
+name = "cadence"
+path = "src/main.rs"
+required-features = ["ui"]
+
 [dependencies]
 fastrand = "2"
 anyhow = "1.0"
@@ -18,7 +29,7 @@ env_logger = "0.11"
 futures = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 gpui-kit = "=0.7.3"
-gpui-motion-kit = "0.5"
+gpui-motion-kit = { version = "0.5", optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 ab_glyph = "0.2"
 keyring = "4.1"
@@ -75,6 +86,7 @@ name = "ui_rendering"
 path = "src/ui_rendering.rs"
 harness = false
 test = false
+required-features = ["ui"]
 
 [profile.dev]
 opt-level = 0

@@ -1,17 +1,22 @@
-# A throwaway prototype: does Sonder's Library page work well in Rune (Anomaly's
-# UI framework) on Windows? Not part of Sonder's build; see README.md.
+# Sonder's new front end, built on Rune (Anomaly's UI framework). It reuses the
+# existing backend crate (Spotify, playback, storage) and replaces only the GPUI
+# interface. Not part of the main Sonder build; see README.md.
 [package]
-name = "rune-library"
-version = "0.0.1"
+name = "sonder-rune"
+version = "0.0.2"
 edition = "2024"
 publish = false
 
 [dependencies]
 rune = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46", features = ["tooling"] }
+cadence = { path = "../..", default-features = false }
+tokio = { version = "1", features = ["rt", "sync"] }
+ureq = "3"
 
 [workspace]
 
 [patch.crates-io]
+# Rune's own patches (same revision as the dependency).
 winit = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
 sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
 parley_engine = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
@@ -20,6 +25,10 @@ naga = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac2
 accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
 accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
 accesskit_atspi_common = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
+# Sonder's own patches, repeated because Cargo does not inherit them from a dependency.
+gpui-pre-windows = { path = "../../vendor/gpui-pre-windows" }
+librespot-core = { path = "../../vendor/librespot-core" }
+librespot-playback = { path = "../../vendor/librespot-playback" }
 
 [profile.release]
 opt-level = 3
