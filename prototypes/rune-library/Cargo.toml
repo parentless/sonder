@@ -1,0 +1,26 @@
+# A throwaway prototype: does Sonder's Library page work well in Rune (Anomaly's
+# UI framework) on Windows? Not part of Sonder's build; see README.md.
+[package]
+name = "rune-library"
+version = "0.0.1"
+edition = "2024"
+publish = false
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46", features = ["tooling"] }
+
+[workspace]
+
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
+naga = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
+accesskit_atspi_common = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"

@@ -1,0 +1,33 @@
+name: Rune prototype
+
+# Builds prototypes/rune-library for Windows so it can be tried by hand.
+# It runs on pushes to the prototype branch only; nothing here touches releases.
+on:
+  push:
+    branches: [rune-prototype]
+    paths:
+      - "prototypes/rune-library/**"
+      - ".github/workflows/rune-prototype.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: prototypes/rune-library
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the Rust version Rune pins
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+      - run: cargo build --release --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rune-library-windows
+          path: prototypes/rune-library/target/release/rune-library.exe
