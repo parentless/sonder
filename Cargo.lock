@@ -947,7 +947,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cadence"
-version = "0.8.71"
+version = "0.8.72"
 dependencies = [
  "ab_glyph",
  "anyhow",

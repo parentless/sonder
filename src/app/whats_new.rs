@@ -41,6 +41,26 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 26, 2026",
+                releases: &[Release {
+                    version: "0.8.72",
+                    notes: &[
+                        Note(
+                            New,
+                            "Add to queue on an album page puts the whole album after the song that is playing.",
+                        ),
+                        Note(
+                            Better,
+                            "The sidebar opens and closes on a smooth spring: the labels fade and the playlist covers glide instead of jumping.",
+                        ),
+                        Note(
+                            Better,
+                            "Like hearts are plain white: outlined when not liked, filled when liked.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
                 date: "Nov 24, 2026",
                 releases: &[Release {
                     version: "0.8.71",

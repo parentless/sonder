@@ -1536,6 +1536,13 @@ impl AlbumPage {
             .update(cx, |player, cx| player.play_context(tracks, 0, cx));
     }
 
+    /// Queues the whole album after the current song.
+    fn queue(&mut self, tracks: &Arc<[model::Track]>, cx: &mut Context<Self>) {
+        let tracks = tracks.to_vec();
+        self.player
+            .update(cx, |player, cx| player.queue_tracks(tracks, cx));
+    }
+
     /// Shows `album`, refetching unless the cached copy is still fresh.
     /// Reports whether this is a different album than the one already shown.
     pub(super) fn open(&mut self, album: model::AlbumRef, cx: &mut Context<Self>) -> bool {
@@ -2687,6 +2694,8 @@ impl Render for AlbumPage {
             .as_ref()
             .map_or_else(|| "Album".into(), |album| album.name.clone());
         let save_tracks = tracks.clone();
+        // Queueing goes after the current song, so it needs one.
+        let can_queue = !tracks.is_empty() && self.player.read(cx).now_playing().is_some();
         let playback_tracks = tracks;
 
         components::page("album-page")
@@ -2736,10 +2745,29 @@ impl Render for AlbumPage {
                                     .gap_2()
                                     .child(
                                         components::pill(palette, "album-play", "Play", true)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.play(&playback_tracks, cx);
-                                            })),
+                                            .on_click({
+                                                let tracks = playback_tracks.clone();
+                                                cx.listener(move |this, _, _, cx| {
+                                                    this.play(&tracks, cx);
+                                                })
+                                            }),
                                     )
+                                    .when(can_queue, |row| {
+                                        row.child(
+                                            components::pill(
+                                                palette,
+                                                "album-queue",
+                                                "Add to queue",
+                                                false,
+                                            )
+                                            .test_support()
+                                            .on_click(
+                                                cx.listener(move |this, _, _, cx| {
+                                                    this.queue(&playback_tracks, cx);
+                                                }),
+                                            ),
+                                        )
+                                    })
                                     .when(can_review, |row| {
                                         row.child(
                                             components::pill(

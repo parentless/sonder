@@ -445,6 +445,8 @@ pub enum BackendCommand {
         respond: Reply<crate::local_files::LocalLibrary>,
     },
     PlayNext(Track),
+    /// Queues several songs, in order, right after the current one.
+    PlayNextMany(Vec<Track>),
     AppendToQueue(Track),
     /// The track started playing, so it belongs in the listening history.
     MarkPlayed(Track),
@@ -1558,6 +1560,7 @@ impl Worker {
                 Ok(())
             }
             BackendCommand::PlayNext(track) => self.play_next(track).await,
+            BackendCommand::PlayNextMany(tracks) => self.play_next_many(tracks).await,
             BackendCommand::AppendToQueue(track) => self.append_to_queue(track).await,
             BackendCommand::RestorePlayback {
                 position_ms,
@@ -1915,16 +1918,24 @@ impl Worker {
     }
 
     async fn play_next(&mut self, track: Track) -> Result<()> {
+        self.play_next_many(vec![track]).await
+    }
+
+    async fn play_next_many(&mut self, tracks: Vec<Track>) -> Result<()> {
         let index = self.queue.index.context("Nothing is currently playing")?;
+        if tracks.is_empty() {
+            return Ok(());
+        }
+        let added = tracks.len();
         let mut updated_tracks = self.queue.tracks.clone();
-        updated_tracks.insert(index + 1, track);
+        updated_tracks.splice(index + 1..index + 1, tracks);
         self.replace_queue(updated_tracks, index).await?;
         if self.queue.index.unwrap_or(0) < self.history_end {
             // Editing from an earlier track establishes a new upcoming queue.
             self.history_end = self.queue.index.unwrap_or(0);
             self.priority_next = 0;
         }
-        self.priority_next += 1;
+        self.priority_next += added;
         Ok(())
     }
 
@@ -4592,6 +4603,49 @@ mod tests {
             control_receiver.try_recv(),
             Ok(BackendCommand::Logout { generation: 1 })
         ));
+    }
+
+    #[tokio::test]
+    async fn queueing_several_songs_keeps_their_order_after_the_current_one() {
+        let (_, shutdown) = tokio::sync::watch::channel(false);
+        let (events, _receiver) = super::event_channel(shutdown);
+        let mut worker = super::Worker::new(
+            super::Startup {
+                store: BlockingStore::from_store(Store::in_memory().unwrap()),
+                spotify: crate::spotify::Spotify::from_client_id(
+                    "00000000000000000000000000000000",
+                    false,
+                )
+                .await
+                .unwrap(),
+                configuration: None,
+                playback_snapshot: None,
+                playback_credentials_invalidated: false,
+                playlist_cursor: None,
+            },
+            events,
+        );
+        let named = |id: &str| {
+            let mut track = favorite();
+            track.source_id = id.into();
+            track
+        };
+        worker.queue.tracks = vec![named("current"), named("later")];
+        worker.queue.index = Some(0);
+        worker
+            .play_next_many(vec![named("a"), named("b"), named("c")])
+            .await
+            .unwrap();
+        let ids: Vec<_> = worker
+            .queue
+            .tracks
+            .iter()
+            .map(|track| track.source_id.to_string())
+            .collect();
+        assert_eq!(ids, ["current", "a", "b", "c", "later"]);
+        assert_eq!(worker.priority_next, 3);
+        worker.play_next_many(Vec::new()).await.unwrap();
+        assert_eq!(worker.queue.tracks.len(), 5);
     }
 
     #[tokio::test]

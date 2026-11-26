@@ -349,6 +349,18 @@ impl Player {
         self.deliver(BackendCommand::PlayNext(track), cx)
     }
 
+    /// Queues `tracks` in order right after the current song.
+    pub(super) fn queue_tracks(
+        &mut self,
+        tracks: Vec<model::Track>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if tracks.is_empty() {
+            return false;
+        }
+        self.deliver(BackendCommand::PlayNextMany(tracks), cx)
+    }
+
     pub(super) fn append_to_queue(&mut self, track: model::Track, cx: &mut Context<Self>) -> bool {
         self.deliver(BackendCommand::AppendToQueue(track), cx)
     }

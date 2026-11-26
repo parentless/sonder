@@ -4192,6 +4192,31 @@ fn an_album_saves_as_a_playlist_and_a_refusal_reaches_the_notice_bar() {
 }
 
 #[test]
+fn an_album_queues_whole_after_the_current_song() {
+    let mut fixture = Fixture::new(false);
+    fixture.play(credited_track());
+    fixture.no_commands();
+    fixture.update(|window, cx| window.click("player-artwork", cx));
+    let BackendCommand::LoadAlbum { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected an album request")
+    };
+    let album = crate::app::test_support::gallery_results().albums.remove(0);
+    respond
+        .send(Ok((album, vec![track(0), track(1), track(2)])))
+        .unwrap();
+    fixture.update(|_, _| {});
+
+    fixture.update(|window, cx| window.click("album-queue", cx));
+    let BackendCommand::PlayNextMany(tracks) = fixture.backend.commands.try_recv().unwrap() else {
+        panic!("expected the album to be queued")
+    };
+    assert_eq!(tracks.len(), 3);
+    assert_eq!(tracks[0].source_id, track(0).source_id);
+    assert_eq!(tracks[2].source_id, track(2).source_id);
+}
+
+#[test]
 fn home_lists_new_releases_from_top_artists_and_opens_one() {
     let mut fixture = Fixture::new(false);
     fixture.update(|window, cx| window.click("nav-home", cx));
