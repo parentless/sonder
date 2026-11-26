@@ -100,6 +100,22 @@ struct RowTransition {
     row_width: Rems,
 }
 
+/// One line of section-label text: the body size times GPUI's default line height.
+const SECTION_LABEL_HEIGHT: Rems = Rems(0.8125 * 1.618_034);
+
+/// Shrinks `block` toward nothing as `progress` falls from 1, and takes back the
+/// flex gap that followed it, so the rows below slide up instead of jumping.
+/// At rest (progress 1) it adds nothing.
+fn collapsing(block: Div, progress: f32, natural: Rems, gap: Rems) -> Div {
+    if progress >= 1. {
+        return block;
+    }
+    block
+        .h(natural * progress)
+        .overflow_hidden()
+        .mb(Rems(-gap.0 * (1. - progress)))
+}
+
 /// The library navigation rail.
 pub(super) struct Sidebar {
     library: Entity<library::Library>,
@@ -724,14 +740,32 @@ impl Sidebar {
             window.request_animation_frame();
         }
         let reorder_progress = ease_out_quint()(reorder_progress);
+        // Labels stay mounted until the rail has fully closed, fading and
+        // shrinking with the spring, so nothing pops in or out mid-slide.
+        let labels_shown = !collapsed || progress > 0.001;
+        // A row's side padding eases from centring the cover on the rail to
+        // the expanded inset, so the cover glides instead of snapping.
+        let collapsed_pad = (COLLAPSED_SIDEBAR_WIDTH
+            - SIDEBAR_CONTENT_PAD * 2.
+            - tokens::SIDEBAR_PLAYLIST_ARTWORK.size)
+            / 2.;
+        let row_pad = collapsed_pad + (Rems(0.75) - collapsed_pad) * progress;
         let pinned_section = div()
             .flex_1()
             .min_h_0()
             .flex()
             .flex_col()
             .gap_2()
-            .when(!collapsed, |section| {
-                section.child(components::section_label(palette, "Playlists"))
+            .when(labels_shown, |section| {
+                section.child(
+                    collapsing(
+                        div().child(components::section_label(palette, "Playlists")),
+                        progress,
+                        SECTION_LABEL_HEIGHT,
+                        Rems(0.5),
+                    )
+                    .opacity(progress),
+                )
             })
             .child(
                 uniform_list(
@@ -767,12 +801,11 @@ impl Sidebar {
                                     .h_11()
                                     .w_full()
                                     .min_w_0()
-                                    .when(!collapsed, |row| row.px_3())
+                                    .px(row_pad)
                                     .bg(rgb(base))
                                     .aria_selected(selected)
                                     .rounded_lg()
                                     .justify_start()
-                                    .when(collapsed, |row| row.justify_center())
                                     .gap_2()
                                     .text_sm()
                                     .text_color(rgb(palette.text))
@@ -783,20 +816,23 @@ impl Sidebar {
                                         tokens::SIDEBAR_PLAYLIST_ARTWORK,
                                         CadenceIcon::Playlist,
                                     ))
-                                    .when(pinned && !collapsed, |row| {
-                                        row.child(components::icon(
-                                            CadenceIcon::PinFilled,
-                                            Rems(0.625),
-                                            palette.text_muted,
+                                    .when(pinned && labels_shown, |row| {
+                                        row.child(div().flex_none().opacity(progress).child(
+                                            components::icon(
+                                                CadenceIcon::PinFilled,
+                                                Rems(0.625),
+                                                palette.text_muted,
+                                            ),
                                         ))
                                     })
-                                    .when(!collapsed, |row| {
+                                    .when(labels_shown, |row| {
                                         row.child(
                                             div()
                                                 .flex_1()
                                                 .min_w_0()
                                                 .text_ellipsis()
                                                 .line_clamp(1)
+                                                .opacity(progress)
                                                 .child(playlist.name),
                                         )
                                     })
@@ -960,13 +996,18 @@ impl Sidebar {
                             .flex()
                             .flex_col()
                             .gap_1()
-                            .when(!collapsed, |nav| {
+                            .when(labels_shown, |nav| {
                                 nav.child(
-                                    div()
-                                        .px_3()
-                                        .pb_1()
-                                        .child(components::section_label(palette, "Library"))
-                                        .map(move |label| label.opacity(progress)),
+                                    collapsing(
+                                        div()
+                                            .px_3()
+                                            .pb_1()
+                                            .child(components::section_label(palette, "Library")),
+                                        progress,
+                                        SECTION_LABEL_HEIGHT + Rems(0.25),
+                                        Rems(0.25),
+                                    )
+                                    .opacity(progress),
                                 )
                             })
                             .children(nav_rows),

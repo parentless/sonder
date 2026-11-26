@@ -11,9 +11,9 @@ use std::time::Duration;
 use gpui_motion_kit::core::{Spring, Transition};
 
 /// How long the sidebar rail takes to settle.
-const SIDEBAR_SETTLE: Duration = Duration::from_millis(260);
+const SIDEBAR_SETTLE: Duration = Duration::from_millis(200);
 
-/// The sidebar rail: a spring with no bounce that settles in about 260ms.
+/// The sidebar rail: a spring with no bounce that settles in about 200ms.
 pub(super) fn sidebar_spring() -> Transition {
     Transition::Spring(Spring::visual(SIDEBAR_SETTLE, 0.).unwrap_or_default())
 }
@@ -46,8 +46,8 @@ mod tests {
     #[test]
     fn the_sidebar_spring_reaches_90_percent_by_its_settle_time() {
         // The kit's `Spring::visual` is the time of first arrival at 90%.
-        // 17 frames of 16ms is 272ms.
-        assert!(run(17)[17] > 0.9);
+        // 13 frames of 16ms is 208ms.
+        assert!(run(13)[13] > 0.9);
     }
 
     #[test]
