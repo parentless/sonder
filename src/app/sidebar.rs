@@ -1006,10 +1006,14 @@ impl Sidebar {
                             .when(labels_shown, |nav| {
                                 nav.child(
                                     collapsing(
-                                        div()
-                                            .px_3()
-                                            .pb_1()
-                                            .child(components::section_label(palette, "Library")),
+                                        // Padding lives on an inner div: padding on the
+                                        // shrinking block would keep it 0.25rem tall at
+                                        // rest-collapsed, then jump when it unmounts.
+                                        div().child(
+                                            div().px_3().pb_1().child(components::section_label(
+                                                palette, "Library",
+                                            )),
+                                        ),
                                         progress,
                                         SECTION_LABEL_HEIGHT + Rems(0.25),
                                         Rems(0.25),
