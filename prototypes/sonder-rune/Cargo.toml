@@ -15,6 +15,7 @@ rune = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac2
 cadence = { path = "../..", default-features = false }
 tokio = { version = "1", features = ["rt", "sync"] }
 ureq = "3"
+rfd = "0.15"
 
 [workspace]
 

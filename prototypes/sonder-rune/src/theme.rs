@@ -18,7 +18,6 @@ pub struct Theme {
     pub pill: Color,
     pub pill_text: Color,
     pub tile: Color,
-    pub heart: Color,
     pub separator: Color,
 }
 
@@ -35,7 +34,6 @@ pub fn dark() -> Theme {
         pill: c("#2c2c2f"),
         pill_text: c("#ffffff"),
         tile: c("#2c2c2f"),
-        heart: c("#f07aa8"),
         separator: Color::WHITE.alpha(0.08),
     }
 }

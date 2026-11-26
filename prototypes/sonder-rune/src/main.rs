@@ -16,6 +16,7 @@ mod sample;
 mod search;
 mod theme;
 mod ui;
+mod views;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -41,6 +42,8 @@ pub enum Conn {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Page {
+    Home,
+    Local,
     Liked,
     Playlists,
     Recent,
@@ -58,6 +61,47 @@ pub struct Detail {
     pub art: Option<String>,
     /// Artists are pictured in circles.
     pub round: bool,
+}
+
+/// Lyrics for the song that is playing, and whether the panel is up.
+#[derive(Default)]
+pub struct LyricsState {
+    pub open: bool,
+    /// Which song `data` belongs to.
+    pub id: Option<String>,
+    pub data: Option<cadence::lyrics::Lyrics>,
+    pub loading: bool,
+    /// The line being sung, to redraw only when it changes.
+    pub line: Option<usize>,
+}
+
+/// The credits dialog: whose song, and what was found.
+pub struct CreditsState {
+    pub track: Track,
+    pub data: Option<cadence::credits::Credits>,
+    pub loading: bool,
+}
+
+/// A small menu for one song, opened by its "more" button or a right click.
+pub struct TrackMenu {
+    pub track: Track,
+    /// Where it opened (window points).
+    pub y: f32,
+}
+
+#[derive(Default)]
+pub struct Home {
+    pub range: cadence::model::HomeRange,
+    pub data: Option<cadence::model::HomeData>,
+    pub loading: bool,
+}
+
+#[derive(Default)]
+pub struct Local {
+    pub folders: Vec<std::path::PathBuf>,
+    pub loaded: bool,
+    pub unreadable: usize,
+    pub truncated: bool,
 }
 
 /// The songs behind one page, shared so playing from a long list copies nothing.
@@ -109,6 +153,15 @@ pub struct State {
     /// Playlists the listener pinned; the sidebar lists them first.
     pub pinned: HashSet<String>,
     pub details: HashMap<String, Detail>,
+    pub artist_albums: HashMap<String, Vec<cadence::model::Album>>,
+    pub lyrics: LyricsState,
+    pub credits: Option<CreditsState>,
+    pub track_menu: Option<TrackMenu>,
+    pub home: Home,
+    pub local: Local,
+    pub local_tracks: Source,
+    /// A short note over the player bar, and the clock time it goes.
+    pub toast: Option<(String, f64)>,
     /// Indexes into the page's songs that match the search, in order.
     pub shown: Vec<usize>,
 
@@ -141,7 +194,7 @@ impl Default for State {
             recent: Source::default(),
             opened: HashMap::new(),
             loaded: false,
-            page: Page::Liked,
+            page: Page::Home,
             query: TextEdit::new(""),
             search: search::Search::default(),
             selected: None,
@@ -151,6 +204,14 @@ impl Default for State {
             scrub: None,
             pinned: HashSet::new(),
             details: HashMap::new(),
+            artist_albums: HashMap::new(),
+            lyrics: LyricsState::default(),
+            credits: None,
+            track_menu: None,
+            home: Home::default(),
+            local: Local::default(),
+            local_tracks: Source::default(),
+            toast: None,
             shown: Vec::new(),
             now: None,
             up_next: Vec::new(),
@@ -183,7 +244,8 @@ impl State {
                 .get(&format!("artist:{id}"))
                 .cloned()
                 .unwrap_or_default(),
-            Page::Playlists | Page::Settings => Source::default(),
+            Page::Local => self.local_tracks.clone(),
+            Page::Playlists | Page::Settings | Page::Home => Source::default(),
         }
     }
 
@@ -224,6 +286,16 @@ impl State {
             _ => {}
         }
         self.menu = false;
+        self.search.open = false;
+        match &page {
+            Page::Home => self.ensure_home(),
+            Page::Local => {
+                if let Some(bridge) = &self.bridge {
+                    bridge.load_local(false);
+                }
+            }
+            _ => {}
+        }
         self.page = page;
         self.query = TextEdit::new("");
         self.search = search::Search::default();
@@ -246,6 +318,87 @@ impl State {
                 index,
             });
         }
+    }
+
+    pub fn ensure_home(&mut self) {
+        if self.home.data.is_none() && !self.home.loading {
+            if let Some(bridge) = &self.bridge {
+                self.home.loading = true;
+                bridge.load_home(self.home.range);
+            }
+        }
+    }
+
+    pub fn set_home_range(&mut self, range: cadence::model::HomeRange) {
+        if self.home.range != range {
+            self.home.range = range;
+            self.home.data = None;
+            self.home.loading = false;
+            self.ensure_home();
+        }
+    }
+
+    /// Opens or closes the lyrics panel, fetching lyrics for the song on.
+    pub fn toggle_lyrics(&mut self) {
+        self.lyrics.open = !self.lyrics.open;
+        self.sync_lyrics();
+    }
+
+    /// Fetches lyrics when the panel is up and the song changed.
+    pub fn sync_lyrics(&mut self) {
+        let Some(now) = &self.now else { return };
+        if !self.lyrics.open || self.lyrics.id.as_deref() == Some(now.source_id.as_str()) {
+            return;
+        }
+        self.lyrics.id = Some(now.source_id.clone());
+        self.lyrics.data = None;
+        self.lyrics.line = None;
+        if let Some(bridge) = &self.bridge {
+            self.lyrics.loading = true;
+            bridge.load_lyrics(
+                now.source_id.clone(),
+                cadence::lyrics::Query {
+                    title: now.title.to_string(),
+                    artist: now.artist.to_string(),
+                    album: now.album.to_string(),
+                    duration_ms: now.duration_ms,
+                },
+            );
+        }
+    }
+
+    pub fn open_credits(&mut self, track: Track) {
+        self.track_menu = None;
+        let mut state = CreditsState {
+            track: track.clone(),
+            data: None,
+            loading: false,
+        };
+        if let (Some(isrc), Some(bridge)) = (track.isrc.clone(), &self.bridge) {
+            state.loading = true;
+            bridge.load_credits(track.source_id.clone(), isrc);
+        }
+        self.credits = Some(state);
+    }
+
+    pub fn open_track_menu(&mut self, track: Track, y: f32) {
+        self.track_menu = Some(TrackMenu { track, y });
+    }
+
+    pub fn toast(&mut self, text: &str) {
+        self.toast = Some((text.to_owned(), self.clock + 2.2));
+    }
+
+    pub fn play_next(&mut self, track: Track) {
+        self.track_menu = None;
+        self.send(BackendCommand::PlayNext(track));
+        self.toast("Playing next");
+    }
+
+    pub fn add_to_queue(&mut self, track: Track) {
+        self.track_menu = None;
+        self.send(BackendCommand::AppendToQueue(track));
+        self.toast("Added to queue");
     }
 
     /// Jumps to `fraction` of the current song.
@@ -523,7 +676,8 @@ impl State {
                 Msg::Artist { id, result } => {
                     let key = format!("artist:{id}");
                     match result {
-                        Some((artist, tracks, _albums)) => {
+                        Some((artist, tracks, albums)) => {
+                            self.artist_albums.insert(id.clone(), albums.albums);
                             self.details.insert(
                                 id.clone(),
                                 Detail {
@@ -550,6 +704,44 @@ impl State {
                     }
                     self.refresh();
                 }
+                Msg::Lyrics { id, result } => {
+                    if self.lyrics.id.as_deref() == Some(id.as_str()) {
+                        self.lyrics.loading = false;
+                        self.lyrics.data = result;
+                    }
+                }
+                Msg::Credits { id, result } => {
+                    if let Some(c) = self.credits.as_mut() {
+                        if c.track.source_id == id {
+                            c.loading = false;
+                            c.data = result;
+                        }
+                    }
+                }
+                Msg::Home { range, result } => {
+                    if range == self.home.range {
+                        self.home.loading = false;
+                        if result.is_some() {
+                            self.home.data = result;
+                        }
+                    }
+                }
+                Msg::Folders(folders) => {
+                    self.local.folders = folders;
+                    self.local.loaded = true;
+                }
+                Msg::Local(library) => {
+                    let library = library.unwrap_or_default();
+                    self.local.unreadable = library.unreadable;
+                    self.local.truncated = library.truncated;
+                    self.local_tracks = Source {
+                        total: library.tracks.len() as u32,
+                        done: true,
+                        tracks: library.tracks.into(),
+                        error: None,
+                    };
+                    self.refresh();
+                }
                 Msg::Search { query, results } => self.on_search_results(query, results),
                 Msg::Art { url, bytes } => {
                     if let Some(art) = self.art.as_mut() {
@@ -573,6 +765,36 @@ fn setup(s: &mut State, waker: Waker) {
 fn poll(s: &mut State, clock: f64, tx: &mut Tx) -> bool {
     s.clock = clock;
     let mut changed = s.drain();
+    s.sync_lyrics();
+    if s.loaded && s.page == Page::Home {
+        s.ensure_home();
+    }
+    if s.loaded && !s.local.loaded {
+        s.local.loaded = true;
+        if let Some(bridge) = &s.bridge {
+            bridge.load_local(false);
+        }
+    }
+    if let Some((_, until)) = &s.toast {
+        if clock >= *until {
+            s.toast = None;
+            changed = true;
+        } else {
+            tx.wake_after(Duration::from_millis(300));
+        }
+    }
+    // The sung line moves on its own timing, not the progress bar's.
+    if s.lyrics.open {
+        let line = s
+            .lyrics
+            .data
+            .as_ref()
+            .and_then(|l| l.current(s.progress_ms()));
+        if line != s.lyrics.line {
+            s.lyrics.line = line;
+            changed = true;
+        }
+    }
     // Covers the last frame asked for and did not have yet.
     if let (Some(art), Some(bridge)) = (s.art.as_mut(), s.bridge.as_ref()) {
         if let Some(now) = &s.now {
@@ -645,6 +867,8 @@ mod tests {
             playlists: Vec::new(),
         });
         assert!(s.loaded && s.conn == Conn::Ready);
+        s.page = Page::Liked;
+        s.refresh();
         assert_eq!(s.shown.len(), 3);
         assert!(s.liked_ids.contains("sample1"));
     }

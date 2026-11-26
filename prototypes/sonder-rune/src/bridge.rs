@@ -39,6 +39,21 @@ pub enum Msg {
         id: String,
         result: Option<cadence::backend::ArtistDetails>,
     },
+    Lyrics {
+        id: String,
+        result: Option<cadence::lyrics::Lyrics>,
+    },
+    Credits {
+        id: String,
+        result: Option<cadence::credits::Credits>,
+    },
+    Home {
+        range: cadence::model::HomeRange,
+        result: Option<cadence::model::HomeData>,
+    },
+    /// Local Files: the folders the listener added, then what is in them.
+    Folders(Vec<std::path::PathBuf>),
+    Local(Option<cadence::local_files::LocalLibrary>),
     /// Spotify's catalog answer for a search.
     Search {
         query: String,
@@ -166,6 +181,90 @@ impl Bridge {
         });
     }
 
+    /// Sends a command that wants an answer and turns the reply into a message.
+    fn ask<T: Send + 'static>(
+        &self,
+        command: impl FnOnce(cadence::backend::Reply<T>) -> BackendCommand + Send + 'static,
+        done: impl FnOnce(Option<T>) -> Msg + Send + 'static,
+    ) {
+        let (handle, tx, wake) = (self.handle.clone(), self.outbox.clone(), self.waker.clone());
+        thread::spawn(move || {
+            let (respond, reply) = tokio::sync::oneshot::channel();
+            let result = if handle.send(command(respond)) {
+                reply.blocking_recv().ok().and_then(Result::ok)
+            } else {
+                None
+            };
+            let _ = tx.send(done(result));
+            wake();
+        });
+    }
+
+    pub fn load_lyrics(&self, id: String, query: cadence::lyrics::Query) {
+        self.ask(
+            move |respond| BackendCommand::LoadLyrics { query, respond },
+            move |result| Msg::Lyrics { id, result },
+        );
+    }
+
+    pub fn load_credits(&self, id: String, isrc: String) {
+        self.ask(
+            move |respond| BackendCommand::LoadCredits { isrc, respond },
+            move |result| Msg::Credits { id, result },
+        );
+    }
+
+    pub fn load_home(&self, range: cadence::model::HomeRange) {
+        self.ask(
+            move |respond| BackendCommand::LoadHome { range, respond },
+            move |result| Msg::Home { range, result },
+        );
+    }
+
+    /// Reads the saved Local Files folders, then (with any) scans them.
+    pub fn load_local(&self, rescan: bool) {
+        let me = self.clone_for_local();
+        let wake = self.waker.clone();
+        thread::spawn(move || {
+            me.edit_folders(rescan, |_| {});
+            wake();
+        });
+    }
+
+    /// Asks for a folder, adds it to Local Files and scans.
+    pub fn add_local_folder(&self) {
+        let (me, wake) = (self.clone_for_local(), self.waker.clone());
+        thread::spawn(move || {
+            let Some(folder) = rfd::FileDialog::new()
+                .set_title("Add to Local Files")
+                .pick_folder()
+            else {
+                return;
+            };
+            me.edit_folders(true, |folders| {
+                if !folders.contains(&folder) {
+                    folders.push(folder);
+                }
+            });
+            wake();
+        });
+    }
+
+    pub fn remove_local_folder(&self, folder: std::path::PathBuf) {
+        let (me, wake) = (self.clone_for_local(), self.waker.clone());
+        thread::spawn(move || {
+            me.edit_folders(true, |folders| folders.retain(|f| f != &folder));
+            wake();
+        });
+    }
+
+    fn clone_for_local(&self) -> LocalEdit {
+        LocalEdit {
+            handle: self.handle.clone(),
+            tx: self.outbox.clone(),
+        }
+    }
+
     pub fn load_album(&self, id: String) {
         let (handle, tx, wake) = (self.handle.clone(), self.outbox.clone(), self.waker.clone());
         thread::spawn(move || {
@@ -242,6 +341,44 @@ impl Bridge {
             let _ = tx.send(Msg::Art { url, bytes });
             wake();
         });
+    }
+}
+
+/// What a folder change needs: the backend to rescan and the queue to report on.
+struct LocalEdit {
+    handle: BackendHandle,
+    tx: Sender<Msg>,
+}
+
+impl LocalEdit {
+    /// Applies `change` to the saved folders, reports them, then reads the index
+    /// (scanning first when `rescan`). Without folders there is nothing to read.
+    fn edit_folders(self, rescan: bool, change: impl FnOnce(&mut Vec<std::path::PathBuf>)) {
+        let Ok(mut storage) = cadence::storage::Store::open_default() else {
+            return;
+        };
+        let mut folders = storage.local_folders().unwrap_or_default();
+        let before = folders.clone();
+        change(&mut folders);
+        if folders != before {
+            let _ = storage.set_local_folders(&folders);
+        }
+        let _ = self.tx.send(Msg::Folders(folders.clone()));
+        if folders.is_empty() {
+            let _ = self.tx.send(Msg::Local(None));
+            return;
+        }
+        let (respond, reply) = tokio::sync::oneshot::channel();
+        let library = if self.handle.send(BackendCommand::LoadLocalFiles {
+            folders,
+            rescan,
+            respond,
+        }) {
+            reply.blocking_recv().ok().and_then(Result::ok)
+        } else {
+            None
+        };
+        let _ = self.tx.send(Msg::Local(library));
     }
 }
 

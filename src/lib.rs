@@ -5,7 +5,7 @@ mod app;
 mod audio_output;
 pub mod backend;
 mod credential_worker;
-mod credits;
+pub mod credits;
 #[cfg(target_os = "windows")]
 mod diagnostics;
 pub(crate) mod discord;

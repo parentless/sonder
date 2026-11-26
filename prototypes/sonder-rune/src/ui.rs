@@ -14,14 +14,14 @@ use crate::icons::{Icons, icon};
 use crate::theme::{self, Theme};
 use crate::{Conn, Page, State};
 
-const RAIL: f32 = 64.0;
-const WIDE: f32 = 208.0;
-const ROW_H: f32 = 56.0;
-const BAR_H: f32 = 76.0;
-const CORNER: f32 = 20.0;
+pub(crate) const RAIL: f32 = 78.0;
+pub(crate) const WIDE: f32 = 232.0;
+pub(crate) const ROW_H: f32 = 56.0;
+pub(crate) const BAR_H: f32 = 76.0;
+pub(crate) const CORNER: f32 = 20.0;
 
 /// The sidebar's spring: quicker than the default reflow (0.4 s).
-fn quick() -> rune::Spring {
+pub(crate) fn quick() -> rune::Spring {
     rune::Spring::new(0.26, 0.0)
 }
 
@@ -45,6 +45,9 @@ pub fn root(s: &State, _: &mut Cx<State>) -> El {
         .child(player_bar(s, &t));
     if s.np {
         app = app.child(now_playing(s, &t));
+    }
+    for layer in crate::views::layers(s, &t) {
+        app = app.child(layer);
     }
     app
 }
@@ -144,7 +147,7 @@ fn submit_client_id(s: &mut State) {
     });
 }
 
-fn pill(key: &'static str, label: &'static str, primary: bool, t: &Theme) -> El {
+pub(crate) fn pill(key: &'static str, label: &'static str, primary: bool, t: &Theme) -> El {
     let (fill, ink) = if primary {
         (theme::c("#f5f3ef"), theme::c("#111111"))
     } else {
@@ -167,20 +170,20 @@ fn sidebar(s: &State, t: &Theme) -> El {
     let icons = s.icons.as_ref();
     let nav = |key: &'static str, label: &'static str, glyph: Option<&rune::Image>, page: Page| {
         let on = s.page == page;
-        let ink = if on { t.text } else { t.muted };
         let mut item = row()
             .key(key)
-            .h(38.0)
-            .px(13.0)
+            .w_full()
+            .h(42.0)
+            .px(if s.wide { 12.0 } else { 14.0 })
             .gap(12.0)
             .center_y()
-            .radius(10.0)
+            .radius(12.0)
             .fill(if on { t.active } else { Color::TRANSPARENT })
-            .hover(t.hover)
+            .hover(if on { t.active } else { t.hover })
             .press_scale(0.98)
             .on_press(move |s: &mut State| s.go(page.clone()));
         if let Some(glyph) = glyph {
-            item = item.child(icon(glyph, 20.0, ink));
+            item = item.child(icon(glyph, 17.0, t.text));
         }
         // The label exists only while the sidebar is wide; mounting and unmounting it
         // is what fades it, so there is no label animation of my own to keep in step.
@@ -189,7 +192,7 @@ fn sidebar(s: &State, t: &Theme) -> El {
                 text(label)
                     .key(format!("{key}-label"))
                     .font(type_::BODY)
-                    .color(ink)
+                    .color(t.text)
                     .nowrap()
                     .transition(Transition::opacity()),
             );
@@ -249,18 +252,22 @@ fn sidebar(s: &State, t: &Theme) -> El {
             el().key("rail-toggle-spacer")
         });
 
-    let mut side = col()
-        .key("sidebar")
-        .w(if s.wide { WIDE } else { RAIL })
-        .h_full()
-        .padding(10.0)
-        .gap(2.0)
-        .fill(t.side)
-        .clip_rounded(0.0)
-        .motion(quick())
-        .child(brand);
+    let section = |key: &'static str, label: &'static str| {
+        row().key(key).w_full().px(12.0).pb(4.0).child(
+            text(label)
+                .font(type_::LABEL)
+                .color(t.muted)
+                .nowrap()
+                .transition(Transition::opacity()),
+        )
+    };
     let i = icons;
-    side = side
+    let mut nav_group = col().key("nav").w_full().gap(4.0);
+    if s.wide {
+        nav_group = nav_group.child(section("sec-library", "Library"));
+    }
+    nav_group = nav_group
+        .child(nav("nav-home", "Home", i.map(|i| &i.home), Page::Home))
         .child(nav(
             "nav-liked",
             "Liked Songs",
@@ -279,7 +286,36 @@ fn sidebar(s: &State, t: &Theme) -> El {
             i.map(|i| &i.recent),
             Page::Recent,
         ));
-    side.child(sidebar_playlists(s))
+    if !s.local.folders.is_empty() {
+        nav_group = nav_group.child(nav(
+            "nav-local",
+            "Local Files",
+            i.map(|i| &i.folder),
+            Page::Local,
+        ));
+    }
+    let mut lists = col()
+        .key("side-lists")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .gap(4.0);
+    if s.wide {
+        lists = lists.child(section("sec-playlists", "Playlists"));
+    }
+    lists = lists.child(sidebar_playlists(s));
+    col()
+        .key("sidebar")
+        .w(if s.wide { WIDE } else { RAIL })
+        .h_full()
+        .padding(16.0)
+        .gap(16.0)
+        .fill(t.side)
+        .clip_rounded(0.0)
+        .motion(quick())
+        .child(brand)
+        .child(nav_group)
+        .child(lists)
 }
 
 /// Every playlist, pinned ones first. Rows are virtual so a long list loads only the covers on screen.
@@ -319,10 +355,10 @@ fn side_playlist(s: &State, index: usize) -> El {
         .key(format!("sp-{id}"))
         .w_full()
         .h(44.0)
-        .px(if s.wide { 8.0 } else { 6.0 })
-        .gap(10.0)
+        .px(if s.wide { 12.0 } else { 8.0 })
+        .gap(8.0)
         .center_y()
-        .radius(10.0)
+        .radius(8.0)
         .fill(if on { t.active } else { Color::TRANSPARENT })
         .hover(t.hover)
         .press_scale(0.98)
@@ -333,7 +369,7 @@ fn side_playlist(s: &State, index: usize) -> El {
             text(playlist.name.to_string())
                 .key(format!("sp-label-{}", playlist.source_id))
                 .font(type_::BODY)
-                .color(if on { t.text } else { t.muted })
+                .color(t.text)
                 .nowrap()
                 .truncate()
                 .transition(Transition::opacity()),
@@ -343,6 +379,24 @@ fn side_playlist(s: &State, index: usize) -> El {
 }
 
 // ─────────────────────────────── page ───────────────────────────────
+
+fn greeting(s: &State) -> String {
+    let name = s
+        .profile
+        .as_ref()
+        .map(|p| {
+            p.display_name
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_owned()
+        })
+        .filter(|n| !n.is_empty());
+    match name {
+        Some(name) => format!("Welcome back, {name}"),
+        None => "Welcome back".into(),
+    }
+}
 
 fn page_title(s: &State) -> (String, String) {
     let source = s.source();
@@ -354,6 +408,15 @@ fn page_title(s: &State) -> (String, String) {
             format!("{} playlists", s.playlists.len()),
         ),
         Page::Settings => ("Settings".into(), "Your account and playback".into()),
+        Page::Home => (greeting(s), "Pick up where you left off".into()),
+        Page::Local => (
+            "Local Files".into(),
+            format!(
+                "{} songs from {} folders",
+                source.total,
+                s.local.folders.len()
+            ),
+        ),
         Page::Album(id) | Page::Artist(id) => {
             let detail = s.details.get(id).cloned().unwrap_or_default();
             (
@@ -400,7 +463,7 @@ fn page(s: &State, t: &Theme) -> El {
                 ),
         )
         .child(el().h(60.0));
-    if s.page == Page::Settings {
+    if matches!(s.page, Page::Settings | Page::Home) {
         page = page.child(
             col()
                 .px(26.0)
@@ -427,6 +490,16 @@ fn page(s: &State, t: &Theme) -> El {
     if s.page == Page::Settings {
         return page.child(settings_body(s, t)).child(top_bar(s, t));
     }
+    if s.page == Page::Home {
+        return page
+            .child(crate::views::home_body(s, t))
+            .child(top_bar(s, t));
+    }
+    if let Page::Artist(id) = &s.page {
+        return page
+            .child(crate::views::artist_body(s, t, id))
+            .child(top_bar(s, t));
+    }
     if s.page == Page::Playlists {
         return page.child(playlist_grid(s, t)).child(top_bar(s, t));
     }
@@ -445,6 +518,11 @@ fn top_bar(s: &State, t: &Theme) -> El {
         .placeholder("Search Spotify", t.faint)
         .on_edit(|s: &mut State| &mut s.query)
         .on_input_change(|s: &mut State, _| s.on_search_input())
+        .on_focus_change(|s: &mut State, focused, _| {
+            if focused {
+                s.search.open = !s.query.text.trim().is_empty();
+            }
+        })
         .on_key_preview(|s: &mut State, key, tx| {
             if key.key == rune::Key::Escape && s.search.open {
                 s.search.open = false;
@@ -467,21 +545,7 @@ fn top_bar(s: &State, t: &Theme) -> El {
                 .map_or_else(|| el().size(18.0, 18.0), |i| icon(&i.search, 18.0, t.muted)),
         )
         .child(field);
-    let mut wrap = col()
-        .key("search-wrap")
-        .w(SEARCH_W)
-        .h(36.0)
-        .on_focus_within_change(|s: &mut State, inside, _| {
-            if inside {
-                s.search.open = !s.query.text.trim().is_empty();
-            } else {
-                s.search.open = false;
-            }
-        })
-        .child(bar);
-    if s.search.open {
-        wrap = wrap.child(search_dropdown(s, t));
-    }
+    let wrap = col().key("search-wrap").w(SEARCH_W).h(36.0).child(bar);
     row()
         .pin(Some(0.0), Some(0.0), Some(0.0), None)
         .h(60.0)
@@ -534,77 +598,71 @@ fn profile_button(s: &State, t: &Theme) -> El {
         .press_scale(0.94)
         .on_press(|s: &mut State| s.menu = !s.menu)
         .child(face);
-    let mut wrap = col()
-        .key("avatar-wrap")
-        .size(38.0, 38.0)
-        .on_focus_within_change(|s: &mut State, inside, _| {
-            if !inside {
-                s.menu = false;
-            }
-        })
-        .child(avatar);
-    if s.menu {
-        let item = |key: &'static str, glyph: Option<&rune::Image>, label: &'static str| {
-            row()
-                .key(key)
-                .w_full()
-                .h(40.0)
-                .px(10.0)
-                .gap(10.0)
-                .center_y()
-                .radius(10.0)
-                .hover(t.hover)
-                .press_scale(0.98)
-                .child(glyph.map_or_else(|| el().size(18.0, 18.0), |g| icon(g, 18.0, t.muted)))
-                .child(text(label).font(type_::BODY).color(t.text).nowrap())
-        };
-        let i = s.icons.as_ref();
-        wrap = wrap.child(
-            col()
-                .key("avatar-menu")
-                .absolute(-172.0, 44.0)
-                .w(210.0)
-                .padding(6.0)
-                .gap(2.0)
-                .radius(14.0)
-                .fill(theme::c("#242427"))
-                .box_shadow(rune::Shadow::core_animation(
-                    0.0,
-                    12.0,
-                    28.0,
-                    Color::BLACK.alpha(0.45),
-                ))
-                .transition(Transition::offset(0.0, -6.0))
-                .child(
-                    row().w_full().h(34.0).px(10.0).center_y().child(
-                        text(if name.is_empty() {
-                            "Signed in".to_owned()
-                        } else {
-                            name
-                        })
-                        .font(type_::LABEL)
-                        .color(t.faint)
-                        .nowrap()
-                        .truncate(),
-                    ),
-                )
-                .child(
-                    item("menu-settings", i.map(|i| &i.settings), "Settings")
-                        .on_press(|s: &mut State| s.go(Page::Settings)),
-                )
-                .child(
-                    item("menu-logout", i.map(|i| &i.logout), "Log out").on_press(
-                        |s: &mut State| {
-                            s.menu = false;
-                            s.config_serial += 1;
-                            let generation = s.config_serial;
-                            s.send(cadence::backend::BackendCommand::Logout { generation });
-                        },
-                    ),
+    col().key("avatar-wrap").size(38.0, 38.0).child(avatar)
+}
+
+fn avatar_menu(s: &State, t: &Theme) -> Option<El> {
+    let name = s
+        .profile
+        .as_ref()
+        .map_or_else(String::new, |p| p.display_name.to_string());
+    let item = |key: &'static str, glyph: Option<&rune::Image>, label: &'static str| {
+        row()
+            .key(key)
+            .w_full()
+            .h(40.0)
+            .px(10.0)
+            .gap(10.0)
+            .center_y()
+            .radius(10.0)
+            .hover(t.hover)
+            .press_scale(0.98)
+            .child(glyph.map_or_else(|| el().size(18.0, 18.0), |g| icon(g, 18.0, t.muted)))
+            .child(text(label).font(type_::BODY).color(t.text).nowrap())
+    };
+    let i = s.icons.as_ref();
+    Some(
+        col()
+            .key("avatar-menu")
+            .pin(None, Some(62.0), Some(22.0), None)
+            .w(210.0)
+            .padding(6.0)
+            .gap(2.0)
+            .radius(14.0)
+            .fill(theme::c("#242427"))
+            .box_shadow(rune::Shadow::core_animation(
+                0.0,
+                12.0,
+                28.0,
+                Color::BLACK.alpha(0.45),
+            ))
+            .transition(Transition::offset(0.0, -6.0))
+            .child(
+                row().w_full().h(34.0).px(10.0).center_y().child(
+                    text(if name.is_empty() {
+                        "Signed in".to_owned()
+                    } else {
+                        name
+                    })
+                    .font(type_::LABEL)
+                    .color(t.faint)
+                    .nowrap()
+                    .truncate(),
                 ),
-        );
-    }
-    wrap
+            )
+            .child(
+                item("menu-settings", i.map(|i| &i.settings), "Settings")
+                    .on_press(|s: &mut State| s.go(Page::Settings)),
+            )
+            .child(
+                item("menu-logout", i.map(|i| &i.logout), "Log out").on_press(|s: &mut State| {
+                    s.menu = false;
+                    s.config_serial += 1;
+                    let generation = s.config_serial;
+                    s.send(cadence::backend::BackendCommand::Logout { generation });
+                }),
+            ),
+    )
 }
 
 // ───────────────────────────── settings ─────────────────────────────
@@ -678,6 +736,57 @@ fn settings_body(s: &State, t: &Theme) -> El {
             line("Covers cache", "Up to 48 MB on disk".into()),
         ],
     );
+    let mut folders: Vec<El> = Vec::new();
+    for (n, folder) in s.local.folders.iter().enumerate() {
+        let path = folder.clone();
+        folders.push(
+            row()
+                .key(format!("lf-{n}"))
+                .w_full()
+                .gap(12.0)
+                .center_y()
+                .child(
+                    text(folder.display().to_string())
+                        .font(type_::BODY)
+                        .color(t.text)
+                        .nowrap()
+                        .truncate()
+                        .grow(1.0),
+                )
+                .child(
+                    row()
+                        .key(format!("lf-rm-{n}"))
+                        .h(28.0)
+                        .px(12.0)
+                        .center()
+                        .radius(14.0)
+                        .fill(t.pill)
+                        .hover(t.hover)
+                        .press_scale(0.97)
+                        .on_press(move |s: &mut State| {
+                            if let Some(bridge) = &s.bridge {
+                                bridge.remove_local_folder(path.clone());
+                            }
+                        })
+                        .child(text("Remove").font(type_::LABEL).color(t.pill_text)),
+                ),
+        );
+    }
+    if folders.is_empty() {
+        folders.push(
+            text("Add a folder of music files to play them here.")
+                .font(type_::BODY)
+                .color(t.muted),
+        );
+    }
+    folders.push(row().child(
+        pill("lf-add", "Add folder", false, t).on_press(|s: &mut State| {
+            if let Some(bridge) = &s.bridge {
+                bridge.add_local_folder();
+            }
+        }),
+    ));
+    let local = card("Local Files", folders);
     let about = card(
         "About",
         vec![
@@ -706,11 +815,38 @@ fn settings_body(s: &State, t: &Theme) -> El {
                 .gap(14.0)
                 .child(account)
                 .child(playback)
+                .child(local)
                 .child(about),
         )
 }
 
 const SEARCH_W: f32 = 440.0;
+
+fn page_left(s: &State) -> f32 {
+    if s.wide { WIDE } else { RAIL }
+}
+
+/// The search panel and the profile menu, each with a layer behind it that closes it.
+pub(crate) fn dropdown_layers(s: &State, t: &Theme) -> Option<Vec<El>> {
+    let mut out = Vec::new();
+    if s.search.open && !s.query.text.trim().is_empty() {
+        out.push(
+            el().key("search-scrim")
+                .pin(Some(0.0), Some(60.0), Some(0.0), Some(0.0))
+                .on_press(|s: &mut State| s.search.open = false),
+        );
+        out.push(search_dropdown(s, t));
+    }
+    if s.menu {
+        out.push(
+            el().key("menu-scrim")
+                .pin(Some(0.0), Some(60.0), Some(0.0), Some(0.0))
+                .on_press(|s: &mut State| s.menu = false),
+        );
+        out.extend(avatar_menu(s, t));
+    }
+    (!out.is_empty()).then_some(out)
+}
 
 /// The panel under the search field: songs already loaded, then Spotify's answer.
 /// It slides up out of the field and fades, and leaves the same way, faster.
@@ -849,7 +985,7 @@ fn search_dropdown(s: &State, t: &Theme) -> El {
 
     col()
         .key("search-drop")
-        .absolute(0.0, 42.0)
+        .pin(Some(page_left(s) + 22.0), Some(62.0), None, None)
         .w(SEARCH_W)
         .padding(8.0)
         .radius(16.0)
@@ -869,7 +1005,7 @@ fn pad(label: El) -> El {
     row().w_full().h(26.0).px(8.0).center_y().child(label)
 }
 
-fn cover(s: &State, track: Option<&Track>, size: f32, radius: f32, t: &Theme) -> El {
+pub(crate) fn cover(s: &State, track: Option<&Track>, size: f32, radius: f32, t: &Theme) -> El {
     cover_url(
         s,
         track.and_then(|t| t.artwork_url.as_deref()),
@@ -879,7 +1015,7 @@ fn cover(s: &State, track: Option<&Track>, size: f32, radius: f32, t: &Theme) ->
     )
 }
 
-fn cover_url(s: &State, url: Option<&str>, size: f32, radius: f32, t: &Theme) -> El {
+pub(crate) fn cover_url(s: &State, url: Option<&str>, size: f32, radius: f32, t: &Theme) -> El {
     let tile = el()
         .size(size, size)
         .radius(radius)
@@ -990,6 +1126,7 @@ fn column_header(t: &Theme) -> El {
         .child(el().w(220.0).child(label("Album")))
         .child(el().w(28.0))
         .child(el().w(44.0).child(label("Time")))
+        .child(el().w(28.0))
 }
 
 fn track_list(s: &State, t: &Theme) -> El {
@@ -1034,7 +1171,7 @@ fn track_list(s: &State, t: &Theme) -> El {
         )
 }
 
-fn playing_here(s: &State, track: &Track) -> bool {
+pub(crate) fn playing_here(s: &State, track: &Track) -> bool {
     s.now
         .as_ref()
         .is_some_and(|now| now.source_id == track.source_id)
@@ -1053,7 +1190,7 @@ fn track_row(s: &State, index: usize, position: usize) -> El {
             .icons
             .as_ref()
             .map(|i| if liked { &i.heart_fill } else { &i.heart });
-        let tint = if liked { t.heart } else { t.muted };
+        let tint = if liked { t.text } else { t.muted };
         let mut button = el()
             .key(format!("like-{index}"))
             .size(28.0, 28.0)
@@ -1142,9 +1279,36 @@ fn track_row(s: &State, index: usize, position: usize) -> El {
                     .color(t.muted),
             ),
         )
+        .child(more_button(s, track, &t))
+        .on_secondary_press_local({
+            let track = track.clone();
+            move |s: &mut State, e, _| s.open_track_menu(track.clone(), e.window_y)
+        })
 }
 
-fn clock(ms: u32) -> String {
+/// The "more" button of a song: opens the same menu as a right click. Shown on hover.
+pub(crate) fn more_button(s: &State, track: &Track, t: &Theme) -> El {
+    let track = track.clone();
+    el().key(format!("more-{}", track.source_id))
+        .size(28.0, 28.0)
+        .radius(14.0)
+        .center()
+        .hover(Color::WHITE.alpha(0.08))
+        .press_scale(0.88)
+        .group_opacity(0.0, 1.0)
+        .on_any_press(move |s: &mut State, button, e, _| {
+            if button == rune::PointerButton::Primary {
+                s.open_track_menu(track.clone(), e.window_y);
+            }
+        })
+        .child(
+            s.icons
+                .as_ref()
+                .map_or_else(|| el().size(18.0, 18.0), |i| icon(&i.more, 18.0, t.muted)),
+        )
+}
+
+pub(crate) fn clock(ms: u32) -> String {
     let secs = ms / 1000;
     format!("{}:{:02}", secs / 60, secs % 60)
 }
@@ -1233,7 +1397,7 @@ fn player_bar(s: &State, t: &Theme) -> El {
             .on_press(move |s: &mut State| s.like(track.clone()))
             .child(glyph.map_or_else(
                 || el().size(18.0, 18.0),
-                |g| icon(g, 18.0, if liked { t.heart } else { t.muted }),
+                |g| icon(g, 18.0, if liked { t.text } else { t.muted }),
             ))
     });
     let left = row()
@@ -1243,7 +1407,7 @@ fn player_bar(s: &State, t: &Theme) -> El {
         .child(art)
         .child(
             col()
-                .grow(1.0)
+                .max_w(190.0)
                 .min_w(0.0)
                 .gap(1.0)
                 .child(
@@ -1271,7 +1435,7 @@ fn player_bar(s: &State, t: &Theme) -> El {
             .radius(17.0)
             .hover(t.hover)
             .press_scale(0.92)
-            .child(glyph.map_or_else(|| el().size(20.0, 20.0), |g| icon(g, 20.0, t.text)))
+            .child(glyph.map_or_else(|| el().size(17.0, 17.0), |g| icon(g, 17.0, t.text)))
     };
     let play = row()
         .key("play")
@@ -1282,11 +1446,11 @@ fn player_bar(s: &State, t: &Theme) -> El {
         .press_scale(0.94)
         .on_press(|s: &mut State| s.toggle_play())
         .child(icons.map_or_else(
-            || el().size(22.0, 22.0),
+            || el().size(16.0, 16.0),
             |i| {
                 icon(
                     if s.playing { &i.pause } else { &i.play },
-                    22.0,
+                    16.0,
                     theme::c("#111111"),
                 )
             },
@@ -1353,12 +1517,31 @@ fn player_bar(s: &State, t: &Theme) -> El {
                         .w(40.0),
                 ),
         );
+    let round = |key: &'static str, on: bool| {
+        row()
+            .key(key)
+            .size(34.0, 34.0)
+            .center()
+            .radius(17.0)
+            .fill(if on { t.active } else { Color::TRANSPARENT })
+            .hover(t.hover)
+            .press_scale(0.92)
+    };
     let right = row()
         .w(300.0)
         .gap(8.0)
         .center_y()
         .justify_end()
-        .child(icons.map_or_else(|| el().size(20.0, 20.0), |i| icon(&i.volume, 20.0, t.muted)))
+        .child(row().size(24.0, 24.0).center().child(icons.map_or_else(
+            || el().size(18.0, 18.0),
+            |i| {
+                icon(
+                    if s.volume <= 0.0 { &i.muted } else { &i.volume },
+                    18.0,
+                    t.muted,
+                )
+            },
+        )))
         .child(slider(
             "volume",
             90.0,
@@ -1368,17 +1551,26 @@ fn player_bar(s: &State, t: &Theme) -> El {
         ))
         .child(el().w(8.0))
         .child(
-            row()
-                .key("np-open")
-                .size(34.0, 34.0)
-                .center()
-                .radius(17.0)
-                .hover(t.hover)
-                .press_scale(0.92)
+            round("lyrics-open", s.lyrics.open)
+                .on_press(|s: &mut State| s.toggle_lyrics())
+                .child(icons.map_or_else(
+                    || el().size(18.0, 18.0),
+                    |i| {
+                        icon(
+                            &i.lyrics,
+                            18.0,
+                            if s.lyrics.open { t.text } else { t.muted },
+                        )
+                    },
+                )),
+        )
+        .child(
+            round("np-open", s.np)
                 .on_press(|s: &mut State| s.np = !s.np)
-                .child(
-                    icons.map_or_else(|| el().size(20.0, 20.0), |i| icon(&i.queue, 20.0, t.muted)),
-                ),
+                .child(icons.map_or_else(
+                    || el().size(18.0, 18.0),
+                    |i| icon(&i.queue, 18.0, if s.np { t.text } else { t.muted }),
+                )),
         );
 
     row()
@@ -1407,7 +1599,7 @@ fn slider(
         .key(key)
         .w(width)
         .h(18.0)
-        .center_y()
+        .justify_center()
         .on_drag(move |s: &mut State, d, _| {
             let f = if d.w > 0.0 {
                 (d.x / d.w).clamp(0.0, 1.0)
@@ -1470,6 +1662,11 @@ fn now_playing(s: &State, t: &Theme) -> El {
                 .center_y()
                 .radius(10.0)
                 .hover(Color::WHITE.alpha(0.08))
+                .press_scale(0.98)
+                // Pressing a queued song jumps straight to it.
+                .on_press(move |s: &mut State| {
+                    s.send(cadence::backend::BackendCommand::PlayQueueItem { offset: i })
+                })
                 .child(cover(s, Some(track), 32.0, 5.0, t))
                 .child(
                     col()

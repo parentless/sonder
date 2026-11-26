@@ -152,6 +152,101 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
         s.page = Page::Album("al".into());
         s.refresh();
     }),
+    ("home", |s| {
+        base(s);
+        s.page = Page::Home;
+        s.home.data = Some(cadence::model::HomeData {
+            artists: (0..8)
+                .map(|i| cadence::model::Artist {
+                    provider: Provider::Spotify,
+                    source_id: format!("ar{i}"),
+                    spotify_uri: None,
+                    name: [
+                        "Tame Impala",
+                        "Radiohead",
+                        "Frank Ocean",
+                        "Mitski",
+                        "Harry Styles",
+                        "Phoebe Bridgers",
+                        "Glass Animals",
+                        "Beach House",
+                    ][i]
+                        .into(),
+                    artwork_url: None,
+                    genres: Vec::new(),
+                })
+                .collect(),
+            tracks: (3..9).map(track).collect(),
+        });
+    }),
+    ("lyrics", |s| {
+        base(s);
+        s.lyrics.open = true;
+        s.lyrics.id = s.now.as_ref().map(|n| n.source_id.clone());
+        let words = [
+            "Static on the radio",
+            "Honey on the glass",
+            "I was never one for waiting",
+            "But I waited for it all",
+            "Midnight in the harbour",
+            "Orbit of a velvet sound",
+            "Hold the line a little longer",
+            "Let the quiet carry us",
+            "Nothing left to say",
+        ];
+        s.lyrics.data = Some(cadence::lyrics::Lyrics {
+            synced: true,
+            lines: words
+                .iter()
+                .enumerate()
+                .map(|(i, w)| cadence::lyrics::Line {
+                    start_ms: i as u32 * 8000,
+                    text: (*w).into(),
+                })
+                .collect(),
+        });
+        s.lyrics.line = Some(8.min(7));
+        s.anchor_ms = 7 * 8000 + 1000;
+    }),
+    ("credits", |s| {
+        base(s);
+        s.credits = Some(crate::CreditsState {
+            track: track(2),
+            loading: false,
+            data: Some(cadence::credits::Credits {
+                roles: vec![
+                    cadence::credits::Role {
+                        label: "Producer".into(),
+                        people: vec![cadence::credits::Person {
+                            name: "Kevin Parker".into(),
+                            detail: None,
+                        }],
+                    },
+                    cadence::credits::Role {
+                        label: "Performers".into(),
+                        people: vec![
+                            cadence::credits::Person {
+                                name: "Dominic Simper".into(),
+                                detail: Some("bass".into()),
+                            },
+                            cadence::credits::Person {
+                                name: "Jay Watson".into(),
+                                detail: Some("keys".into()),
+                            },
+                        ],
+                    },
+                ],
+            }),
+        });
+    }),
+    ("songmenu", |s| {
+        base(s);
+        s.page = Page::Liked;
+        s.track_menu = Some(crate::TrackMenu {
+            track: track(3),
+            y: 260.0,
+        });
+    }),
     ("nowplaying", |s| {
         base(s);
         s.np = true;
