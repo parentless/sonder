@@ -1,10 +1,10 @@
 {
   "source": {
     "cadence": "0.8.71",
-    "gpui-kit": "0.7.0",
-    "gpui-pre": "0.3.7",
-    "revision": "10b968aeda2b8b2e20b9699c09534a58692f539a",
-    "lockfile_sha256": "fa03cc6a569ac9dd30e3a5a49962eb88a0b8184df31dfd2e8095efe0790c8e93"
+    "gpui-kit": "0.7.3",
+    "gpui-pre": "0.3.9",
+    "revision": "35a2a9ff94571347dd8c1327157601e7ae7671b7",
+    "lockfile_sha256": "4c5f5d9e853c270b442b7bedc89cdb8f42953a2e32addd2711d67efa08e956de"
   },
   "platform": {
     "os": "macOS",
@@ -38,7 +38,7 @@
   },
   "reduced_motion": true,
   "window_active": true,
-  "capture_run": "https://github.com/parentless/sonder/actions/runs/45346829169",
+  "capture_run": "https://github.com/parentless/sonder/actions/runs/45765910192",
   "rust": "1.97.1",
   "keyboard_focus_details": {
     "cases": [
@@ -58,12 +58,12 @@
     },
     "source": {
       "cadence": "0.8.71",
-      "gpui-kit": "0.7.0",
-      "gpui-pre": "0.3.7",
-      "revision": "10b968aeda2b8b2e20b9699c09534a58692f539a",
-      "lockfile_sha256": "fa03cc6a569ac9dd30e3a5a49962eb88a0b8184df31dfd2e8095efe0790c8e93"
+      "gpui-kit": "0.7.3",
+      "gpui-pre": "0.3.9",
+      "revision": "35a2a9ff94571347dd8c1327157601e7ae7671b7",
+      "lockfile_sha256": "4c5f5d9e853c270b442b7bedc89cdb8f42953a2e32addd2711d67efa08e956de"
     },
-    "capture_run": "https://github.com/parentless/sonder/actions/runs/45346829169"
+    "capture_run": "https://github.com/parentless/sonder/actions/runs/45765910192"
   },
   "reviewed_changes": [
     "Settings gains General, Connections and System tabs in a left rail; General holds appearance and playback, Connections holds Spotify, Discord and the new opt-in Last.fm section, System holds updates and cache",
@@ -120,6 +120,7 @@
     "0.8.65: the sidebar gains a What's new footer (divider, row and version caption) so every full-window scene changes; the account menu drops What's new (artist-account-menu); Local Files From link and Folders become icon-only outlined buttons; Profile top artists are clickable rows; artist backdrops blur from a smaller source; Settings (the version) and the What's new list changed",
     "0.8.69 returns to the 0.8.65 design: the Window style and Design settings are removed again, so every reference matches 0.8.65 apart from the version text (sidebar footer, Settings) and the new What's new entry",
     "Settings gains an Audio tab holding the equalizer (curve editor, presets, Compare, Save as preset): 8 new references (settings-audio and settings-audio-shaped, light and dark, regular and compact); the System tab moves to the fourth position and every full-window reference shows version 0.8.70",
-    "0.8.71: a heart beside the playing song in the player bar (every scene with a song); search-cached gains a Spotify song with an empty heart in place of its label and the highlighted row is neutral grey; artist portrait is 12rem with the name moved to match; every full-window reference shows version 0.8.71"
+    "0.8.71: a heart beside the playing song in the player bar (every scene with a song); search-cached gains a Spotify song with an empty heart in place of its label and the highlighted row is neutral grey; artist portrait is 12rem with the name moved to match; every full-window reference shows version 0.8.71",
+    "GPUI moves to gpui-kit 0.7.3 (gpui-pre 0.3.9) for gpui-motion-kit: 40 of the references change by a few pixels only: the 3px-wide text caret in the search, setup and Local Files link inputs, a 130x20 patch of the title in the playlist zoom scenes and a 200x2 line in the Soloist key scenes; no control moves, and the sidebar at rest is unchanged"
   ]
 }
