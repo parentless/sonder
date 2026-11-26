@@ -525,9 +525,9 @@ impl PlayerMetadata {
                 .active(|style| style.bg(rgb(palette.control_hover)))
                 .focus_visible(|style| style.border_2().border_color(rgb(palette.focus_ring)))
                 .child(if liked {
-                    components::icon(CadenceIcon::HeartFilled, tokens::LIKE_ICON, palette.liked)
+                    components::icon(CadenceIcon::HeartFilled, tokens::LIKE_ICON, palette.text)
                 } else {
-                    components::icon(CadenceIcon::Heart, tokens::LIKE_ICON, palette.text_muted)
+                    components::icon(CadenceIcon::Heart, tokens::LIKE_ICON, palette.text)
                 })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let liked = this.read_heart(cx).0;

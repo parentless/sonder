@@ -123,8 +123,6 @@ struct CadencePalette {
     link: u32,
     accent_hover: u32,
     on_accent: u32,
-    /// A heart that is filled because the song is in Liked Songs.
-    liked: u32,
 }
 
 impl CadencePalette {
@@ -155,7 +153,6 @@ impl CadencePalette {
         link: 0x0066CC,
         accent_hover: 0x121212,
         on_accent: 0xFFFFFF,
-        liked: 0xD6336C,
     };
 
     const DARK: Self = Self {
@@ -185,7 +182,6 @@ impl CadencePalette {
         link: 0x2997FF,
         accent_hover: 0xFFFFFF,
         on_accent: 0x171717,
-        liked: 0xEE7AA0,
     };
 }
 

@@ -510,9 +510,9 @@ impl Toolbar {
                 window.prevent_default();
             })
             .child(if liked {
-                components::icon(CadenceIcon::HeartFilled, tokens::LIKE_ICON, palette.liked)
+                components::icon(CadenceIcon::HeartFilled, tokens::LIKE_ICON, palette.text)
             } else {
-                components::icon(CadenceIcon::Heart, tokens::LIKE_ICON, palette.text_muted)
+                components::icon(CadenceIcon::Heart, tokens::LIKE_ICON, palette.text)
             })
             .on_click(
                 cx.listener(move |this, event: &gpui_kit::ClickEvent, _, cx| {
