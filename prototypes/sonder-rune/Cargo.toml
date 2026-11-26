@@ -7,6 +7,9 @@ version = "0.0.2"
 edition = "2024"
 publish = false
 
+[build-dependencies]
+embed-resource = "3"
+
 [dependencies]
 rune = { git = "https://github.com/anomalyco/rune", rev = "d6da4d94d04c543b2cac29a4fd10c974f37b1d46", features = ["tooling"] }
 cadence = { path = "../..", default-features = false }

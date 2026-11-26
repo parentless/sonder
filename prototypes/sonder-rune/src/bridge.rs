@@ -31,6 +31,11 @@ pub enum Msg {
         liked: bool,
         ok: bool,
     },
+    /// Spotify's catalog answer for a search.
+    Search {
+        query: String,
+        results: Option<cadence::model::CatalogSearchResults>,
+    },
     /// An album cover's bytes, fetched off-thread.
     Art {
         url: String,
@@ -149,6 +154,25 @@ impl Bridge {
                 liked,
                 ok,
             });
+            wake();
+        });
+    }
+
+    /// Searches Spotify's catalog; the answer comes back as `Msg::Search`.
+    pub fn search(&self, query: String) {
+        let (handle, tx, wake) = (self.handle.clone(), self.outbox.clone(), self.waker.clone());
+        thread::spawn(move || {
+            let (respond, reply) = tokio::sync::oneshot::channel();
+            let sent = handle.send(BackendCommand::SearchCatalog {
+                query: query.clone(),
+                respond,
+            });
+            let results = if sent {
+                reply.blocking_recv().ok().and_then(Result::ok)
+            } else {
+                None
+            };
+            let _ = tx.send(Msg::Search { query, results });
             wake();
         });
     }

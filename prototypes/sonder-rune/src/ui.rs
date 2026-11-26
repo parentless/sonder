@@ -192,23 +192,41 @@ fn sidebar(s: &State, t: &Theme) -> El {
         item
     };
 
-    let toggle = row()
+    // The chevron only closes the sidebar. While it is a rail, the logo opens it again.
+    let collapse = row()
         .key("rail-toggle")
         .size(30.0, 30.0)
         .center()
         .radius(8.0)
         .hover(t.hover)
-        .on_press(|s: &mut State| s.wide = !s.wide)
+        .on_press(|s: &mut State| s.wide = false)
         .child(match icons {
-            Some(i) => icon(if s.wide { &i.back } else { &i.forward }, 18.0, t.muted),
+            Some(i) => icon(&i.back, 18.0, t.muted),
             None => el().size(18.0, 18.0),
         });
+    let mark = match icons {
+        Some(i) => el().size(28.0, 28.0).pixels(i.logo.pixels()),
+        None => el().size(28.0, 28.0).radius(8.0).fill(t.tile),
+    };
+    let logo = if s.wide {
+        row().key("logo").size(32.0, 32.0).center().child(mark)
+    } else {
+        row()
+            .key("logo")
+            .size(40.0, 40.0)
+            .center()
+            .radius(10.0)
+            .hover(t.hover)
+            .press_scale(0.94)
+            .on_press(|s: &mut State| s.wide = true)
+            .child(mark)
+    };
     let brand = row()
         .h(44.0)
-        .px(8.0)
+        .px(if s.wide { 8.0 } else { 2.0 })
         .gap(10.0)
         .center_y()
-        .child(el().size(28.0, 28.0).radius(8.0).fill(t.tile))
+        .child(logo)
         .child(if s.wide {
             text("Sonder")
                 .key("brand")
@@ -221,7 +239,7 @@ fn sidebar(s: &State, t: &Theme) -> El {
         })
         .child(spacer())
         .child(if s.wide {
-            toggle
+            collapse
         } else {
             el().key("rail-toggle-spacer")
         });
@@ -236,23 +254,6 @@ fn sidebar(s: &State, t: &Theme) -> El {
         .clip_rounded(0.0)
         .motion(motion::REFLOW)
         .child(brand);
-    if !s.wide {
-        side = side.child(
-            row().h(34.0).center().child(
-                row()
-                    .key("rail-toggle-collapsed")
-                    .size(30.0, 30.0)
-                    .center()
-                    .radius(8.0)
-                    .hover(t.hover)
-                    .on_press(|s: &mut State| s.wide = true)
-                    .child(icons.map_or_else(
-                        || el().size(18.0, 18.0),
-                        |i| icon(&i.forward, 18.0, t.muted),
-                    )),
-            ),
-        );
-    }
     let i = icons;
     side = side
         .child(nav(
@@ -321,45 +322,71 @@ fn page(s: &State, t: &Theme) -> El {
                     [(0.0, tint.alpha(0.30)), (1.0, Color::TRANSPARENT)],
                 ),
         )
-        .child(top_bar(s, t));
+        .child(el().h(60.0));
     page = page.child(header(s, t, &title, &meta));
+    // Last, so the dropdown draws over the page beneath it.
     if s.page == Page::Playlists {
-        return page.child(playlist_grid(s, t));
+        return page.child(playlist_grid(s, t)).child(top_bar(s, t));
     }
-    page.child(column_header(t)).child(track_list(s, t))
+    page.child(column_header(t))
+        .child(track_list(s, t))
+        .child(top_bar(s, t))
 }
 
 fn top_bar(s: &State, t: &Theme) -> El {
     let field = text_input(&s.query, type_::BODY.lh(22.0))
         .key("search")
-        .label("Search this page")
+        .label("Search Spotify")
         .single_line()
         .grow(1.0)
         .color(t.text)
-        .placeholder("Search this page", t.faint)
+        .placeholder("Search Spotify", t.faint)
         .on_edit(|s: &mut State| &mut s.query)
-        .on_input_change(|s: &mut State, _| s.refresh());
+        .on_input_change(|s: &mut State, _| s.on_search_input())
+        .on_key_preview(|s: &mut State, key, tx| {
+            if key.key == rune::Key::Escape && s.search.open {
+                s.search.open = false;
+                tx.blur();
+                return true;
+            }
+            false
+        });
+    let bar = row()
+        .h(36.0)
+        .w(SEARCH_W)
+        .px(12.0)
+        .gap(8.0)
+        .center_y()
+        .radius(18.0)
+        .fill(Color::WHITE.alpha(0.07))
+        .child(
+            s.icons
+                .as_ref()
+                .map_or_else(|| el().size(18.0, 18.0), |i| icon(&i.search, 18.0, t.muted)),
+        )
+        .child(field);
+    let mut wrap = col()
+        .key("search-wrap")
+        .w(SEARCH_W)
+        .h(36.0)
+        .on_focus_within_change(|s: &mut State, inside, _| {
+            if inside {
+                s.search.open = !s.query.text.trim().is_empty();
+            } else {
+                s.search.open = false;
+            }
+        })
+        .child(bar);
+    if s.search.open {
+        wrap = wrap.child(search_dropdown(s, t));
+    }
     row()
+        .pin(Some(0.0), Some(0.0), Some(0.0), None)
         .h(60.0)
         .px(22.0)
         .gap(10.0)
         .center_y()
-        .child(
-            row()
-                .h(36.0)
-                .w(340.0)
-                .px(12.0)
-                .gap(8.0)
-                .center_y()
-                .radius(18.0)
-                .fill(Color::WHITE.alpha(0.07))
-                .child(
-                    s.icons
-                        .as_ref()
-                        .map_or_else(|| el().size(18.0, 18.0), |i| icon(&i.search, 18.0, t.muted)),
-                )
-                .child(field),
-        )
+        .child(wrap)
         .child(spacer())
         .child(
             text(s.message.clone().unwrap_or_default())
@@ -369,13 +396,173 @@ fn top_bar(s: &State, t: &Theme) -> El {
         )
 }
 
+const SEARCH_W: f32 = 440.0;
+
+/// The panel under the search field: songs already loaded, then Spotify's answer.
+/// It slides up out of the field and fades, and leaves the same way, faster.
+fn search_dropdown(s: &State, t: &Theme) -> El {
+    let section = |label: &'static str| text(label).font(type_::LABEL).color(t.faint).nowrap();
+    let result = |key: String, art: El, title: String, sub: String| {
+        row()
+            .key(key)
+            .w_full()
+            .h(48.0)
+            .px(8.0)
+            .gap(10.0)
+            .center_y()
+            .radius(10.0)
+            .hover(t.hover)
+            .press_scale(0.99)
+            .child(art)
+            .child(
+                col()
+                    .grow(1.0)
+                    .min_w(0.0)
+                    .child(
+                        text(title)
+                            .font(type_::BODY)
+                            .color(t.text)
+                            .nowrap()
+                            .truncate(),
+                    )
+                    .child(
+                        text(sub)
+                            .font(type_::LABEL)
+                            .color(t.muted)
+                            .nowrap()
+                            .truncate(),
+                    ),
+            )
+    };
+
+    let mut list = col().w_full().gap(2.0);
+    let mut any = false;
+    if !s.search.library.is_empty() {
+        any = true;
+        list = list.child(pad(section("In your library")));
+        for (i, track) in s.search.library.iter().enumerate() {
+            let pool = s.search.library.clone();
+            list = list.child(
+                result(
+                    format!("sr-lib-{i}"),
+                    cover(s, Some(track), 32.0, 6.0, t),
+                    track.title.to_string(),
+                    track.artist.to_string(),
+                )
+                .on_press(move |s: &mut State| s.play_found(pool.clone(), i)),
+            );
+        }
+    }
+    let live = s
+        .search
+        .live
+        .as_ref()
+        .filter(|(q, _)| q == s.query.text.trim())
+        .map(|(_, r)| r);
+    if let Some(live) = live {
+        let tracks: Vec<Track> = live
+            .tracks
+            .iter()
+            .filter(|t| !s.search.library.iter().any(|l| l.source_id == t.source_id))
+            .take(3)
+            .cloned()
+            .collect();
+        if !tracks.is_empty() {
+            any = true;
+            list = list.child(pad(section("Songs")));
+            for (i, track) in tracks.iter().enumerate() {
+                let pool = tracks.clone();
+                list = list.child(
+                    result(
+                        format!("sr-song-{i}"),
+                        cover(s, Some(track), 32.0, 6.0, t),
+                        track.title.to_string(),
+                        track.artist.to_string(),
+                    )
+                    .on_press(move |s: &mut State| s.play_found(pool.clone(), i)),
+                );
+            }
+        }
+        if !live.artists.is_empty() {
+            any = true;
+            list = list.child(pad(section("Artists")));
+            for (i, artist) in live.artists.iter().take(2).enumerate() {
+                list = list.child(
+                    result(
+                        format!("sr-artist-{i}"),
+                        cover_url(s, artist.artwork_url.as_deref(), 32.0, 16.0, t),
+                        artist.name.to_string(),
+                        "Artist".into(),
+                    )
+                    .on_press(|s: &mut State| {
+                        s.message = Some("Artist pages are not in this build yet.".into());
+                    }),
+                );
+            }
+        }
+        if !live.albums.is_empty() {
+            any = true;
+            list = list.child(pad(section("Albums")));
+            for (i, album) in live.albums.iter().take(2).enumerate() {
+                list = list.child(
+                    result(
+                        format!("sr-album-{i}"),
+                        cover_url(s, album.artwork_url.as_deref(), 32.0, 6.0, t),
+                        album.name.to_string(),
+                        album.release_date.clone().unwrap_or_else(|| "Album".into()),
+                    )
+                    .on_press(|s: &mut State| {
+                        s.message = Some("Album pages are not in this build yet.".into());
+                    }),
+                );
+            }
+        }
+    }
+    let waiting = s.search.loading || s.search.due.is_some();
+    if waiting && live.is_none() {
+        list = list.child(pad(section("Searching Spotify…")));
+    } else if !any && !waiting {
+        list = list.child(pad(section("No results")));
+    }
+
+    col()
+        .key("search-drop")
+        .absolute(0.0, 42.0)
+        .w(SEARCH_W)
+        .padding(8.0)
+        .radius(16.0)
+        .fill(theme::c("#242427"))
+        .box_shadow(rune::Shadow::core_animation(
+            0.0,
+            14.0,
+            30.0,
+            Color::BLACK.alpha(0.45),
+        ))
+        .motion(motion::REFLOW)
+        .transition(Transition::offset(0.0, -6.0))
+        .child(list)
+}
+
+fn pad(label: El) -> El {
+    row().w_full().h(26.0).px(8.0).center_y().child(label)
+}
+
 fn cover(s: &State, track: Option<&Track>, size: f32, radius: f32, t: &Theme) -> El {
+    cover_url(
+        s,
+        track.and_then(|t| t.artwork_url.as_deref()),
+        size,
+        radius,
+        t,
+    )
+}
+
+fn cover_url(s: &State, url: Option<&str>, size: f32, radius: f32, t: &Theme) -> El {
     let tile = el()
         .size(size, size)
         .radius(radius)
         .fill(t.tile)
         .clip_rounded(radius);
-    let url = track.and_then(|track| track.artwork_url.as_deref());
     match (
         url.and_then(|u| s.art.as_ref().and_then(|a| a.get(u))),
         s.icons.as_ref(),
@@ -558,6 +745,7 @@ fn track_row(s: &State, index: usize, position: usize) -> El {
             .color(t.faint)
     };
 
+    let selected = s.selected.as_deref() == Some(track.source_id.as_str());
     row()
         .key(format!("row-{index}"))
         .w_full()
@@ -567,8 +755,18 @@ fn track_row(s: &State, index: usize, position: usize) -> El {
         .center_y()
         .radius(10.0)
         .hover_group()
-        .hover(t.hover)
-        .on_press(move |s: &mut State| s.play_from(index))
+        .fill(if selected {
+            t.active
+        } else {
+            Color::TRANSPARENT
+        })
+        .hover(if selected { t.active } else { t.hover })
+        // One click picks the row; two play it.
+        .on_press({
+            let id = track.source_id.clone();
+            move |s: &mut State| s.selected = Some(id.clone())
+        })
+        .on_double_press(move |s: &mut State| s.play_from(index))
         .child(el().w(34.0).child(number))
         .child(cover(s, Some(track), 40.0, 6.0, &t))
         .child(

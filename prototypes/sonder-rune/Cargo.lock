@@ -8577,6 +8577,7 @@ name = "sonder-rune"
 version = "0.0.2"
 dependencies = [
  "cadence",
+ "embed-resource",
  "rune",
  "tokio",
  "ureq",

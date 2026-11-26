@@ -111,6 +111,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
         base(s);
         s.query = rune::TextEdit::new("glass");
         s.refresh();
+        s.on_search_input();
+        s.search.live = Some(("glass".into(), live()));
     }),
     ("nowplaying", |s| {
         base(s);
@@ -123,3 +125,30 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
         s.conn = Conn::Setup;
     }),
 ];
+
+/// What Spotify might answer for the search picture.
+fn live() -> cadence::model::CatalogSearchResults {
+    use cadence::model::{Album, Artist, CatalogSearchResults, Provider};
+    let artist = |n: &str| Artist {
+        provider: Provider::Spotify,
+        source_id: n.into(),
+        spotify_uri: None,
+        name: n.to_owned().into(),
+        artwork_url: None,
+        genres: Vec::new(),
+    };
+    CatalogSearchResults {
+        artists: vec![artist("Glass Animals"), artist("Glassjaw")],
+        albums: vec![Album {
+            provider: Provider::Spotify,
+            source_id: "zabba".into(),
+            spotify_uri: None,
+            name: "Zabba".to_owned().into(),
+            artists: Vec::new(),
+            release_date: Some("2020".into()),
+            artwork_url: None,
+            track_count: Some(11),
+        }],
+        tracks: (20..24).map(track).collect(),
+    }
+}

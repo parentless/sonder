@@ -39,17 +39,24 @@ pub struct Icons {
     pub shuffle: Image,
     pub queue: Image,
     pub back: Image,
-    pub forward: Image,
     pub down: Image,
     pub search: Image,
     pub note: Image,
+    /// Sonder's mark in its own colours (not tinted).
+    pub logo: Image,
 }
 
 impl Icons {
     pub fn new(waker: Waker) -> Icons {
         let cache = ImageCache::new(waker);
         let make = |svg: &str, size: f32| cache.svg(svg.as_bytes(), size, 2.0);
+        let logo = cache.svg(
+            &include_bytes!("../../../assets/sonder-mark.svg")[..],
+            28.0,
+            3.0,
+        );
         Icons {
+            logo,
             heart: make(
                 svg!(
                     r#"<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>"#
@@ -95,7 +102,6 @@ impl Icons {
                 20.0,
             ),
             back: make(svg!(r#"<path d="M15 6l-6 6 6 6"/>"#), 18.0),
-            forward: make(svg!(r#"<path d="M9 6l6 6-6 6"/>"#), 18.0),
             down: make(svg!(r#"<path d="M6 9l6 6 6-6"/>"#), 18.0),
             search: make(
                 svg!(r#"<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>"#),

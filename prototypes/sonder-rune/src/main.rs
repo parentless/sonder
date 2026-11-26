@@ -13,6 +13,7 @@ mod disk;
 mod icons;
 mod memory;
 mod sample;
+mod search;
 mod theme;
 mod ui;
 
@@ -83,6 +84,9 @@ pub struct State {
 
     pub page: Page,
     pub query: TextEdit,
+    pub search: search::Search,
+    /// The row a single click picked; a double click plays it.
+    pub selected: Option<String>,
     /// Indexes into the page's songs that match the search, in order.
     pub shown: Vec<usize>,
 
@@ -117,6 +121,8 @@ impl Default for State {
             loaded: false,
             page: Page::Liked,
             query: TextEdit::new(""),
+            search: search::Search::default(),
+            selected: None,
             shown: Vec::new(),
             now: None,
             up_next: Vec::new(),
@@ -143,20 +149,9 @@ impl State {
         }
     }
 
-    /// Recomputes which songs the search lets through.
+    /// Lists every song of the page.
     pub fn refresh(&mut self) {
-        let source = self.source();
-        let query = self.query.text.trim().to_lowercase();
-        self.shown = (0..source.tracks.len())
-            .filter(|&i| {
-                query.is_empty() || {
-                    let track = &source.tracks[i];
-                    track.title.to_lowercase().contains(&query)
-                        || track.artist.to_lowercase().contains(&query)
-                        || track.album.to_lowercase().contains(&query)
-                }
-            })
-            .collect();
+        self.shown = (0..self.source().tracks.len()).collect();
     }
 
     pub fn go(&mut self, page: Page) {
@@ -176,6 +171,8 @@ impl State {
         }
         self.page = page;
         self.query = TextEdit::new("");
+        self.search = search::Search::default();
+        self.selected = None;
         self.refresh();
     }
 
@@ -392,6 +389,7 @@ impl State {
                         self.message = Some("Could not update your liked songs.".into());
                     }
                 }
+                Msg::Search { query, results } => self.on_search_results(query, results),
                 Msg::Art { url, bytes } => {
                     if let Some(art) = self.art.as_mut() {
                         art.supply(url, bytes);
@@ -426,6 +424,9 @@ fn poll(s: &mut State, clock: f64, tx: &mut Tx) -> bool {
         for url in art.take_wanted() {
             bridge.fetch_art(url);
         }
+    }
+    if s.tick_search() {
+        tx.wake_after(Duration::from_millis(100));
     }
     // The progress bar moves once a second, and only while something plays.
     if s.playing {
@@ -471,22 +472,6 @@ mod tests {
         let mut s = State::default();
         (sample::SCENES[0].1)(&mut s);
         s
-    }
-
-    #[test]
-    fn the_search_keeps_only_songs_that_match() {
-        let mut s = loaded();
-        let all = s.shown.len();
-        s.query = TextEdit::new("glass");
-        s.refresh();
-        assert!(!s.shown.is_empty() && s.shown.len() < all);
-        let tracks = s.source().tracks;
-        assert!(s.shown.iter().all(|&i| {
-            let t = &tracks[i];
-            [t.title.as_ref(), t.artist.as_ref(), t.album.as_ref()]
-                .iter()
-                .any(|f| f.to_lowercase().contains("glass"))
-        }));
     }
 
     #[test]
