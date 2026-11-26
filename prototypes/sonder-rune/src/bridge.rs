@@ -31,6 +31,14 @@ pub enum Msg {
         liked: bool,
         ok: bool,
     },
+    Album {
+        id: String,
+        result: Option<cadence::backend::AlbumDetails>,
+    },
+    Artist {
+        id: String,
+        result: Option<cadence::backend::ArtistDetails>,
+    },
     /// Spotify's catalog answer for a search.
     Search {
         query: String,
@@ -154,6 +162,42 @@ impl Bridge {
                 liked,
                 ok,
             });
+            wake();
+        });
+    }
+
+    pub fn load_album(&self, id: String) {
+        let (handle, tx, wake) = (self.handle.clone(), self.outbox.clone(), self.waker.clone());
+        thread::spawn(move || {
+            let (respond, reply) = tokio::sync::oneshot::channel();
+            let sent = handle.send(BackendCommand::LoadAlbum {
+                source_id: id.clone(),
+                respond,
+            });
+            let result = if sent {
+                reply.blocking_recv().ok().and_then(Result::ok)
+            } else {
+                None
+            };
+            let _ = tx.send(Msg::Album { id, result });
+            wake();
+        });
+    }
+
+    pub fn load_artist(&self, id: String) {
+        let (handle, tx, wake) = (self.handle.clone(), self.outbox.clone(), self.waker.clone());
+        thread::spawn(move || {
+            let (respond, reply) = tokio::sync::oneshot::channel();
+            let sent = handle.send(BackendCommand::LoadArtist {
+                source_id: id.clone(),
+                respond,
+            });
+            let result = if sent {
+                reply.blocking_recv().ok().and_then(Result::ok)
+            } else {
+                None
+            };
+            let _ = tx.send(Msg::Artist { id, result });
             wake();
         });
     }

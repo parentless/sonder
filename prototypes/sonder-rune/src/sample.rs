@@ -71,6 +71,12 @@ fn base(s: &mut State) {
             artwork_url: None,
         })
         .collect();
+    s.profile = Some(cadence::model::UserProfile {
+        display_name: "Trent".into(),
+        artwork_url: None,
+        id: "trent".into(),
+    });
+    s.pinned = ["pl3".to_owned()].into();
     s.loaded = true;
     s.conn = Conn::Ready;
     s.now = Some(track(2));
@@ -113,6 +119,38 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
         s.refresh();
         s.on_search_input();
         s.search.live = Some(("glass".into(), live()));
+    }),
+    ("menu", |s| {
+        base(s);
+        s.menu = true;
+    }),
+    ("settings", |s| {
+        base(s);
+        s.page = Page::Settings;
+    }),
+    ("album", |s| {
+        base(s);
+        let tracks: Vec<Track> = (0..11).map(track).collect();
+        s.details.insert(
+            "al".into(),
+            crate::Detail {
+                title: "Midnight Sessions".into(),
+                sub: "Tame Impala · 2020 · 11 songs".into(),
+                art: None,
+                round: false,
+            },
+        );
+        s.opened.insert(
+            "album:al".into(),
+            Source {
+                total: 11,
+                done: true,
+                tracks: tracks.into(),
+                error: None,
+            },
+        );
+        s.page = Page::Album("al".into());
+        s.refresh();
     }),
     ("nowplaying", |s| {
         base(s);

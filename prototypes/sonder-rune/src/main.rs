@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cadence::backend::{BackendCommand, BackendEvent};
-use cadence::model::{Playlist, Track};
+use cadence::model::{Playlist, Track, UserProfile};
 use rune::{AppSpec, Cx, El, TextEdit, Tx, Waker};
 
 use bridge::{Bridge, Msg};
@@ -45,6 +45,19 @@ pub enum Page {
     Playlists,
     Recent,
     Playlist(String),
+    Album(String),
+    Artist(String),
+    Settings,
+}
+
+/// What an album or artist page says about itself.
+#[derive(Clone, Default)]
+pub struct Detail {
+    pub title: String,
+    pub sub: String,
+    pub art: Option<String>,
+    /// Artists are pictured in circles.
+    pub round: bool,
 }
 
 /// The songs behind one page, shared so playing from a long list copies nothing.
@@ -87,6 +100,15 @@ pub struct State {
     pub search: search::Search,
     /// The row a single click picked; a double click plays it.
     pub selected: Option<String>,
+    pub profile: Option<UserProfile>,
+    /// Whether the profile menu is down.
+    pub menu: bool,
+    pub volume: f32,
+    /// Where the progress bar is held while it is being dragged (0..1).
+    pub scrub: Option<f32>,
+    /// Playlists the listener pinned; the sidebar lists them first.
+    pub pinned: HashSet<String>,
+    pub details: HashMap<String, Detail>,
     /// Indexes into the page's songs that match the search, in order.
     pub shown: Vec<usize>,
 
@@ -123,6 +145,12 @@ impl Default for State {
             query: TextEdit::new(""),
             search: search::Search::default(),
             selected: None,
+            profile: None,
+            menu: false,
+            volume: 0.72,
+            scrub: None,
+            pinned: HashSet::new(),
+            details: HashMap::new(),
             shown: Vec::new(),
             now: None,
             up_next: Vec::new(),
@@ -145,7 +173,17 @@ impl State {
             Page::Liked => self.liked.clone(),
             Page::Recent => self.recent.clone(),
             Page::Playlist(id) => self.opened.get(id).cloned().unwrap_or_default(),
-            Page::Playlists => Source::default(),
+            Page::Album(id) => self
+                .opened
+                .get(&format!("album:{id}"))
+                .cloned()
+                .unwrap_or_default(),
+            Page::Artist(id) => self
+                .opened
+                .get(&format!("artist:{id}"))
+                .cloned()
+                .unwrap_or_default(),
+            Page::Playlists | Page::Settings => Source::default(),
         }
     }
 
@@ -169,6 +207,23 @@ impl State {
                 }
             }
         }
+        match &page {
+            Page::Album(id) if !self.opened.contains_key(&format!("album:{id}")) => {
+                self.opened.insert(format!("album:{id}"), Source::default());
+                if let Some(bridge) = &self.bridge {
+                    bridge.load_album(id.clone());
+                }
+            }
+            Page::Artist(id) if !self.opened.contains_key(&format!("artist:{id}")) => {
+                self.opened
+                    .insert(format!("artist:{id}"), Source::default());
+                if let Some(bridge) = &self.bridge {
+                    bridge.load_artist(id.clone());
+                }
+            }
+            _ => {}
+        }
+        self.menu = false;
         self.page = page;
         self.query = TextEdit::new("");
         self.search = search::Search::default();
@@ -191,6 +246,21 @@ impl State {
                 index,
             });
         }
+    }
+
+    /// Jumps to `fraction` of the current song.
+    pub fn seek_to(&mut self, fraction: f32) {
+        let Some(now) = &self.now else { return };
+        let ms = (now.duration_ms as f32 * fraction.clamp(0.0, 1.0)) as u32;
+        self.anchor_ms = ms;
+        self.anchor_at = self.clock;
+        self.second = ms / 1000;
+        self.send(BackendCommand::Seek(ms));
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume = volume.clamp(0.0, 1.0);
+        self.send(BackendCommand::SetVolume(self.volume));
     }
 
     pub fn toggle_play(&mut self) {
@@ -240,7 +310,11 @@ impl State {
 
     fn apply(&mut self, event: BackendEvent) {
         match event {
-            BackendEvent::SetupRequired => self.conn = Conn::Setup,
+            BackendEvent::SetupRequired => {
+                self.conn = Conn::Setup;
+                // A reset sends the listener back through setup.
+                self.loaded = false;
+            }
             BackendEvent::SpotifyConfigured { generation, .. } => {
                 if generation == self.config_serial && generation != 0 {
                     self.conn = Conn::Connecting;
@@ -253,10 +327,26 @@ impl State {
                     "Could not set up Spotify. Check the Client ID. {error}"
                 ));
             }
-            BackendEvent::AuthorizationRequired | BackendEvent::LoggedOut => {
+            BackendEvent::LoggedOut => {
+                // Back to the sign-in screen with nothing of the last account left.
+                let bridge = self.bridge.take();
+                let (art, icons) = (self.art.take(), self.icons.take());
+                *self = State {
+                    bridge,
+                    art,
+                    icons,
+                    conn: Conn::Login,
+                    clock: self.clock,
+                    ..State::default()
+                };
+            }
+            BackendEvent::AuthorizationRequired => {
                 if self.conn != Conn::Connecting {
                     self.conn = Conn::Login;
                 }
+            }
+            BackendEvent::ProfileLoaded { profile, .. } => {
+                self.profile = Some(profile);
             }
             BackendEvent::CatalogReady { .. } => {
                 if self.conn != Conn::Premium {
@@ -277,8 +367,11 @@ impl State {
                 self.set_library(liked_tracks, playlists);
             }
             BackendEvent::LocalStateLoaded {
-                recently_played, ..
+                recently_played,
+                pinned_playlists,
+                ..
             } => {
+                self.pinned = pinned_playlists.into_iter().map(|p| p.source_id).collect();
                 self.recent = Source {
                     total: recently_played.len() as u32,
                     done: true,
@@ -388,6 +481,74 @@ impl State {
                         }
                         self.message = Some("Could not update your liked songs.".into());
                     }
+                }
+                Msg::Album { id, result } => {
+                    let key = format!("album:{id}");
+                    match result {
+                        Some((album, tracks)) => {
+                            let artists: Vec<_> =
+                                album.artists.iter().map(|a| a.name.to_string()).collect();
+                            let year = album.release_date.as_deref().unwrap_or("").get(..4);
+                            let mut sub = artists.join(", ");
+                            if let Some(year) = year {
+                                sub = format!("{sub} · {year}");
+                            }
+                            sub = format!("{sub} · {} songs", tracks.len());
+                            self.details.insert(
+                                id.clone(),
+                                Detail {
+                                    title: album.name.to_string(),
+                                    sub,
+                                    art: album.artwork_url.clone(),
+                                    round: false,
+                                },
+                            );
+                            self.opened.insert(
+                                key,
+                                Source {
+                                    total: tracks.len() as u32,
+                                    done: true,
+                                    tracks: tracks.into(),
+                                    error: None,
+                                },
+                            );
+                        }
+                        None => {
+                            self.opened.entry(key).or_default().error =
+                                Some("The album could not be loaded.".into());
+                        }
+                    }
+                    self.refresh();
+                }
+                Msg::Artist { id, result } => {
+                    let key = format!("artist:{id}");
+                    match result {
+                        Some((artist, tracks, _albums)) => {
+                            self.details.insert(
+                                id.clone(),
+                                Detail {
+                                    title: artist.name.to_string(),
+                                    sub: "Popular songs".into(),
+                                    art: artist.artwork_url.clone(),
+                                    round: true,
+                                },
+                            );
+                            self.opened.insert(
+                                key,
+                                Source {
+                                    total: tracks.len() as u32,
+                                    done: true,
+                                    tracks: tracks.into(),
+                                    error: None,
+                                },
+                            );
+                        }
+                        None => {
+                            self.opened.entry(key).or_default().error =
+                                Some("The artist could not be loaded.".into());
+                        }
+                    }
+                    self.refresh();
                 }
                 Msg::Search { query, results } => self.on_search_results(query, results),
                 Msg::Art { url, bytes } => {

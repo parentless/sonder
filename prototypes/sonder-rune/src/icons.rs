@@ -42,6 +42,9 @@ pub struct Icons {
     pub down: Image,
     pub search: Image,
     pub note: Image,
+    pub volume: Image,
+    pub settings: Image,
+    pub logout: Image,
     /// Sonder's mark in its own colours (not tinted).
     pub logo: Image,
 }
@@ -55,8 +58,29 @@ impl Icons {
             28.0,
             3.0,
         );
+        let volume = make(
+            svg!(
+                r#"<path d="M4 9.5v5h4l5 4v-13l-5 4z"/><path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"/>"#
+            ),
+            20.0,
+        );
+        let settings = make(
+            svg!(
+                r#"<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>"#
+            ),
+            20.0,
+        );
+        let logout = make(
+            svg!(
+                r#"<path d="M10 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h4"/><path d="M15 8l4 4-4 4M19 12H9"/>"#
+            ),
+            20.0,
+        );
         Icons {
             logo,
+            volume,
+            settings,
+            logout,
             heart: make(
                 svg!(
                     r#"<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>"#
