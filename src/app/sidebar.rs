@@ -1002,26 +1002,27 @@ impl Sidebar {
                         div()
                             .flex()
                             .flex_col()
-                            .gap_1()
                             .when(labels_shown, |nav| {
+                                // The label sits outside the rows' gapped column, and the
+                                // space under it is its own padding on an inner div, so one
+                                // height shrinks to nothing: a negative margin or padding on
+                                // the shrinking block itself leaves a few pixels behind that
+                                // jump when it unmounts.
                                 nav.child(
                                     collapsing(
-                                        // Padding lives on an inner div: padding on the
-                                        // shrinking block would keep it 0.25rem tall at
-                                        // rest-collapsed, then jump when it unmounts.
                                         div().child(
-                                            div().px_3().pb_1().child(components::section_label(
+                                            div().px_3().pb_2().child(components::section_label(
                                                 palette, "Library",
                                             )),
                                         ),
                                         progress,
-                                        SECTION_LABEL_HEIGHT + Rems(0.25),
-                                        Rems(0.25),
+                                        SECTION_LABEL_HEIGHT + Rems(0.5),
+                                        Rems(0.),
                                     )
                                     .opacity(progress),
                                 )
                             })
-                            .children(nav_rows),
+                            .child(div().flex().flex_col().gap_1().children(nav_rows)),
                     )
                     .when(show_pinned, |sidebar| {
                         sidebar.child(
