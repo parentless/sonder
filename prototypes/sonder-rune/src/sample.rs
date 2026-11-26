@@ -127,6 +127,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("settings", |s| {
         base(s);
         s.page = Page::Settings;
+        s.prefs.equalizer.enabled = true;
+        s.prefs.equalizer.steps = [12, 6, 0, -4, 8];
     }),
     ("album", |s| {
         base(s);

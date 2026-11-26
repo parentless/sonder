@@ -446,6 +446,15 @@ pub enum BackendCommand {
     },
     PlayNext(Track),
     AppendToQueue(Track),
+    /// Drops an upcoming song; `offset` counts from the playing one (1 is next).
+    RemoveQueueItem {
+        offset: usize,
+    },
+    /// Moves an upcoming song to another place among the upcoming ones.
+    MoveQueueItem {
+        from: usize,
+        to: usize,
+    },
     /// The track started playing, so it belongs in the listening history.
     MarkPlayed(Track),
     RestorePlayback {
@@ -1559,6 +1568,8 @@ impl Worker {
             }
             BackendCommand::PlayNext(track) => self.play_next(track).await,
             BackendCommand::AppendToQueue(track) => self.append_to_queue(track).await,
+            BackendCommand::RemoveQueueItem { offset } => self.remove_queue_item(offset).await,
+            BackendCommand::MoveQueueItem { from, to } => self.move_queue_item(from, to).await,
             BackendCommand::RestorePlayback {
                 position_ms,
                 playing,
@@ -1926,6 +1937,34 @@ impl Worker {
         }
         self.priority_next += 1;
         Ok(())
+    }
+
+    /// Removes the upcoming song `offset` places after the playing one.
+    async fn remove_queue_item(&mut self, offset: usize) -> Result<()> {
+        let index = self.queue.index.context("Nothing is currently playing")?;
+        let target = index + offset;
+        if offset == 0 || target >= self.queue.tracks.len() {
+            return Ok(());
+        }
+        let mut updated_tracks = self.queue.tracks.clone();
+        updated_tracks.remove(target);
+        self.replace_queue(updated_tracks, index).await?;
+        // A removed Play Next / Add to Queue entry no longer holds priority.
+        self.priority_next = self.priority_next.saturating_sub(usize::from(offset <= self.priority_next));
+        Ok(())
+    }
+
+    /// Moves the upcoming song at `from` to `to` (both counted from the playing one).
+    async fn move_queue_item(&mut self, from: usize, to: usize) -> Result<()> {
+        let index = self.queue.index.context("Nothing is currently playing")?;
+        let len = self.queue.tracks.len();
+        if from == 0 || to == 0 || from == to || index + from >= len || index + to >= len {
+            return Ok(());
+        }
+        let mut updated_tracks = self.queue.tracks.clone();
+        let track = updated_tracks.remove(index + from);
+        updated_tracks.insert(index + to, track);
+        self.replace_queue(updated_tracks, index).await
     }
 
     async fn append_to_queue(&mut self, track: Track) -> Result<()> {

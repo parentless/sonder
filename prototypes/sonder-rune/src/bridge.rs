@@ -14,6 +14,8 @@ use rune::Waker;
 /// Everything the UI thread hears about.
 pub enum Msg {
     Event(BackendEvent),
+    /// The saved preferences, read once at start.
+    Prefs(cadence::storage::AppPreferences),
     /// One page of a playlist's songs; `done` once the last page arrived.
     PlaylistPage {
         id: String,
@@ -219,6 +221,29 @@ impl Bridge {
             move |respond| BackendCommand::LoadHome { range, respond },
             move |result| Msg::Home { range, result },
         );
+    }
+
+    /// Reads the saved preferences once.
+    pub fn load_prefs(&self) {
+        let (tx, wake) = (self.outbox.clone(), self.waker.clone());
+        thread::spawn(move || {
+            if let Some(p) = cadence::storage::Store::open_default()
+                .ok()
+                .and_then(|s| s.preferences().ok())
+            {
+                let _ = tx.send(Msg::Prefs(p));
+                wake();
+            }
+        });
+    }
+
+    /// Saves one preference off the UI thread.
+    pub fn save_pref(&self, f: impl FnOnce(&mut cadence::storage::Store) + Send + 'static) {
+        thread::spawn(move || {
+            if let Ok(mut store) = cadence::storage::Store::open_default() {
+                f(&mut store);
+            }
+        });
     }
 
     /// Reads the saved Local Files folders, then (with any) scans them.

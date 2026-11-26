@@ -736,6 +736,7 @@ fn settings_body(s: &State, t: &Theme) -> El {
             line("Covers cache", "Up to 48 MB on disk".into()),
         ],
     );
+    let audio = card("Audio", audio_rows(s, t));
     let mut folders: Vec<El> = Vec::new();
     for (n, folder) in s.local.folders.iter().enumerate() {
         let path = folder.clone();
@@ -815,6 +816,7 @@ fn settings_body(s: &State, t: &Theme) -> El {
                 .gap(14.0)
                 .child(account)
                 .child(playback)
+                .child(audio)
                 .child(local)
                 .child(about),
         )
@@ -1296,10 +1298,9 @@ pub(crate) fn more_button(s: &State, track: &Track, t: &Theme) -> El {
         .hover(Color::WHITE.alpha(0.08))
         .press_scale(0.88)
         .group_opacity(0.0, 1.0)
-        .on_any_press(move |s: &mut State, button, e, _| {
-            if button == rune::PointerButton::Primary {
-                s.open_track_menu(track.clone(), e.window_y);
-            }
+        .on_press_tx(move |s: &mut State, tx| {
+            let y = tx.press_point().map_or(200.0, |p| p.window_y);
+            s.open_track_menu(track.clone(), y);
         })
         .child(
             s.icons
@@ -1470,6 +1471,12 @@ fn player_bar(s: &State, t: &Theme) -> El {
                     button("shuffle", icons.map(|i| &i.shuffle)).on_press(|s: &mut State| {
                         s.shuffle = !s.shuffle;
                         s.send(cadence::backend::BackendCommand::SetShuffle(s.shuffle));
+                        let on = s.shuffle;
+                        if let Some(b) = &s.bridge {
+                            b.save_pref(move |st| {
+                                let _ = st.set_shuffle(on);
+                            });
+                        }
                     }),
                 )
                 .child(
@@ -1547,7 +1554,17 @@ fn player_bar(s: &State, t: &Theme) -> El {
             90.0,
             s.volume,
             t,
-            |s: &mut State, f, _| s.set_volume(f),
+            |s: &mut State, f, done| {
+                s.set_volume(f);
+                if done {
+                    let pct = (s.volume * 100.0).round() as u8;
+                    if let Some(b) = &s.bridge {
+                        b.save_pref(move |st| {
+                            let _ = st.set_volume_percent(pct);
+                        });
+                    }
+                }
+            },
         ))
         .child(el().w(8.0))
         .child(
@@ -1665,7 +1682,7 @@ fn now_playing(s: &State, t: &Theme) -> El {
                 .press_scale(0.98)
                 // Pressing a queued song jumps straight to it.
                 .on_press(move |s: &mut State| {
-                    s.send(cadence::backend::BackendCommand::PlayQueueItem { offset: i })
+                    s.send(cadence::backend::BackendCommand::PlayQueueItem { offset: i + 1 })
                 })
                 .child(cover(s, Some(track), 32.0, 5.0, t))
                 .child(
@@ -1686,7 +1703,39 @@ fn now_playing(s: &State, t: &Theme) -> El {
                                 .nowrap()
                                 .truncate(),
                         ),
-                ),
+                )
+                .child(queue_btn(
+                    format!("up-up-{i}"),
+                    "↑",
+                    t,
+                    move |s: &mut State| {
+                        if i > 0 {
+                            s.send(cadence::backend::BackendCommand::MoveQueueItem {
+                                from: i + 1,
+                                to: i,
+                            })
+                        }
+                    },
+                ))
+                .child(queue_btn(
+                    format!("up-dn-{i}"),
+                    "↓",
+                    t,
+                    move |s: &mut State| {
+                        s.send(cadence::backend::BackendCommand::MoveQueueItem {
+                            from: i + 1,
+                            to: i + 2,
+                        })
+                    },
+                ))
+                .child(queue_btn(
+                    format!("up-rm-{i}"),
+                    "✕",
+                    t,
+                    move |s: &mut State| {
+                        s.send(cadence::backend::BackendCommand::RemoveQueueItem { offset: i + 1 })
+                    },
+                )),
         );
     }
     let close = row()
@@ -1741,5 +1790,251 @@ fn now_playing(s: &State, t: &Theme) -> El {
                     ),
                 )
                 .child(queue),
+        )
+}
+
+/// Small text button on a queue row (move up, move down, remove).
+fn queue_btn(key: String, glyph: &'static str, t: &Theme, f: impl Fn(&mut State) + 'static) -> El {
+    row()
+        .key(key)
+        .size(24.0, 24.0)
+        .center()
+        .radius(12.0)
+        .hover(Color::WHITE.alpha(0.14))
+        .press_scale(0.9)
+        .on_press(f)
+        .child(text(glyph).font(type_::LABEL).color(t.muted))
+}
+
+/// A switch row: label on the left, an on/off pill on the right.
+fn toggle_row(
+    key: &'static str,
+    label: &'static str,
+    on: bool,
+    t: &Theme,
+    f: impl Fn(&mut State) + 'static,
+) -> El {
+    let ink = theme::c("#111111");
+    let mut track = row()
+        .key(key)
+        .w(44.0)
+        .h(24.0)
+        .radius(12.0)
+        .px(3.0)
+        .center_y()
+        .fill(if on { t.text } else { Color::WHITE.alpha(0.16) })
+        .press_scale(0.96)
+        .on_press(f);
+    if on {
+        track = track.justify_end();
+    }
+    row()
+        .w_full()
+        .center_y()
+        .gap(12.0)
+        .child(text(label).font(type_::BODY).color(t.text).grow(1.0))
+        .child(
+            track.child(
+                el().size(18.0, 18.0)
+                    .radius(9.0)
+                    .fill(if on { ink } else { t.muted }),
+            ),
+        )
+}
+
+/// A row of choice chips; the chosen one is lit.
+fn choice_row(
+    label: &'static str,
+    chips: Vec<(String, bool, Box<dyn Fn(&mut State)>)>,
+    t: &Theme,
+) -> El {
+    let ink = theme::c("#111111");
+    let mut r = row().gap(6.0).center_y();
+    for (n, (name, on, f)) in chips.into_iter().enumerate() {
+        r = r.child(
+            row()
+                .key(format!("chip-{label}-{n}"))
+                .h(28.0)
+                .px(12.0)
+                .center()
+                .radius(14.0)
+                .fill(if on { t.text } else { t.pill })
+                .hover(if on { t.text } else { t.hover })
+                .press_scale(0.97)
+                .on_press(move |s: &mut State| f(s))
+                .child(
+                    text(name)
+                        .font(type_::LABEL)
+                        .color(if on { ink } else { t.pill_text }),
+                ),
+        );
+    }
+    col()
+        .w_full()
+        .gap(8.0)
+        .child(text(label).font(type_::BODY).color(t.muted))
+        .child(r)
+}
+
+/// Equalizer, loudness, autoplay, quality and player engine.
+fn audio_rows(s: &State, t: &Theme) -> Vec<El> {
+    use cadence::equalizer::{BAND_COUNT, FREQUENCIES, MAX_GAIN_DB, PRESETS, Settings};
+    use cadence::storage::StreamingQuality;
+    let p = s.prefs;
+    let eq = p.equalizer;
+    let mut rows = vec![toggle_row("eq-on", "Equalizer", eq.enabled, t, |s| {
+        let mut e = s.prefs.equalizer;
+        e.enabled = !e.enabled;
+        s.set_equalizer(e);
+    })];
+    if eq.enabled {
+        let mut presets = Vec::new();
+        for preset in PRESETS.iter() {
+            let steps = Settings::default().with_gains(preset.gains).steps;
+            presets.push((
+                preset.name.to_owned(),
+                eq.steps == steps,
+                Box::new(move |s: &mut State| {
+                    let mut e = s.prefs.equalizer;
+                    e.steps = steps;
+                    s.set_equalizer(e);
+                }) as Box<dyn Fn(&mut State)>,
+            ));
+        }
+        rows.push(choice_row("Preset", presets, t));
+        let gains = eq.gains_db();
+        for band in 0..BAND_COUNT {
+            let hz = FREQUENCIES[band];
+            let label = if hz >= 1000.0 {
+                format!("{} kHz", hz / 1000.0)
+            } else {
+                format!("{hz} Hz")
+            };
+            let fraction = (gains[band] + MAX_GAIN_DB) / (2.0 * MAX_GAIN_DB);
+            rows.push(
+                row()
+                    .w_full()
+                    .center_y()
+                    .gap(12.0)
+                    .child(text(label).font(type_::LABEL).color(t.muted).w(64.0))
+                    .child(band_slider(band, fraction.clamp(0.0, 1.0), t))
+                    .child(
+                        text(format!("{:+.1} dB", gains[band]))
+                            .font(type_::LABEL)
+                            .color(t.text)
+                            .w(64.0),
+                    ),
+            );
+        }
+    }
+    rows.push(toggle_row(
+        "norm-on",
+        "Normalise volume",
+        p.normalise_volume,
+        t,
+        |s| {
+            let on = !s.prefs.normalise_volume;
+            s.prefs.normalise_volume = on;
+            cadence::playback::set_normalisation(on);
+            if let Some(b) = &s.bridge {
+                b.save_pref(move |st| {
+                    let _ = st.set_normalise_volume(on);
+                });
+            }
+        },
+    ));
+    rows.push(toggle_row(
+        "auto-on",
+        "Autoplay similar songs",
+        p.autoplay,
+        t,
+        |s| {
+            let on = !s.prefs.autoplay;
+            s.prefs.autoplay = on;
+            if let Some(b) = &s.bridge {
+                b.save_pref(move |st| {
+                    let _ = st.set_autoplay(on);
+                });
+            }
+        },
+    ));
+    let quality = StreamingQuality::ALL
+        .into_iter()
+        .map(|q| {
+            (
+                q.label().to_owned(),
+                p.streaming_quality == q,
+                Box::new(move |s: &mut State| {
+                    s.prefs.streaming_quality = q;
+                    cadence::playback::set_streaming_kbps(q.kbps());
+                    if let Some(b) = &s.bridge {
+                        b.save_pref(move |st| {
+                            let _ = st.set_streaming_quality(q);
+                        });
+                    }
+                }) as Box<dyn Fn(&mut State)>,
+            )
+        })
+        .collect();
+    rows.push(choice_row("Streaming quality (next song)", quality, t));
+    let engines = [
+        ("Built-in", cadence::playback::Engine::BuiltIn),
+        ("Spotify's player", cadence::playback::Engine::Soloist),
+    ]
+    .into_iter()
+    .map(|(name, e)| {
+        (
+            name.to_owned(),
+            p.player == e,
+            Box::new(move |s: &mut State| {
+                s.prefs.player = e;
+                cadence::playback::set_engine(e);
+                if let Some(b) = &s.bridge {
+                    b.save_pref(move |st| {
+                        let _ = st.set_player(e);
+                    });
+                }
+            }) as Box<dyn Fn(&mut State)>,
+        )
+    })
+    .collect();
+    rows.push(choice_row("Player", engines, t));
+    rows
+}
+
+/// One equalizer band: drag to set, snapped to half-decibel steps.
+fn band_slider(band: usize, fraction: f32, t: &Theme) -> El {
+    use cadence::equalizer::{MAX_GAIN_DB, Settings};
+    col()
+        .key(format!("eq-band-{band}"))
+        .grow(1.0)
+        .h(22.0)
+        .justify_center()
+        .on_drag(move |s: &mut State, d, _| {
+            let f = if d.w > 0.0 {
+                (d.x / d.w).clamp(0.0, 1.0)
+            } else {
+                0.5
+            };
+            let mut gains = s.prefs.equalizer.gains_db();
+            gains[band] = (f * 2.0 - 1.0) * MAX_GAIN_DB;
+            let mut e: Settings = s.prefs.equalizer;
+            e = e.with_gains(gains);
+            e.enabled = true;
+            s.set_equalizer(e);
+        })
+        .child(
+            row()
+                .w_full()
+                .h(4.0)
+                .radius(2.0)
+                .fill(Color::WHITE.alpha(0.16))
+                .child(
+                    el().grow(fraction.max(0.001))
+                        .h(4.0)
+                        .radius(2.0)
+                        .fill(t.text),
+                )
+                .child(el().grow((1.0 - fraction).max(0.001)).h(4.0)),
         )
 }

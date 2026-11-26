@@ -173,6 +173,8 @@ pub struct State {
     pub clock: f64,
     pub second: u32,
     pub shuffle: bool,
+    pub prefs: cadence::storage::AppPreferences,
+    pub prefs_loaded: bool,
 
     pub wide: bool,
     pub np: bool,
@@ -221,6 +223,8 @@ impl Default for State {
             clock: 0.0,
             second: 0,
             shuffle: false,
+            prefs: cadence::storage::AppPreferences::default(),
+            prefs_loaded: false,
             wide: true,
             np: false,
             config_serial: 0,
@@ -409,6 +413,31 @@ impl State {
         self.anchor_at = self.clock;
         self.second = ms / 1000;
         self.send(BackendCommand::Seek(ms));
+    }
+
+    /// Puts the saved preferences to work: the audio switches, then volume and shuffle.
+    fn apply_prefs(&mut self, p: cadence::storage::AppPreferences) {
+        self.prefs = p;
+        cadence::playback::set_normalisation(p.normalise_volume);
+        cadence::playback::set_streaming_kbps(p.streaming_quality.kbps());
+        cadence::playback::set_engine(p.player);
+        cadence::equalizer::publish(p.equalizer, false);
+        self.volume = f32::from(p.volume_percent) / 100.0;
+        self.send(BackendCommand::SetVolume(self.volume));
+        if p.shuffle != self.shuffle {
+            self.send(BackendCommand::SetShuffle(p.shuffle));
+        }
+    }
+
+    /// Applies an equalizer change at once and saves it.
+    pub fn set_equalizer(&mut self, eq: cadence::equalizer::Settings) {
+        self.prefs.equalizer = eq;
+        cadence::equalizer::publish(eq, false);
+        if let Some(b) = &self.bridge {
+            b.save_pref(move |s| {
+                let _ = s.set_equalizer(eq);
+            });
+        }
     }
 
     pub fn set_volume(&mut self, volume: f32) {
@@ -726,6 +755,7 @@ impl State {
                         }
                     }
                 }
+                Msg::Prefs(p) => self.apply_prefs(p),
                 Msg::Folders(folders) => {
                     self.local.folders = folders;
                     self.local.loaded = true;
@@ -768,6 +798,12 @@ fn poll(s: &mut State, clock: f64, tx: &mut Tx) -> bool {
     s.sync_lyrics();
     if s.loaded && s.page == Page::Home {
         s.ensure_home();
+    }
+    if s.loaded && !s.prefs_loaded {
+        s.prefs_loaded = true;
+        if let Some(bridge) = &s.bridge {
+            bridge.load_prefs();
+        }
     }
     if s.loaded && !s.local.loaded {
         s.local.loaded = true;
