@@ -801,11 +801,18 @@ impl Sidebar {
                                     .h_11()
                                     .w_full()
                                     .min_w_0()
-                                    .px(row_pad)
                                     .bg(rgb(base))
                                     .aria_selected(selected)
                                     .rounded_lg()
-                                    .justify_start()
+                                    // Settled and collapsed, the cover is centred as before; while the
+                                    // rail moves its padding eases between the two positions.
+                                    .map(move |row| {
+                                        if progress <= 0. {
+                                            row.justify_center()
+                                        } else {
+                                            row.justify_start().px(row_pad)
+                                        }
+                                    })
                                     .gap_2()
                                     .text_sm()
                                     .text_color(rgb(palette.text))
