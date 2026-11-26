@@ -125,7 +125,7 @@ pub(super) struct Sidebar {
     hover: components::HoverHighlight,
     collapsed: bool,
     /// 0 collapsed to 1 expanded, sprung toward the chosen state.
-    progress: super::motion::Spring,
+    progress: gpui_motion_kit::ValueState,
     visual_width: Rems,
     /// The toggle and navigation rows draw keyboard focus on the fill inside
     /// them, so they own their focus handles.
@@ -180,10 +180,7 @@ impl Sidebar {
             compact_layout: false,
             hover: components::HoverHighlight::default(),
             collapsed,
-            progress: super::motion::Spring::new(
-                if collapsed { 0. } else { 1. },
-                Duration::from_millis(260),
-            ),
+            progress: gpui_motion_kit::ValueState::new(if collapsed { 0. } else { 1. }),
             visual_width: width,
             toggle_focus: cx.focus_handle().tab_stop(true),
             nav_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
@@ -625,15 +622,13 @@ impl Sidebar {
         let collapsed = self.collapsed;
         let pinned_origin = self.pinned_origin;
         let expanded_width = expanded_sidebar_width(self.compact_layout);
-        let sample = self.progress.step(
+        let frame = self.progress.frame(
             if collapsed { 0. } else { 1. },
-            cx.background_executor().now(),
-            cx.reduce_motion(),
+            super::motion::sidebar_spring(),
+            window,
+            cx,
         );
-        if sample.moving {
-            window.request_animation_frame();
-        }
-        let progress = sample.value.clamp(0., 1.);
+        let progress = (frame.value() as f32).clamp(0., 1.);
         let width_range = expanded_width - COLLAPSED_SIDEBAR_WIDTH;
         // The rail's real width follows the spring, so the page edge slides with it.
         let shown_width = COLLAPSED_SIDEBAR_WIDTH + width_range * progress;
