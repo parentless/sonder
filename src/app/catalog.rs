@@ -2741,6 +2741,7 @@ impl Render for AlbumPage {
                             .child(
                                 div()
                                     .flex()
+                                    .flex_wrap()
                                     .items_center()
                                     .gap_2()
                                     .child(
