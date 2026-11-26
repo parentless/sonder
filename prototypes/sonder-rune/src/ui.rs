@@ -737,6 +737,43 @@ fn settings_body(s: &State, t: &Theme) -> El {
         ],
     );
     let audio = card("Audio", audio_rows(s, t));
+    let system = card(
+        "System",
+        vec![
+            toggle_row(
+                "tray-on",
+                "Keep running in the tray when closed",
+                s.prefs.keep_in_tray,
+                t,
+                |s| {
+                    let on = !s.prefs.keep_in_tray;
+                    s.prefs.keep_in_tray = on;
+                    s.sync_tray();
+                    if let Some(b) = &s.bridge {
+                        b.save_pref(move |st| {
+                            let _ = st.set_keep_in_tray(on);
+                        });
+                    }
+                },
+            ),
+            toggle_row(
+                "login-on",
+                "Start Sonder when I sign in to Windows",
+                s.prefs.launch_at_login,
+                t,
+                |s| {
+                    let on = !s.prefs.launch_at_login;
+                    s.prefs.launch_at_login = on;
+                    crate::shell::set_launch_at_login(on);
+                    if let Some(b) = &s.bridge {
+                        b.save_pref(move |st| {
+                            let _ = st.set_launch_at_login(on);
+                        });
+                    }
+                },
+            ),
+        ],
+    );
     let mut folders: Vec<El> = Vec::new();
     for (n, folder) in s.local.folders.iter().enumerate() {
         let path = folder.clone();
@@ -817,6 +854,7 @@ fn settings_body(s: &State, t: &Theme) -> El {
                 .child(account)
                 .child(playback)
                 .child(audio)
+                .child(system)
                 .child(local)
                 .child(about),
         )

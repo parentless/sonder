@@ -65,6 +65,22 @@ pub fn start() {
     });
 }
 
+/// Asks Windows to move this process's pages out of the working set; they come back on demand.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn trim() {
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn K32EmptyWorkingSet(process: isize) -> i32;
+    }
+    if std::env::var("SONDER_TRIM").map_or(true, |v| v != "0") {
+        unsafe { K32EmptyWorkingSet(GetCurrentProcess()) };
+    }
+}
+
+#[cfg(not(windows))]
+pub fn trim() {}
+
 #[cfg(not(windows))]
 pub fn start() {}
 

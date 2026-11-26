@@ -45,6 +45,15 @@ impl Art {
         }
     }
 
+    /// Drops every decoded cover. Anything drawn again is read back from the disk cache.
+    pub fn release(&mut self) {
+        self.slots.borrow_mut().clear();
+        self.wanted.borrow_mut().clear();
+        *self.big.borrow_mut() = None;
+        self.pinned = None;
+        self.pin_next = None;
+    }
+
     /// The cover as pixels once it has loaded. The first ask queues the fetch.
     pub fn get(&self, url: &str) -> Option<Pixels> {
         let mut slots = self.slots.borrow_mut();

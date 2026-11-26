@@ -16,6 +16,7 @@ cadence = { path = "../..", default-features = false }
 tokio = { version = "1", features = ["rt", "sync"] }
 ureq = "3"
 rfd = "0.15"
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [workspace]
 

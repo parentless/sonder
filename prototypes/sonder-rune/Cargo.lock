@@ -8625,6 +8625,7 @@ version = "0.0.2"
 dependencies = [
  "cadence",
  "embed-resource",
+ "image",
  "rfd",
  "rune",
  "tokio",

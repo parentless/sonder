@@ -14,6 +14,7 @@ mod icons;
 mod memory;
 mod sample;
 mod search;
+mod shell;
 mod theme;
 mod ui;
 mod views;
@@ -175,6 +176,7 @@ pub struct State {
     pub shuffle: bool,
     pub prefs: cadence::storage::AppPreferences,
     pub prefs_loaded: bool,
+    pub tray: Option<rune::Tray>,
 
     pub wide: bool,
     pub np: bool,
@@ -225,6 +227,7 @@ impl Default for State {
             shuffle: false,
             prefs: cadence::storage::AppPreferences::default(),
             prefs_loaded: false,
+            tray: None,
             wide: true,
             np: false,
             config_serial: 0,
@@ -418,6 +421,7 @@ impl State {
     /// Puts the saved preferences to work: the audio switches, then volume and shuffle.
     fn apply_prefs(&mut self, p: cadence::storage::AppPreferences) {
         self.prefs = p;
+        self.sync_tray();
         cadence::playback::set_normalisation(p.normalise_volume);
         cadence::playback::set_streaming_kbps(p.streaming_quality.kbps());
         cadence::playback::set_engine(p.player);
@@ -427,6 +431,23 @@ impl State {
         if p.shuffle != self.shuffle {
             self.send(BackendCommand::SetShuffle(p.shuffle));
         }
+    }
+
+    /// Keeps the tray icon in step with the "keep in tray" preference.
+    pub fn sync_tray(&mut self) {
+        if self.prefs.keep_in_tray && self.tray.is_none() {
+            self.tray = shell::start_tray();
+        } else if !self.prefs.keep_in_tray {
+            self.tray = None;
+        }
+    }
+
+    /// Gives back what a hidden window does not need: decoded covers, then Windows' pages.
+    pub fn release_memory(&mut self) {
+        if let Some(art) = self.art.as_mut() {
+            art.release();
+        }
+        memory::trim();
     }
 
     /// Applies an equalizer change at once and saves it.
@@ -796,6 +817,14 @@ fn poll(s: &mut State, clock: f64, tx: &mut Tx) -> bool {
     s.clock = clock;
     let mut changed = s.drain();
     s.sync_lyrics();
+    for command in shell::take_commands() {
+        match command.as_str() {
+            "toggle" => s.toggle_play(),
+            "next" => s.send(BackendCommand::Next),
+            "previous" => s.send(BackendCommand::Previous),
+            _ => {}
+        }
+    }
     if s.loaded && s.page == Page::Home {
         s.ensure_home();
     }
@@ -863,10 +892,34 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
     ui::root(s, cx)
 }
 
+fn on_close(s: &mut State, tx: &mut Tx) {
+    if s.tray.is_some() && s.prefs.keep_in_tray {
+        s.release_memory();
+    } else {
+        tx.quit();
+    }
+}
+
+/// The window is hidden, minimised or has drawn nothing for a while.
+fn on_rest(s: &mut State, tx: &mut Tx) -> bool {
+    if !tx.window_visible() {
+        s.release_memory();
+    } else {
+        memory::trim();
+    }
+    false
+}
+
 fn main() {
     memory::gpu_policy();
     memory::start();
-    rune::run(AppSpec::<State> {
+    // Read the saved preferences first: they decide whether closing keeps Sonder in the tray.
+    let early = cadence::storage::Store::open_default()
+        .ok()
+        .and_then(|s| s.preferences().ok())
+        .unwrap_or_default();
+    let quiet = early.keep_in_tray && shell::launched_at_startup();
+    let spec = AppSpec::<State> {
         scenes: sample::SCENES,
         setup: Some(setup),
         poll: Some(poll),
@@ -880,7 +933,24 @@ fn main() {
         ],
         families: ("Inter", "ui-monospace"),
         ..AppSpec::new("Sonder", (1180.0, 760.0), State::default, view)
-    });
+    };
+    let mut app = rune::App::new(spec)
+        .args(shell::rune_args())
+        .keep_running()
+        .release_gpu_when_closed()
+        .on_close(on_close)
+        .on_rest(on_rest)
+        .init(move || {
+            let mut s = State::default();
+            s.prefs = early;
+            s.sync_tray();
+            s
+        });
+    if quiet {
+        app = app.windowless();
+    }
+    shell::set_handle(app.handle());
+    app.run();
 }
 
 #[cfg(test)]
