@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 //! Sonder on Rune: the new front end over the existing backend.
 //!
 //! Design A (refined layout) with design B's Now Playing morph. Run it with
