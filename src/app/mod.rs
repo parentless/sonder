@@ -246,17 +246,6 @@ const CATALOG_STALE_TIME: Duration = Duration::from_secs(5 * 60);
 const COMPACT_PLAYER_LEFT_WIDTH: Rems = Rems(13.75);
 const COMPACT_PLAYER_RIGHT_WIDTH: Rems = Rems(6.);
 
-fn sidebar_transition_duration(
-    current_width: Rems,
-    target_width: Rems,
-    expanded_width: Rems,
-) -> Duration {
-    let remaining_distance = (target_width - current_width).0.abs();
-    let full_distance = (expanded_width - COLLAPSED_SIDEBAR_WIDTH).0;
-    let remaining_fraction = (remaining_distance / full_distance).clamp(0., 1.);
-    Duration::from_millis((180. * remaining_fraction).round().max(60.) as u64)
-}
-
 /// Leading padding that puts a row's leading content on the collapsed rail
 /// axis at progress 0 and back on its expanded padding at progress 1.
 fn sidebar_row_pad(expanded_pad: Rems, content_width: Rems, progress: f32) -> Rems {
@@ -393,6 +382,7 @@ mod link_downloads;
 mod link_popover;
 mod lyrics_view;
 mod media_controls;
+mod motion;
 mod onboarding;
 mod page;
 mod playback_clock;
@@ -489,8 +479,8 @@ mod tests {
         BRAND_LOGO_SIZE, BRAND_ROW_PAD, COLLAPSED_SIDEBAR_WIDTH, NAV_GLYPH_WIDTH, NAV_ROW_PAD,
         SIDEBAR_CONTENT_PAD, SIDEBAR_FILL_COLLAPSED, SIDEBAR_FILL_INSET,
         TRAFFIC_LIGHT_CLUSTER_WIDTH, resolve_dark_mode, sidebar_fill_geometry, sidebar_row_pad,
-        sidebar_transition_duration, traffic_light_position, uses_compact_content_layout,
-        uses_compact_player_layout, volume_for_pointer,
+        traffic_light_position, uses_compact_content_layout, uses_compact_player_layout,
+        volume_for_pointer,
     };
     use crate::storage::ThemePreference;
     use gpui_kit::{Pixels, Rems, WindowAppearance, px};
@@ -542,15 +532,6 @@ mod tests {
         assert!(!uses_compact_content_layout(px(960.), DEFAULT_REM_SIZE));
         assert!(uses_compact_player_layout(px(1135.), DEFAULT_REM_SIZE));
         assert!(!uses_compact_player_layout(px(1136.), DEFAULT_REM_SIZE));
-    }
-
-    #[test]
-    fn sidebar_transition_duration_scales_with_remaining_distance() {
-        let expanded = rems_from_px(232.);
-        let duration_from = |width| sidebar_transition_duration(width, expanded, expanded);
-        assert_eq!(duration_from(COLLAPSED_SIDEBAR_WIDTH).as_millis(), 180);
-        assert_eq!(duration_from(rems_from_px(155.)).as_millis(), 90);
-        assert_eq!(duration_from(rems_from_px(220.)).as_millis(), 60);
     }
 
     #[test]

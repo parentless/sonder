@@ -2817,6 +2817,8 @@ fn collapsed_sidebar_keeps_playlist_buttons_inside_rail_and_promotes_opened_play
             window.find(("sidebar-playlist", 2usize)).bounds().top()
                 < window.find(("sidebar-playlist", 0usize)).bounds().top()
         );
+        // The rail springs to its width; this test checks where it ends up.
+        cx.set_reduce_motion(true);
         workspace
             .upgrade()
             .unwrap()
