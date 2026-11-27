@@ -28,6 +28,12 @@ const MIXES_WAITS: u32 = 120;
 /// Releases listed in the rail before "Show all".
 const RAIL_ROWS: usize = 4;
 /// The rail's width and the gap between the two panes, at 100% zoom.
+/// The space between rail rows, so a highlighted row has room around it.
+const RAIL_GAP: f32 = 4.;
+/// A rail row: a 56px cover and 10px above and below it.
+const RAIL_ROW_HEIGHT: f32 = 76.;
+/// The panel's corner radius, which the row highlight matches.
+const RAIL_ROW_RADIUS: f32 = 22.;
 const RAIL_WIDTH: f32 = 412.;
 const PANE_GAP: f32 = 32.;
 /// The narrowest a mix cover is allowed to get before a card is dropped, and
@@ -821,8 +827,8 @@ impl HomePage {
                 .rounded(rem(22.))
                 .bg(rgb(palette.card))
                 .pt(rem(18.))
-                .px(rem(18.))
-                .pb(rem(10.))
+                .px(rem(12.))
+                .pb(rem(12.))
         };
         let Some(releases) = self.releases.as_ref() else {
             // Placeholders hold the panel's height while Spotify answers.
@@ -830,19 +836,18 @@ impl HomePage {
                 panel()
                     .id("home-releases-loading")
                     .test_support()
-                    .gap(rem(12.))
-                    .pb(rem(18.))
-                    .child(heading(
+                    .gap(rem(RAIL_GAP))
+                    .child(div().px(rem(6.)).pb(rem(6.)).child(heading(
                         palette,
                         "home-releases-heading".to_owned(),
                         "New from artists you play".into(),
                         20.,
-                    ))
+                    )))
                     .children((0..RAIL_ROWS).map(|_| {
                         div()
-                            .h(cover.size)
+                            .h(rem(RAIL_ROW_HEIGHT))
                             .w_full()
-                            .rounded(rem(12.))
+                            .rounded(rem(RAIL_ROW_RADIUS))
                             .bg(rgb(palette.card_hover))
                     }))
                     .into_any_element()
@@ -890,9 +895,11 @@ impl HomePage {
                         .min_w_0()
                         .justify_start()
                         .gap(rem(14.))
-                        .px(rem(6.))
-                        .py(rem(9.))
-                        .rounded(rem(12.))
+                        .px(rem(12.))
+                        .py(rem(10.))
+                        // The panel's own roundness, so the highlight sits in
+                        // it like a smaller copy of its corner.
+                        .rounded(rem(RAIL_ROW_RADIUS))
                         .hover(|style| style.bg(rgb(palette.card_hover)))
                         .child(components::artwork(
                             palette,
@@ -906,15 +913,17 @@ impl HomePage {
                             components::button(palette, ("home-release-play", index))
                                 .test_support()
                                 .absolute()
-                                .right(rem(6.))
-                                .top(rem(21.))
+                                .right(rem(16.))
+                                .top(rem((RAIL_ROW_HEIGHT - 32.) / 2.))
                                 .size(rem(32.))
                                 .rounded_full()
-                                .bg(rgb(palette.card_hover))
+                                // Solid, so it still stands out on the row's
+                                // own highlight.
+                                .bg(rgb(palette.text_primary))
                                 .child(components::icon(
                                     CadenceIcon::Play,
                                     Rems(0.6875),
-                                    palette.text_primary,
+                                    palette.on_accent,
                                 ))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.stop_propagation();
@@ -935,6 +944,7 @@ impl HomePage {
                         .items_baseline()
                         .justify_between()
                         .mb(rem(10.))
+                        .px(rem(6.))
                         .child(heading(
                             palette,
                             "home-releases-heading".to_owned(),
@@ -956,6 +966,7 @@ impl HomePage {
                         .test_support()
                         .flex()
                         .flex_col()
+                        .gap(rem(RAIL_GAP))
                         .children(rows),
                 )
                 .into_any_element(),
