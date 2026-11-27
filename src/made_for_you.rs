@@ -77,6 +77,7 @@ fn client() -> Result<reqwest::Client> {
 /// Both shelves for the session's account, from memory when read lately.
 /// `web_token` is a current Web API access token.
 pub(crate) async fn load(session: &Session, web_token: String, force: bool) -> Result<HomeMixes> {
+    wait_until_ready(session).await?;
     let mut state = state().lock().await;
     let account = session.username();
     if state.account != account {
@@ -105,6 +106,19 @@ pub(crate) async fn load(session: &Session, web_token: String, force: bool) -> R
     let mixes = mixes?;
     state.cached = Some((Instant::now(), mixes.clone()));
     Ok(mixes)
+}
+
+/// The session announces the account's country a moment after it connects,
+/// and Spotify refuses the query without it. Waits for that, then gives up
+/// as "not connected" so the page asks again later.
+async fn wait_until_ready(session: &Session) -> Result<()> {
+    for _ in 0..40 {
+        if !session.is_invalid() && !session.country().is_empty() {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    Err(PlaybackNotConnected.into())
 }
 
 async fn fetch(session: &Session, web_token: &str) -> (Result<HomeMixes>, Option<Duration>) {
