@@ -2233,7 +2233,7 @@ fn artist_tracks_scroll_into_virtualized_discography_and_albums_still_open() {
         let portrait = window.find("artist-portrait").bounds();
         assert_eq!(
             portrait.size.width,
-            gpui_kit::Rems(12.).to_pixels(window.rem_size())
+            gpui_kit::Rems(15.).to_pixels(window.rem_size())
         );
         window.dispatch_event(
             gpui_kit::ScrollWheelEvent {
@@ -2327,7 +2327,7 @@ fn short_artist_pages_fully_dock_and_back_works_after_switching_artists() {
         fixture.update(|window, _| {
             assert_eq!(
                 window.find("artist-portrait").bounds().size.width,
-                gpui_kit::Rems(12.).to_pixels(window.rem_size()),
+                gpui_kit::Rems(15.).to_pixels(window.rem_size()),
                 "new artist resets the header"
             );
         });
@@ -3329,11 +3329,11 @@ fn discography_cards_fit_the_available_width_at_narrow_and_wide_sizes() {
         fixture.cx.advance_clock(Duration::from_secs(1));
         fixture.update(|_, _| {});
         fixture.update(|window, cx| {
-            let position = window.find(("spotify-track", 1usize)).bounds().center();
+            let position = window.find("artist-portrait").bounds().center();
             window.dispatch_event(
                 gpui_kit::ScrollWheelEvent {
                     position,
-                    delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-600.))),
+                    delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-800.))),
                     modifiers: Default::default(),
                     touch_phase: gpui_kit::TouchPhase::Moved,
                 }
@@ -5388,7 +5388,7 @@ fn popular_songs_stop_at_five_until_show_more_is_pressed() {
         window.dispatch_event(
             gpui_kit::ScrollWheelEvent {
                 position,
-                delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-300.))),
+                delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-360.))),
                 ..Default::default()
             }
             .to_platform_input(),
@@ -5410,7 +5410,7 @@ fn popular_songs_stop_at_five_until_show_more_is_pressed() {
         window.dispatch_event(
             gpui_kit::ScrollWheelEvent {
                 position: point(px(700.), px(400.)),
-                delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-300.))),
+                delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-500.))),
                 ..Default::default()
             }
             .to_platform_input(),
@@ -5423,6 +5423,66 @@ fn popular_songs_stop_at_five_until_show_more_is_pressed() {
         assert!(window.try_find(("spotify-track", 5usize)).is_none());
     });
     fixture.no_commands();
+}
+
+#[test]
+fn an_artist_shows_its_monthly_listeners_under_the_name_once_spotify_says() {
+    crate::backend::KEEP_LISTENER_REQUESTS.with(|keep| keep.set(true));
+    let mut fixture = Fixture::new(false);
+    let workspace = fixture.workspace.clone().unwrap();
+    fixture.update(|_, cx| {
+        cx.set_reduce_motion(true);
+        workspace.upgrade().unwrap().update(cx, |workspace, cx| {
+            workspace.open_artist(
+                artist_ref("Artist", "artist-listeners"),
+                Route::LikedSongs,
+                cx,
+            );
+        });
+    });
+    let mut listeners = None;
+    let mut artist = None;
+    while let Ok(command) = fixture.backend.commands.try_recv() {
+        match command {
+            BackendCommand::LoadArtistListeners { source_id, respond } => {
+                assert_eq!(source_id, "artist-listeners");
+                listeners = Some(respond);
+            }
+            BackendCommand::LoadArtist { respond, .. } => artist = Some(respond),
+            _ => {}
+        }
+    }
+    artist
+        .expect("the artist is asked for")
+        .send(Ok((
+            model::Artist {
+                genres: Vec::new(),
+                provider: model::Provider::Spotify,
+                source_id: "artist-listeners".into(),
+                spotify_uri: None,
+                name: "Artist".into(),
+                artwork_url: None,
+            },
+            vec![track(0)],
+            Vec::new().into(),
+        )))
+        .unwrap();
+    fixture.update(|_, _| {});
+    // Until Spotify answers, the line is empty and the name is where it will stay.
+    let before = fixture.update(|window, _| window.find("artist-moving-name").bounds());
+    fixture.update(|window, _| {
+        assert_eq!(window.find("artist-listeners").bounds().size.width, px(0.));
+    });
+    listeners
+        .expect("the listener count is asked for")
+        .send(Ok(Some(8_123_456)))
+        .unwrap();
+    fixture.update(|_, _| {});
+    fixture.update(|window, _| {
+        assert!(window.find("artist-listeners").bounds().size.width > px(0.));
+        assert_eq!(window.find("artist-moving-name").bounds(), before);
+    });
+    crate::backend::KEEP_LISTENER_REQUESTS.with(|keep| keep.set(false));
 }
 
 /// A window opened for an install that has never run Sonder.

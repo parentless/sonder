@@ -619,6 +619,10 @@ pub(super) struct ArtistPage {
     error: Option<SharedString>,
     loaded_at: Option<SystemTime>,
     request: Option<gpui_kit::Task<()>>,
+    /// How many people listened this month, when Spotify says. Shown under the
+    /// artist's name; asked for beside the page itself and left out on failure.
+    monthly_listeners: Option<u64>,
+    listeners_request: Option<gpui_kit::Task<()>>,
     image_cache: Entity<image_cache::BoundedImageCache>,
     track_list: Entity<TrackList>,
     _list_subscription: Subscription,
@@ -677,10 +681,46 @@ impl ArtistPage {
             error: None,
             loaded_at: None,
             request: None,
+            monthly_listeners: None,
+            listeners_request: None,
             image_cache: services::AppServices::image_cache(cx),
             _list_subscription: page::forward(&track_list, cx),
             track_list,
         }
+    }
+
+    /// Puts a listener count on the page without asking, for screenshots.
+    #[cfg(test)]
+    pub(super) fn fixture_monthly_listeners(&mut self, listeners: u64, cx: &mut Context<Self>) {
+        self.set_monthly_listeners(Some(listeners), cx);
+    }
+
+    /// Shows the artist's monthly listeners under their name.
+    fn set_monthly_listeners(&mut self, listeners: Option<u64>, cx: &mut Context<Self>) {
+        self.monthly_listeners = listeners;
+        self.header_motion.update(cx, |header, cx| {
+            header.listeners = listeners.map(|count| {
+                SharedString::from(format!("{} monthly listeners", profile::thousands(count)))
+            });
+            cx.notify();
+        });
+    }
+
+    /// Asks for the listener count; a failure only leaves the line out.
+    fn load_monthly_listeners(&mut self, source_id: String, cx: &mut Context<Self>) {
+        let reply = request(&self.backend, |respond| {
+            BackendCommand::LoadArtistListeners { source_id, respond }
+        });
+        self.listeners_request = Some(cx.spawn(async move |this, cx| {
+            let result = reply.await;
+            let _ = this.update(cx, |page, cx| {
+                page.listeners_request = None;
+                match result {
+                    Ok(listeners) => page.set_monthly_listeners(listeners, cx),
+                    Err(error) => log::debug!("artist: no monthly listeners: {error}"),
+                }
+            });
+        }));
     }
 
     /// Takes down any open row menu, for a route change no click drove.
@@ -734,8 +774,11 @@ impl ArtistPage {
                     .name
                     .clone();
                 header.artwork = None;
+                header.listeners = None;
                 header.reset(cx);
             });
+            self.monthly_listeners = None;
+            self.listeners_request = None;
         } else if retrying_failure {
             self.loaded = false;
         }
@@ -743,10 +786,12 @@ impl ArtistPage {
             self.album_request = None;
             self.album_error = None;
             self.next_album_offset = None;
+            let listeners_of = source_id.clone();
             let reply = request(&self.backend, |respond| BackendCommand::LoadArtist {
                 source_id,
                 respond,
             });
+            self.load_monthly_listeners(listeners_of, cx);
             self.request = Some(cx.spawn(async move |this, cx| {
                 let result = reply.await;
                 let _ = this.update(cx, |page, cx| {

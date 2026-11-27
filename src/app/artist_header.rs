@@ -6,6 +6,8 @@ use std::time::Instant;
 pub(super) struct ArtistHeader {
     pub name: SharedString,
     pub artwork: Option<String>,
+    /// "8,123,456 monthly listeners", once Spotify has said.
+    pub listeners: Option<SharedString>,
     cache: Entity<image_cache::BoundedImageCache>,
     pub target_bounds: Option<Bounds<Pixels>>,
     pub origin: gpui_kit::Point<Pixels>,
@@ -25,6 +27,30 @@ pub(super) const NAME_LEFT: Rems = Rems(2. + tokens::ARTIST_ARTWORK.size.0 + 1.5
 /// the tail off letters like g and y. The box grows both ways, so the text
 /// itself does not move.
 const NAME_LEAD: f32 = 0.25;
+/// The line for monthly listeners under the name. Always kept free, so the
+/// name does not move when the count arrives.
+const LISTENERS_ROW: f32 = 1.75;
+
+/// How heavy the artist's name is set.
+#[cfg(not(test))]
+fn name_weight() -> gpui_kit::FontWeight {
+    gpui_kit::FontWeight::SEMIBOLD
+}
+
+/// Previews try the weights side by side; tests and shipped builds use one.
+#[cfg(test)]
+pub(super) static PREVIEW_WEIGHT: std::sync::atomic::AtomicU16 =
+    std::sync::atomic::AtomicU16::new(0);
+
+#[cfg(test)]
+fn name_weight() -> gpui_kit::FontWeight {
+    match PREVIEW_WEIGHT.load(std::sync::atomic::Ordering::Relaxed) {
+        500 => gpui_kit::FontWeight::MEDIUM,
+        700 => gpui_kit::FontWeight::BOLD,
+        _ => gpui_kit::FontWeight::SEMIBOLD,
+    }
+}
+
 /// Scroll distance, in rems, over which the portrait gives way to the dock.
 const DOCK_DISTANCE: f32 = tokens::ARTIST_ARTWORK.size.0 + 6.25;
 
@@ -33,6 +59,7 @@ impl ArtistHeader {
         Self {
             name: "Artist".into(),
             artwork: None,
+            listeners: None,
             cache: services::AppServices::image_cache(cx),
             target_bounds: None,
             origin: point(px(0.), px(0.)),
@@ -158,17 +185,36 @@ impl Render for ArtistHeader {
                         .test_support()
                         .absolute()
                         .left(NAME_LEFT.to_pixels(rem))
-                        .top(unit(4. + tokens::ARTIST_ARTWORK.size.0 - NAME_LEAD) - hero_scroll)
+                        .top(
+                            unit(4. + tokens::ARTIST_ARTWORK.size.0 - NAME_LEAD - LISTENERS_ROW)
+                                - hero_scroll,
+                        )
                         .opacity(hero_opacity)
                         .w((self.viewport_width - NAME_LEFT.to_pixels(rem) - unit(2.))
                             .max(unit(1.))
-                            .min(unit(30.)))
+                            .min(unit(44.)))
                         .truncate()
                         .text_size(px(40.) * (rem / px(16.)))
                         .line_height(unit(2.75 + 2. * NAME_LEAD))
-                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                        .font_weight(name_weight())
                         .text_color(rgb(palette.text_primary))
                         .child(self.name.clone()),
+                )
+                .child(
+                    div()
+                        .id("artist-listeners")
+                        .test_support()
+                        .absolute()
+                        .left(NAME_LEFT.to_pixels(rem))
+                        .top(
+                            unit(4. + tokens::ARTIST_ARTWORK.size.0 + 2.75 - LISTENERS_ROW)
+                                - hero_scroll,
+                        )
+                        .opacity(hero_opacity)
+                        .text_size(px(15.) * (rem / px(16.)))
+                        .line_height(unit(LISTENERS_ROW))
+                        .text_color(rgb(palette.text_muted))
+                        .children(self.listeners.clone()),
                 );
         }
         if grown > 0. {

@@ -67,7 +67,7 @@ fn state() -> &'static Mutex<State> {
 /// No user agent on purpose: tried against the live service, Spotify answers
 /// this request with 403 "Client/request not allowed" when it carries an
 /// unfamiliar one ("Sonder/x.y.z") and with 200 when it carries none.
-fn client() -> Result<reqwest::Client> {
+pub(crate) fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .use_rustls_tls()
         .connect_timeout(Duration::from_secs(5))
@@ -113,7 +113,7 @@ pub(crate) async fn load(session: &Session, web_token: String, force: bool) -> R
 /// The session announces the account's country a moment after it connects,
 /// and Spotify refuses the query without it. Waits for that, then gives up
 /// as "not connected" so the page asks again later.
-async fn wait_until_ready(session: &Session) -> Result<()> {
+pub(crate) async fn wait_until_ready(session: &Session) -> Result<()> {
     for _ in 0..40 {
         if !session.is_invalid() && !session.country().is_empty() {
             return Ok(());

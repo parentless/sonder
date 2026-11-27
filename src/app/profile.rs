@@ -350,7 +350,7 @@ fn habit_of(by_hour: &[u32; 24]) -> (&'static Habit, u32) {
 }
 
 /// 12,345.
-fn thousands(value: u64) -> String {
+pub(super) fn thousands(value: u64) -> String {
     let digits = value.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (index, digit) in digits.chars().enumerate() {

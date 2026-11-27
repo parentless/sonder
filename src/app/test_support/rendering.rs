@@ -280,8 +280,10 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             Arc::new(gpui_kit::RenderImage::new([image::Frame::new(pixels)])),
                         );
                     });
+                    // Previews can name another artist and give a listener count.
+                    let artist_name = std::env::var("CADENCE_PREVIEW_ARTIST").unwrap_or_else(|_| "The Midnight".into());
                     let reference = model::ArtistRef {
-                        name: "The Midnight".into(),
+                        name: artist_name.clone().into(),
                         source_id: Some("fixture-artist".into()),
                         spotify_uri: None,
                     };
@@ -304,7 +306,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                                         provider: model::Provider::Spotify,
                                         source_id: "fixture-artist".into(),
                                         spotify_uri: None,
-                                        name: "The Midnight".into(),
+                                        name: artist_name.clone().into(),
                                         artwork_url: Some(url.into()),
                                     },
                                     if matches!(scene, Scene::ArtistManyPopular) { (0..10).map(track).collect() } else { vec![track(0), track(1), track(2)] },
@@ -327,6 +329,9 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     }
                     if matches!(scene, Scene::ArtistYours) {
                         workspace.artist.update(cx, |artist, cx| artist.select_yours(cx));
+                    }
+                    if let Some(listeners) = std::env::var("CADENCE_PREVIEW_LISTENERS").ok().and_then(|text| text.parse::<u64>().ok()) {
+                        workspace.artist.update(cx, |artist, cx| artist.fixture_monthly_listeners(listeners, cx));
                     }
                 }
                 Scene::ArtistLoading => workspace.open_artist(model::ArtistRef { name: "Artist".into(), source_id: Some("loading".into()), spotify_uri: None }, Route::LikedSongs, cx),
@@ -1287,7 +1292,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
         cx.update_window(handle.into(), |_, window, _| {
             let bounds = window.find("artist-portrait").bounds();
             // Fractional zoom levels round layout to half pixels.
-            let expected = Rems(12.).to_pixels(window.rem_size());
+            let expected = Rems(15.).to_pixels(window.rem_size());
             assert!((bounds.size.width - expected).abs() <= px(1.));
             assert!((bounds.size.height - expected).abs() <= px(1.));
             let popular = window.find("artist-popular-heading").bounds();
@@ -1540,6 +1545,35 @@ pub(crate) fn run() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/glaive-profile.png");
         save_artifact(&screenshot, &path);
         println!("{}", path.display());
+        return;
+    }
+    if std::env::args().any(|argument| argument == "--artist-header-preview") {
+        let previews = artifacts.with_file_name("artist-header-previews");
+        std::fs::create_dir_all(&previews).unwrap();
+        for (name, artist, listeners, weight) in [
+            ("a-medium", "glaive", "4213555", 500),
+            ("b-semibold", "glaive", "4213555", 600),
+            ("c-bold", "glaive", "4213555", 700),
+            (
+                "d-long-name",
+                "Sleigh Bells of the Midnight Hour",
+                "18734092",
+                600,
+            ),
+            ("e-small-artist", "midwxst", "12408", 600),
+        ] {
+            // SAFETY: this preview runs on one thread before any scene is built.
+            unsafe {
+                std::env::set_var("CADENCE_PREVIEW_ARTIST", artist);
+                std::env::set_var("CADENCE_PREVIEW_LISTENERS", listeners);
+            }
+            crate::app::artist_header::PREVIEW_WEIGHT
+                .store(weight, std::sync::atomic::Ordering::Relaxed);
+            let image = capture(Scene::Artist, ThemePreference::Dark, 1620.);
+            let path = previews.join(format!("artist-{name}.png"));
+            save_artifact(&image, &path);
+            println!("{}", path.display());
+        }
         return;
     }
     if std::env::args().any(|argument| argument == "--home-wide-preview") {

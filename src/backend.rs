@@ -410,6 +410,11 @@ pub enum BackendCommand {
         index: usize,
         next_offset: Option<u32>,
     },
+    /// How many people listened to the artist this month, when Spotify says.
+    LoadArtistListeners {
+        source_id: String,
+        respond: Reply<Option<u64>>,
+    },
     LoadArtist {
         source_id: String,
         respond: Reply<ArtistDetails>,
@@ -883,6 +888,12 @@ impl Backend {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Set by a test that wants to see the artist page's listener request.
+    pub(crate) static KEEP_LISTENER_REQUESTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 fn send_command(
     commands: &Sender<BackendCommand>,
     controls: &Sender<BackendCommand>,
@@ -894,6 +905,14 @@ fn send_command(
         BackendCommand::Authenticate { .. } | BackendCommand::Logout { .. }
     ) {
         return controls.try_send(command).is_ok();
+    }
+    // Most page tests are about what a page asks for itself; the extra
+    // listener-count request is kept out of their way unless a test opts in.
+    #[cfg(test)]
+    if matches!(&command, BackendCommand::LoadArtistListeners { .. })
+        && !KEEP_LISTENER_REQUESTS.with(std::cell::Cell::get)
+    {
+        return true;
     }
     match command {
         BackendCommand::SetVolume(volume) => volume_sender.send(volume).is_ok(),
@@ -1464,6 +1483,11 @@ impl Worker {
                 let session = self.playback_session();
                 self.catalog
                     .playlist(self.spotify.clone(), session, playlist, offset, respond);
+                Ok(())
+            }
+            BackendCommand::LoadArtistListeners { source_id, respond } => {
+                let session = self.playback_session();
+                self.catalog.artist_listeners(session, source_id, respond);
                 Ok(())
             }
             BackendCommand::LoadArtist { source_id, respond } => {
@@ -3040,6 +3064,7 @@ struct CatalogFetches {
     made_for_you: Option<tokio::task::JoinHandle<()>>,
     playlist: Option<tokio::task::JoinHandle<()>>,
     artist: Option<tokio::task::JoinHandle<()>>,
+    artist_listeners: Option<tokio::task::JoinHandle<()>>,
     artist_albums: Option<tokio::task::JoinHandle<()>>,
     album: Option<tokio::task::JoinHandle<()>>,
     /// Seeded by the first full reload; lets later reloads answer Unchanged
@@ -3318,6 +3343,23 @@ impl CatalogFetches {
         );
     }
 
+    fn artist_listeners(
+        &mut self,
+        session: Option<librespot::core::session::Session>,
+        source_id: String,
+        respond: Reply<Option<u64>>,
+    ) {
+        Self::start(
+            &mut self.artist_listeners,
+            respond,
+            "artist listeners request",
+            async move {
+                let session = session.ok_or(crate::made_for_you::PlaybackNotConnected)?;
+                crate::artist_listeners::monthly_listeners(&session, &source_id).await
+            },
+        );
+    }
+
     fn artist_albums(
         &mut self,
         spotify: Spotify,
@@ -3377,6 +3419,7 @@ impl CatalogFetches {
         abort_task(&mut self.discover);
         abort_task(&mut self.playlist);
         abort_task(&mut self.artist);
+        abort_task(&mut self.artist_listeners);
         abort_task(&mut self.artist_albums);
         abort_task(&mut self.album);
         // The next account's library must not compare equal to this one's.

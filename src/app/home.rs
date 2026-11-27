@@ -30,9 +30,11 @@ const RAIL_ROWS: usize = 4;
 /// The rail's width and the gap between the two panes, at 100% zoom.
 const RAIL_WIDTH: f32 = 412.;
 const PANE_GAP: f32 = 32.;
-/// The narrowest a mix cover is allowed to get before a card is dropped.
-const MIX_COVER_MIN: f32 = 190.;
-const MIX_COVER_MAX_COUNT: usize = 6;
+/// The narrowest a mix cover is allowed to get before a card is dropped, and
+/// the fewest and most in a row. Five fit the window Sonder opens with.
+const MIX_COVER_MIN: f32 = 150.;
+const MIX_MIN_COUNT: usize = 5;
+const MIX_MAX_COUNT: usize = 8;
 /// The hue of the Liked Songs tile.
 const LIKED_HUE: f32 = 340.;
 /// Home reads the stretch Spotify calls medium term (about six months).
@@ -1076,16 +1078,23 @@ struct Layout {
 }
 
 impl Layout {
-    /// `room` is the page's width in pixels at 100% zoom.
+    /// `room` is the page's width in pixels at 100% zoom. The rail goes beside
+    /// the main pane only while five covers still fit in what is left; below
+    /// that it drops underneath so the shelves keep the whole width.
     fn for_room(room: f32) -> Self {
-        let stacked = room < STACK_BELOW;
-        let main = if stacked {
-            room
+        let beside = room - PANE_GAP - RAIL_WIDTH;
+        let stacked = beside < row_width(MIX_MIN_COUNT);
+        let main = if stacked { room } else { beside };
+        // As many covers as fit at the narrowest size, never fewer than five
+        // unless the window itself is too small; then they stretch to fill the
+        // row, so the shelf never ends in a gap.
+        let fits = (((main + GRID_GAP) / (MIX_COVER_MIN + GRID_GAP)) as usize)
+            .clamp(MIX_MIN_COUNT, MIX_MAX_COUNT);
+        let mix_count = if main < row_width(MIX_MIN_COUNT) {
+            (((main + GRID_GAP) / (MIX_COVER_MIN + GRID_GAP)) as usize).max(2)
         } else {
-            room - PANE_GAP - RAIL_WIDTH
+            fits
         };
-        let mix_count = (((main + GRID_GAP) / (MIX_COVER_MIN + GRID_GAP)) as usize)
-            .clamp(2, MIX_COVER_MAX_COUNT);
         let mix_cover = ((main - GRID_GAP * (mix_count - 1) as f32) / mix_count as f32).floor();
         Self {
             stacked,
@@ -1096,8 +1105,11 @@ impl Layout {
     }
 }
 
-/// Under this the rail no longer fits beside the main pane.
-const STACK_BELOW: f32 = 1000.;
+/// The width of `count` of the narrowest covers in a row.
+fn row_width(count: usize) -> f32 {
+    MIX_COVER_MIN * count as f32 + GRID_GAP * (count - 1) as f32
+}
+
 /// The sidebar and the page's margins, in pixels at 100% zoom.
 const PAGE_CHROME: f32 = 312.;
 /// The space between neighbours in every grid, so edges line up.
@@ -1170,7 +1182,10 @@ fn release_label(date: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GRID_GAP, Layout, PAGE_CHROME, PANE_GAP, RAIL_WIDTH, greeting_for, release_label};
+    use super::{
+        GRID_GAP, Layout, MIX_MAX_COUNT, PAGE_CHROME, PANE_GAP, RAIL_WIDTH, greeting_for,
+        release_label,
+    };
 
     #[test]
     fn the_greeting_follows_the_hour() {
@@ -1188,11 +1203,11 @@ mod tests {
     #[test]
     fn the_layout_follows_the_window() {
         // The window Sonder opens with: the rail beside the main pane, and
-        // four mixes across it.
+        // five mixes across it.
         let wide = Layout::for_room(super::super::windows::DEFAULT_WINDOW_WIDTH - PAGE_CHROME);
         assert!(!wide.stacked);
         assert_eq!(wide.tile_columns, 2);
-        assert_eq!(wide.mix_count, 4);
+        assert_eq!(wide.mix_count, 5);
         // A row of covers fills the pane exactly, to the pixel.
         let main =
             super::super::windows::DEFAULT_WINDOW_WIDTH - PAGE_CHROME - PANE_GAP - RAIL_WIDTH;
@@ -1203,11 +1218,22 @@ mod tests {
         );
         // Wider windows add covers rather than stretching them.
         assert!(Layout::for_room(2200.).mix_count > wide.mix_count);
-        assert!(Layout::for_room(5000.).mix_count <= 6);
-        // Narrower ones put the rail under the main pane.
-        let narrow = Layout::for_room(800.);
-        assert!(narrow.stacked);
-        assert!(narrow.mix_count >= 2);
+        assert!(Layout::for_room(5000.).mix_count <= MIX_MAX_COUNT);
+        // Narrower ones put the rail under the main pane, which keeps five
+        // across down to a laptop-sized first window.
+        for room in [1054., 968., 820.] {
+            let layout = Layout::for_room(room);
+            assert!(layout.stacked, "{room}");
+            assert!(layout.mix_count >= 5, "{room}: {}", layout.mix_count);
+            let row = layout.mix_cover * layout.mix_count as f32
+                + GRID_GAP * (layout.mix_count - 1) as f32;
+            assert!(
+                (room - row).abs() < layout.mix_count as f32,
+                "{room} vs {row}"
+            );
+        }
+        // Only a very small window drops below five.
+        assert!(Layout::for_room(500.).mix_count >= 2);
         assert_eq!(Layout::for_room(400.).tile_columns, 1);
     }
 

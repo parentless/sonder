@@ -364,7 +364,7 @@ type BackendEvents = crate::backend::EventReceiver;
 
 mod actions;
 mod appearance;
-mod artist_header;
+pub(crate) mod artist_header;
 mod assets;
 mod bootstrap;
 mod cached_search;

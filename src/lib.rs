@@ -1,4 +1,5 @@
 mod app;
+mod artist_listeners;
 mod audio_output;
 pub mod backend;
 mod credential_worker;
