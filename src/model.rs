@@ -107,14 +107,14 @@ pub struct Playlist {
 }
 
 /// One of Spotify's made-for-you playlists, with the line it shows beneath.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct HomeMix {
     pub playlist: Playlist,
     pub description: Option<String>,
 }
 
 /// Home's two personalized shelves, in Spotify's order.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct HomeMixes {
     pub made_for_you: Vec<HomeMix>,
     pub top_mixes: Vec<HomeMix>,

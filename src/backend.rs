@@ -33,6 +33,8 @@ const HOME_CACHE_SECONDS: u64 = 6 * 60 * 60;
 /// How long the Profile page keeps the last plays Spotify reported.
 const PROFILE_RECENT_CACHE_SECONDS: u64 = 20 * 60;
 const PROFILE_TOP_KEY: &str = "profile-top";
+/// Under `cache:`, so signing out clears it with the other saved answers.
+const HOME_MIXES_KEY: &str = "home-mixes";
 const PROFILE_RECENT_KEY: &str = "profile-recent";
 /// Announced releases change daily at most.
 const UPCOMING_CACHE_SECONDS: u64 = 24 * 60 * 60;
@@ -391,6 +393,11 @@ pub enum BackendCommand {
     LoadMadeForYou {
         force: bool,
         respond: Reply<crate::model::HomeMixes>,
+    },
+    /// What the last Made for you read saved, of any age, so Home can show
+    /// something at once while `LoadMadeForYou` waits for playback to connect.
+    LoadMadeForYouSaved {
+        respond: Reply<Option<crate::model::HomeMixes>>,
     },
     SearchCatalog {
         query: String,
@@ -1471,8 +1478,17 @@ impl Worker {
             }
             BackendCommand::LoadMadeForYou { force, respond } => {
                 let session = self.playback_session();
-                self.catalog
-                    .made_for_you(self.spotify.clone(), session, force, respond);
+                self.catalog.made_for_you(
+                    self.spotify.clone(),
+                    self.store.clone(),
+                    session,
+                    force,
+                    respond,
+                );
+                Ok(())
+            }
+            BackendCommand::LoadMadeForYouSaved { respond } => {
+                self.catalog.made_for_you_saved(self.store.clone(), respond);
                 Ok(())
             }
             BackendCommand::LoadPlaylist {
@@ -3062,6 +3078,7 @@ struct CatalogFetches {
     upcoming: Option<tokio::task::JoinHandle<()>>,
     discover: Option<tokio::task::JoinHandle<()>>,
     made_for_you: Option<tokio::task::JoinHandle<()>>,
+    made_for_you_saved: Option<tokio::task::JoinHandle<()>>,
     playlist: Option<tokio::task::JoinHandle<()>>,
     artist: Option<tokio::task::JoinHandle<()>>,
     artist_listeners: Option<tokio::task::JoinHandle<()>>,
@@ -3235,6 +3252,7 @@ impl CatalogFetches {
         // MusicBrainz allows one request a second, so a sweep outlasts the
         // catalog timeout; it keeps partial results and bounds itself instead.
         abort_task(&mut self.made_for_you);
+        abort_task(&mut self.made_for_you_saved);
         abort_task(&mut self.upcoming);
         let mut respond = respond;
         self.upcoming = Some(tokio::spawn(async move {
@@ -3318,6 +3336,7 @@ impl CatalogFetches {
     fn made_for_you(
         &mut self,
         spotify: Spotify,
+        store: BlockingStore,
         session: Option<librespot::core::session::Session>,
         force: bool,
         respond: Reply<crate::model::HomeMixes>,
@@ -3329,8 +3348,28 @@ impl CatalogFetches {
             async move {
                 let session = session.ok_or(crate::made_for_you::PlaybackNotConnected)?;
                 let token = spotify.access_token().await?;
-                crate::made_for_you::load(&session, token, force).await
+                let mixes = crate::made_for_you::load(&session, token, force).await?;
+                // Kept so the next launch can show these at once.
+                if let Ok(json) = serde_json::to_string(&mixes)
+                    && let Err(error) = store.set_cached_json(HOME_MIXES_KEY.to_owned(), json).await
+                {
+                    log::warn!("could not save Made for you: {error:#}");
+                }
+                Ok(mixes)
             },
+        );
+    }
+
+    fn made_for_you_saved(
+        &mut self,
+        store: BlockingStore,
+        respond: Reply<Option<crate::model::HomeMixes>>,
+    ) {
+        Self::start(
+            &mut self.made_for_you_saved,
+            respond,
+            "saved Made for you",
+            async move { Ok(saved_json::<crate::model::HomeMixes>(&store, HOME_MIXES_KEY).await) },
         );
     }
 

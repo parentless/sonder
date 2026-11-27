@@ -145,16 +145,7 @@ async fn fetch(session: &Session, web_token: &str) -> (Result<HomeMixes>, Option
     };
     let country = session.country();
     let timezone = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_owned());
-    // Spotify answers 403 "Client/request not allowed" to some pairings of the
-    // `sp_t` context and the session's tokens. Try the Web API token first,
-    // as Spotifast does, then the session's own token, then none, and keep
-    // whichever Spotify accepts, logging what each one got.
-    let contexts = [
-        ("web token", web_token),
-        ("session token", &token),
-        ("none", ""),
-    ];
-    let mut request = Request {
+    let request = Request {
         client: &client,
         token: &token,
         client_token: &client_token,
@@ -162,26 +153,10 @@ async fn fetch(session: &Session, web_token: &str) -> (Result<HomeMixes>, Option
         timezone: &timezone,
         web_token,
     };
-    let mut made_for_you = Err(SectionError::Failed(anyhow!("no attempt was made")));
-    for (label, context) in contexts {
-        request.web_token = context;
-        made_for_you = read_section(&request, MADE_FOR_YOU).await;
-        match &made_for_you {
-            Ok(_) => {
-                log::info!("made for you: Spotify accepted the {label} as context");
-                break;
-            }
-            Err(SectionError::RateLimited(_)) => break,
-            Err(SectionError::Failed(error)) => {
-                log::warn!("made for you: context {label} failed: {error:#}");
-            }
-        }
-    }
-    let top_mixes = if made_for_you.is_ok() {
-        read_section(&request, TOP_MIXES).await
-    } else {
-        Err(SectionError::Failed(anyhow!("skipped")))
-    };
+    let (made_for_you, top_mixes) = tokio::join!(
+        read_section(&request, MADE_FOR_YOU),
+        read_section(&request, TOP_MIXES)
+    );
     let wait = [&made_for_you, &top_mixes]
         .into_iter()
         .filter_map(|result| match result {

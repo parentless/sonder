@@ -23,8 +23,8 @@ const MIXES_STALE_TIME: Duration = Duration::from_secs(10 * 60);
 const MIXES_RETRY: Duration = Duration::from_secs(5 * 60);
 /// While playback connects, Made for you is asked for again this often, this
 /// many times, before the page treats it as a failure.
-const MIXES_WAIT: Duration = Duration::from_secs(3);
-const MIXES_WAITS: u32 = 20;
+const MIXES_WAIT: Duration = Duration::from_secs(1);
+const MIXES_WAITS: u32 = 60;
 /// Releases listed in the rail before "Show all".
 const RAIL_ROWS: usize = 4;
 /// The rail's width and the gap between the two panes, at 100% zoom.
@@ -104,6 +104,8 @@ pub(super) struct HomePage {
     /// Retries so far while playback was not yet connected.
     mixes_waits: u32,
     mixes_request: Option<gpui_kit::Task<()>>,
+    /// The shelves saved by the last visit, shown while the new ones load.
+    mixes_saved_request: Option<gpui_kit::Task<()>>,
     /// Which shelves "Show all" has opened out.
     expanded: Vec<Shelf>,
     /// The album a rail row's play button is fetching, so a second click
@@ -145,6 +147,7 @@ impl HomePage {
             mixes_failed_at: None,
             mixes_waits: 0,
             mixes_request: None,
+            mixes_saved_request: None,
             expanded: Vec::new(),
             playing_release: None,
             error: None,
@@ -196,6 +199,7 @@ impl HomePage {
         self.mixes_failed_at = None;
         self.mixes_waits = 0;
         self.mixes_request = None;
+        self.mixes_saved_request = None;
         self.expanded.clear();
         self.playing_release = None;
         self.error = None;
@@ -277,6 +281,9 @@ impl HomePage {
             return;
         }
         self.mixes_loading = true;
+        if self.mixes.is_none() && self.mixes_saved_request.is_none() {
+            self.show_saved_mixes(cx);
+        }
         let reply = catalog::request(&self.backend, |respond| BackendCommand::LoadMadeForYou {
             force: false,
             respond,
@@ -313,7 +320,31 @@ impl HomePage {
         }));
     }
 
-    /// Asks for the mixes again in a few seconds, while playback connects.
+    /// Shows what the last visit saved at once, as just after launch, while
+    /// playback connects. It counts as stale, so the real read still follows,
+    /// and it never replaces shelves that have already arrived.
+    fn show_saved_mixes(&mut self, cx: &mut Context<Self>) {
+        let reply = catalog::request(&self.backend, |respond| {
+            BackendCommand::LoadMadeForYouSaved { respond }
+        });
+        self.mixes_saved_request = Some(cx.spawn(async move |this, cx| {
+            let saved = reply.await;
+            let _ = this.update(cx, |page, cx| {
+                page.mixes_saved_request = None;
+                if let Ok(Some(shelves)) = saved
+                    && page.mixes.is_none()
+                {
+                    page.mixes = Some(Mixes {
+                        shelves,
+                        loaded_at: SystemTime::UNIX_EPOCH,
+                    });
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// Asks for the mixes again in a moment, while playback connects.
     fn retry_mixes_soon(&mut self, cx: &mut Context<Self>) {
         if self.mixes_waits >= MIXES_WAITS {
             self.mixes_failed_at = Some(SystemTime::now());
