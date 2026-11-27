@@ -500,9 +500,6 @@ impl Workspace {
             page::PageEvent::OpenAlbum(album) => self.open_album(album.clone(), origin, cx),
             page::PageEvent::StartRadio(track) => self.start_track_radio(track.clone(), cx),
             page::PageEvent::ShowCredits(track) => self.show_credits(track.clone(), cx),
-            page::PageEvent::SavePlaylist { name, tracks } => {
-                self.save_playlist(name.clone(), tracks.clone(), cx)
-            }
             page::PageEvent::OpenLocalFilesSettings => {
                 self.settings
                     .update(cx, |settings, cx| settings.show_local_files(cx));
@@ -510,54 +507,6 @@ impl Workspace {
             }
         }
         cx.notify();
-    }
-
-    /// Saves songs as a private Spotify playlist, one at a time, telling the
-    /// listener how it went in the notice bar.
-    fn save_playlist(
-        &mut self,
-        name: SharedString,
-        tracks: Arc<[model::Track]>,
-        cx: &mut Context<Self>,
-    ) {
-        if self.playlist_request.is_some() {
-            return;
-        }
-        let uris: Vec<String> = tracks
-            .iter()
-            .filter(|track| !track.is_local())
-            .filter_map(|track| track.spotify_uri.clone())
-            .collect();
-        if uris.is_empty() {
-            self.action_notice = Some("There are no Spotify songs here to save".into());
-            return;
-        }
-        self.action_notice = Some(format!("Saving “{name}”…").into());
-        let backend = services::AppServices::backend(cx);
-        // Weak, so a request still running cannot keep the library alive.
-        let library = services::AppServices::library(cx).downgrade();
-        let reply = catalog::request(&backend, {
-            let name = name.to_string();
-            move |respond| BackendCommand::CreatePlaylist {
-                name,
-                uris,
-                respond,
-            }
-        });
-        self.playlist_request = Some(cx.spawn(async move |this, cx| {
-            let result = reply.await;
-            let _ = this.update(cx, |this, cx| {
-                this.playlist_request = None;
-                this.action_notice = Some(match result {
-                    Ok(()) => {
-                        let _ = library.update(cx, |library, cx| library.playlist_created(cx));
-                        format!("Saved “{name}” to your playlists").into()
-                    }
-                    Err(error) => error,
-                });
-                cx.notify();
-            });
-        }));
     }
 
     /// Queues a radio seeded from `track`, tracking the request so a later

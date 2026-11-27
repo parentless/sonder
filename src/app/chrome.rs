@@ -129,6 +129,8 @@ pub(super) struct Toolbar {
     library: Entity<library::Library>,
     pub(super) artist_header: Option<Entity<artist_header::ArtistHeader>>,
     menu_open: bool,
+    /// 0 when the account menu is closed, 1 when open; it eases between.
+    menu_motion: gpui_motion_kit::ValueState,
     session: Entity<session::Session>,
     player: Entity<player::Player>,
     route: Route,
@@ -192,6 +194,7 @@ impl Toolbar {
             library,
             artist_header: None,
             menu_open: false,
+            menu_motion: gpui_motion_kit::ValueState::new(0.),
             session: services::AppServices::session(cx),
             player: services::AppServices::player(cx),
             route: Route::LikedSongs,
@@ -910,7 +913,12 @@ impl Toolbar {
         )
     }
 
-    fn account_menu(&self, palette: CadencePalette, cx: &mut Context<Self>) -> impl IntoElement {
+    fn account_menu(
+        &self,
+        palette: CadencePalette,
+        progress: f32,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let profile_name = self.profile_name(cx);
         let can_connect = matches!(
             self.session.read(cx).state(),
@@ -923,8 +931,11 @@ impl Toolbar {
                 cx.listener(|this, _, _, cx| this.close_menu(cx)),
             )
             .absolute()
-            .top_12()
+            // Fades in and settles down from 4px above, so it reads as coming
+            // from the avatar. Fully open it sits where it always did.
+            .top(Rems(3. - 0.25 * (1. - progress)))
             .right_0()
+            .opacity(progress)
             .child(
                 div()
                     .px_2p5()
@@ -1017,6 +1028,16 @@ impl Render for Toolbar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = appearance::Appearance::palette(cx);
         let compact = is_compact_content_layout(window);
+        let menu_progress = self
+            .menu_motion
+            .frame(
+                if self.menu_open { 1. } else { 0. },
+                super::motion::popover(self.menu_open),
+                window,
+                cx,
+            )
+            .value() as f32;
+        let menu_progress = menu_progress.clamp(0., 1.);
         let profile_name = self.profile_name(cx);
         let profile = self.session.read(cx).profile().cloned();
         let profile_artwork = profile
@@ -1150,8 +1171,8 @@ impl Render for Toolbar {
                                 cx.notify();
                             })),
                     )
-                    .when(self.menu_open, |anchor| {
-                        anchor.child(deferred(self.account_menu(palette, cx)))
+                    .when(self.menu_open || menu_progress > 0.001, |anchor| {
+                        anchor.child(deferred(self.account_menu(palette, menu_progress, cx)))
                     }),
             )
     }

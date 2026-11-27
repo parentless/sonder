@@ -96,9 +96,18 @@ pub(super) fn show_app_window(cx: &mut App) {
     }
 }
 
+/// The main window's first size. Wide enough that Home's "New from artists you
+/// play" shows four covers; a smaller screen shrinks it to fit.
+pub(super) const DEFAULT_WINDOW_WIDTH: f32 = 1620.;
+const DEFAULT_WINDOW_HEIGHT: f32 = 900.;
+
 /// Opens the resizable main window over the already-running services.
 pub(super) fn open_main_window(cx: &mut App) {
-    let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
+    let bounds = Bounds::centered(
+        None,
+        size(px(DEFAULT_WINDOW_WIDTH), px(DEFAULT_WINDOW_HEIGHT)),
+        cx,
+    );
     let opened = gpui_kit::open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),

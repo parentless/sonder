@@ -13,7 +13,6 @@ pub(super) struct Workspace {
     pub(super) radio_request_id: u64,
     pub(super) pending_radio_request: Option<u64>,
     /// A playlist being saved; one at a time.
-    pub(super) playlist_request: Option<gpui_kit::Task<()>>,
     pub(super) player: Entity<player::Player>,
     pub(super) session: Entity<session::Session>,
     pub(super) library: Entity<library::Library>,
@@ -385,7 +384,6 @@ impl Workspace {
             action_notice: None,
             radio_request_id: 0,
             pending_radio_request: None,
-            playlist_request: None,
             player,
             session,
             library,

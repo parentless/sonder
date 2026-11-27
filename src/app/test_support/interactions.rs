@@ -4135,62 +4135,6 @@ fn home_loads_top_items_once_when_opened_and_lists_no_top_artists() {
     });
 }
 
-fn notice(fixture: &mut Fixture) -> String {
-    let workspace = fixture.workspace.clone().unwrap();
-    fixture.update(|_, cx| {
-        workspace
-            .upgrade()
-            .unwrap()
-            .read(cx)
-            .action_notice
-            .clone()
-            .map(|notice| notice.to_string())
-            .unwrap_or_default()
-    })
-}
-
-#[test]
-fn an_album_saves_as_a_playlist_and_a_refusal_reaches_the_notice_bar() {
-    let mut fixture = Fixture::new(false);
-    fixture.play(credited_track());
-    fixture.no_commands();
-    fixture.update(|window, cx| window.click("player-artwork", cx));
-    let BackendCommand::LoadAlbum { respond, .. } = fixture.backend.commands.try_recv().unwrap()
-    else {
-        panic!("expected an album request")
-    };
-    let album = crate::app::test_support::gallery_results().albums.remove(0);
-    respond
-        .send(Ok((album.clone(), vec![track(0), track(1), track(2)])))
-        .unwrap();
-    fixture.update(|_, _| {});
-
-    fixture.update(|window, cx| window.click("album-save-playlist", cx));
-    let BackendCommand::CreatePlaylist {
-        name,
-        uris,
-        respond,
-    } = fixture.backend.commands.try_recv().unwrap()
-    else {
-        panic!("expected a playlist request")
-    };
-    assert_eq!(name, album.name.to_string());
-    assert_eq!(uris.len(), 3);
-    respond
-        .send(Err(anyhow::anyhow!(
-            "To create playlists, sign out of Sonder and sign in again"
-        )))
-        .unwrap();
-    fixture.update(|_, _| {});
-    assert!(notice(&mut fixture).contains("sign in again"));
-    // After a failure it can be tried again.
-    fixture.update(|window, cx| window.click("album-save-playlist", cx));
-    assert!(matches!(
-        fixture.backend.commands.try_recv(),
-        Ok(BackendCommand::CreatePlaylist { .. })
-    ));
-}
-
 #[test]
 fn an_album_queues_whole_after_the_current_song() {
     let mut fixture = Fixture::new(false);

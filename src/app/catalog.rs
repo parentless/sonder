@@ -2689,11 +2689,6 @@ impl Render for AlbumPage {
             None => "Review album".into(),
         };
         let reviewing = self.review.is_some();
-        let save_name: SharedString = self
-            .album
-            .as_ref()
-            .map_or_else(|| "Album".into(), |album| album.name.clone());
-        let save_tracks = tracks.clone();
         // Queueing goes after the current song, so it needs one.
         let can_queue = !tracks.is_empty() && self.player.read(cx).now_playing().is_some();
         let playback_tracks = tracks;
@@ -2771,23 +2766,6 @@ impl Render for AlbumPage {
                                     })
                                     .when(can_review, |row| {
                                         row.child(
-                                            components::pill(
-                                                palette,
-                                                "album-save-playlist",
-                                                "Save as playlist",
-                                                false,
-                                            )
-                                            .test_support()
-                                            .on_click(
-                                                cx.listener(move |_, _, _, cx| {
-                                                    cx.emit(PageEvent::SavePlaylist {
-                                                        name: save_name.clone(),
-                                                        tracks: save_tracks.clone(),
-                                                    });
-                                                }),
-                                            ),
-                                        )
-                                        .child(
                                             components::pill(
                                                 palette,
                                                 "album-review",

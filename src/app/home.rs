@@ -1340,8 +1340,15 @@ mod tests {
 
     #[test]
     fn the_shelf_shows_more_albums_as_the_window_widens() {
-        // The default window: two columns of about 476, so three covers.
+        // A 1280 window: two columns of about 476, so three covers.
         assert_eq!(shelf_count(968., 2), 3);
+        // The window Sonder opens with shows at least four.
+        assert!(
+            shelf_count(
+                super::super::windows::DEFAULT_WINDOW_WIDTH - super::PAGE_CHROME,
+                2
+            ) >= 4
+        );
         // Wider windows add covers rather than gaps.
         assert_eq!(shelf_count(1400., 2), 4);
         assert_eq!(shelf_count(2200., 2), 6);

@@ -11,9 +11,8 @@ use rspotify::{
     AuthCodePkceSpotify, Config, Credentials, OAuth, Token,
     model::{
         AlbumId, AlbumType, ArtistId, FullAlbum, FullArtist, FullTrack, Id, Image, LibraryId,
-        Market, PlayableId, PlayableItem, PlaylistId, SavedTrack, SearchResult, SearchType,
-        SimplifiedAlbum, SimplifiedArtist, SimplifiedPlaylist, SimplifiedTrack, TimeRange, TrackId,
-        UserId,
+        Market, PlayableItem, PlaylistId, SavedTrack, SearchResult, SearchType, SimplifiedAlbum,
+        SimplifiedArtist, SimplifiedPlaylist, SimplifiedTrack, TimeRange, TrackId,
     },
     prelude::{BaseClient, OAuthClient},
     scopes,
@@ -455,9 +454,6 @@ struct TopArtist {
 
 /// Followed artists read for the release scan; only a handful are scanned.
 const FOLLOWED_ARTISTS_READ: u32 = 30;
-/// Spotify takes at most this many songs in one add request.
-const PLAYLIST_ADD_CHUNK: usize = 100;
-
 /// How long a fetched top-artist list is reused within one run.
 /// Artists asked for per range on the Profile page: enough to tell which
 /// favourites stay in every chart.
@@ -935,46 +931,6 @@ impl Spotify {
                 Ok(Vec::new())
             }
         }
-    }
-
-    /// Makes a private playlist holding `uris` (songs only, in order). Older
-    /// sessions need consent for the extra permission.
-    pub async fn create_playlist(&self, name: &str, uris: &[String]) -> Result<()> {
-        let ids: Vec<TrackId<'static>> = uris
-            .iter()
-            .filter_map(|uri| TrackId::from_uri(uri).ok())
-            .map(TrackId::into_static)
-            .collect();
-        if ids.is_empty() {
-            bail!("There are no Spotify songs here to save");
-        }
-        self.gated(async {
-            let authorized = self.client.token.lock().await
-                .map_err(|_| anyhow!("could not lock Spotify token state"))?
-                .as_ref().is_some_and(|token| token.scopes.contains("playlist-modify-private"));
-            if !authorized {
-                bail!("To create playlists, sign out of Sonder and sign in again to grant playlist editing permission");
-            }
-            let user = UserId::from_id("me")?;
-            let playlist = self
-                .client
-                .user_playlist_create(user, name, Some(false), None, None)
-                .await
-                .context("could not create the Spotify playlist")?;
-            for chunk in ids.chunks(PLAYLIST_ADD_CHUNK) {
-                self.pace().await;
-                self.client
-                    .playlist_add_items(
-                        playlist.id.as_ref(),
-                        chunk.iter().cloned().map(PlayableId::Track),
-                        None,
-                    )
-                    .await
-                    .context("could not add songs to the Spotify playlist")?;
-            }
-            Ok(())
-        })
-        .await
     }
 
     /// The listener's top artists over the medium term, fetched at most once
@@ -1955,67 +1911,6 @@ mod tests {
             seen.push(request);
         }
         seen
-    }
-
-    fn page_json(items: serde_json::Value) -> serde_json::Value {
-        serde_json::json!({"href":"","items":items,"limit":50,"next":null,"offset":0,"previous":null,"total":0})
-    }
-
-    #[tokio::test]
-    async fn playlists_need_their_permission_then_hold_every_song_in_chunks_of_a_hundred() {
-        use super::*;
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let spotify = test_client(listener.local_addr().unwrap()).await;
-        let uris: Vec<String> = (0..101)
-            .map(|index| format!("spotify:track:{index:022}"))
-            .collect();
-        let error = spotify.create_playlist("Mix", &uris).await.unwrap_err();
-        assert!(error.to_string().contains("sign out"), "{error:#}");
-        assert!(
-            spotify
-                .create_playlist("Mix", &["spotify:local:a::b:1".into()])
-                .await
-                .is_err()
-        );
-        spotify
-            .client
-            .token
-            .lock()
-            .await
-            .unwrap()
-            .as_mut()
-            .unwrap()
-            .scopes
-            .insert("playlist-modify-private".into());
-        let created = serde_json::json!({
-            "collaborative": false, "description": null, "external_urls": {},
-            "followers": {"href": null, "total": 0}, "href": "", "id": "pl1",
-            "images": [], "name": "Mix",
-            "owner": {"display_name": "me", "external_urls": {}, "href": "", "id": "me", "images": []},
-            "public": false, "snapshot_id": "snap", "items": page_json(serde_json::json!([]))
-        })
-        .to_string();
-        let added = serde_json::json!({"snapshot_id": "snap"}).to_string();
-        let server = tokio::spawn(serve_once_each(
-            listener,
-            vec![
-                ("POST /v1/me/playlists", created),
-                ("POST /v1/playlists/pl1/items", added.clone()),
-                ("POST /v1/playlists/pl1/items", added),
-            ],
-        ));
-        timeout(
-            Duration::from_secs(10),
-            spotify.create_playlist("Mix", &uris),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        let seen = server.await.unwrap();
-        assert!(seen[0].contains("\"public\":false"), "{}", seen[0]);
-        assert!(seen[0].contains("\"name\":\"Mix\""));
-        assert_eq!(seen[1].matches("spotify:track:").count(), 100);
-        assert_eq!(seen[2].matches("spotify:track:").count(), 1);
     }
 
     #[tokio::test]

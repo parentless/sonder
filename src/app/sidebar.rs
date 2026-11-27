@@ -103,6 +103,9 @@ struct RowTransition {
 /// One line of section-label text: the body size times GPUI's default line height.
 const SECTION_LABEL_HEIGHT: Rems = Rems(0.8125 * 1.618_034);
 
+/// One line of caption text: the caption size times GPUI's default line height.
+const CAPTION_LINE_HEIGHT: Rems = Rems(0.6875 * 1.618_034);
+
 /// Shrinks `block` toward nothing as `progress` falls from 1, and takes back the
 /// flex gap that followed it, so the rows below slide up instead of jumping.
 /// At rest (progress 1) it adds nothing.
@@ -233,6 +236,7 @@ impl Sidebar {
         palette: CadencePalette,
         collapsed: bool,
         animate: bool,
+        transition: &RowTransition,
     ) -> Option<AnyElement> {
         let offer = self.update.as_ref()?;
         let (title, detail, action) = match offer {
@@ -272,8 +276,12 @@ impl Sidebar {
             });
         }
         let key = title.len();
+        let progress = transition.progress;
+        // Laid out at the full row width however far the rail has opened, and
+        // clipped by the rail, so its text never wraps and unwraps mid-slide.
         let card = div()
             .flex_none()
+            .w(transition.row_width)
             .p_3p5()
             .rounded_2xl()
             .border_1()
@@ -313,18 +321,24 @@ impl Sidebar {
             });
         // It shows up once, a moment after startup settles, so it eases in. Test
         // renders skip the fade so screenshots never catch it half-drawn.
-        if animate && !cfg!(test) {
-            Some(
-                card.with_animation(
-                    ("update-card", key),
-                    Animation::new(Duration::from_millis(220)).with_easing(ease_out_quint()),
-                    |card, progress| card.opacity(progress),
-                )
-                .into_any_element(),
+        let card = if animate && !cfg!(test) {
+            card.with_animation(
+                ("update-card", key),
+                Animation::new(Duration::from_millis(220)).with_easing(ease_out_quint()),
+                |card, progress| card.opacity(progress),
             )
+            .into_any_element()
         } else {
-            Some(card.into_any_element())
-        }
+            card.into_any_element()
+        };
+        Some(
+            div()
+                .w_full()
+                .overflow_hidden()
+                .opacity(progress)
+                .child(card)
+                .into_any_element(),
+        )
     }
 
     pub(super) fn show_route(
@@ -620,14 +634,25 @@ impl Sidebar {
             .border_t_1()
             .border_color(rgb(palette.border))
             .child(row)
-            .when(!collapsed, |footer| {
+            // Mounted while the rail moves, on one line and fading with it, so it
+            // never wraps into the narrow rail and then unwraps as the rail opens.
+            .when(!collapsed || progress > 0.001, |footer| {
                 footer.child(
-                    div()
-                        .px_3()
-                        .pb_1()
-                        .text_size(tokens::CAPTION_TEXT)
-                        .text_color(rgb(palette.text_muted))
-                        .child(concat!("Sonder ", env!("CARGO_PKG_VERSION"))),
+                    collapsing(
+                        div().child(
+                            div()
+                                .px_3()
+                                .pb_1()
+                                .whitespace_nowrap()
+                                .text_size(tokens::CAPTION_TEXT)
+                                .text_color(rgb(palette.text_muted))
+                                .child(concat!("Sonder ", env!("CARGO_PKG_VERSION"))),
+                        ),
+                        progress,
+                        CAPTION_LINE_HEIGHT + Rems(0.25),
+                        Rems(0.),
+                    )
+                    .opacity(progress),
                 )
             })
             .into_any_element()
@@ -1038,7 +1063,12 @@ impl Sidebar {
                         )
                     })
                     .when(!show_pinned, |panel| panel.child(div().flex_1()))
-                    .children(self.update_card(palette, collapsed, !cx.reduce_motion()))
+                    .children(self.update_card(
+                        palette,
+                        collapsed && progress <= 0.001,
+                        !cx.reduce_motion(),
+                        &transition,
+                    ))
                     .child(whats_new_footer),
             )
     }

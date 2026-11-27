@@ -41,6 +41,27 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 27, 2026",
+                releases: &[Release {
+                    version: "0.8.73",
+                    notes: &[
+                        Note(
+                            Better,
+                            "Sonder opens larger, wide enough to show four albums in New from artists you play.",
+                        ),
+                        Note(
+                            Better,
+                            "The account menu opens with a quick fade and slide.",
+                        ),
+                        Note(
+                            Fixed,
+                            "Reopening the sidebar no longer makes What’s new and the version flicker while it widens.",
+                        ),
+                        Note(Better, "Save as playlist is gone from albums."),
+                    ],
+                }],
+            },
+            Day {
                 date: "Nov 26, 2026",
                 releases: &[Release {
                     version: "0.8.72",

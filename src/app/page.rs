@@ -18,11 +18,6 @@ pub(super) enum PageEvent {
     StartRadio(model::Track),
     /// Who made this song.
     ShowCredits(model::Track),
-    /// Makes a private Spotify playlist from these songs.
-    SavePlaylist {
-        name: SharedString,
-        tracks: Arc<[model::Track]>,
-    },
     /// Settings, at the folders Local Files reads.
     OpenLocalFilesSettings,
 }
