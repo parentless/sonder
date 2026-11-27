@@ -64,10 +64,12 @@ fn state() -> &'static Mutex<State> {
     STATE.get_or_init(Mutex::default)
 }
 
+/// No user agent on purpose: tried against the live service, Spotify answers
+/// this request with 403 "Client/request not allowed" when it carries an
+/// unfamiliar one ("Sonder/x.y.z") and with 200 when it carries none.
 fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .use_rustls_tls()
-        .user_agent(concat!("Sonder/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(15))
         .build()
