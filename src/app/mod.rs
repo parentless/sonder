@@ -368,7 +368,7 @@ pub(crate) mod artist_header;
 mod assets;
 mod bootstrap;
 mod cached_search;
-mod catalog;
+pub(crate) mod catalog;
 mod chrome;
 mod components;
 mod credits_dialog;

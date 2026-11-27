@@ -630,6 +630,70 @@ pub(super) struct ArtistPage {
 
 impl EventEmitter<PageEvent> for ArtistPage {}
 
+/// How the artist's picture fades into the page at the bottom of the header.
+/// Each layer is a full-size gradient from clear at `from` to the page colour
+/// at `strength` by `to` (both as a share of the height); stacked, they make
+/// a curve that starts gently and gathers, which a single ramp cannot.
+struct BackdropFade {
+    layers: &'static [(f32, f32, f32)],
+    /// How far the picture runs below the header, in rems.
+    extra_rems: f32,
+    /// The dark wash over the picture, as 0xRRGGBBAA.
+    tint: u32,
+}
+
+const FADES: [BackdropFade; 5] = [
+    BackdropFade {
+        layers: &[(0.58, 0.96, 1.)],
+        extra_rems: 2.875,
+        tint: 0x10101455,
+    },
+    BackdropFade {
+        layers: &[(0.30, 1., 1.)],
+        extra_rems: 2.875,
+        tint: 0x10101455,
+    },
+    BackdropFade {
+        layers: &[(0.25, 1., 0.55), (0.55, 1., 1.)],
+        extra_rems: 4.,
+        tint: 0x10101455,
+    },
+    BackdropFade {
+        layers: &[(0.25, 1., 0.55), (0.55, 1., 1.)],
+        extra_rems: 6.,
+        tint: 0x10101433,
+    },
+    BackdropFade {
+        layers: &[(0.10, 1., 0.45), (0.40, 1., 0.65), (0.68, 1., 1.)],
+        extra_rems: 8.,
+        tint: 0x10101433,
+    },
+];
+
+/// Which of `FADES` the page uses.
+const FADE: usize = 0;
+
+#[cfg(not(test))]
+fn backdrop_fade() -> &'static BackdropFade {
+    &FADES[FADE]
+}
+
+/// Previews compare the fades side by side; tests and shipped builds use `FADE`.
+#[cfg(test)]
+pub(crate) static PREVIEW_FADE: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(FADE);
+
+/// How far the picture runs below the header, for the screenshot checks.
+#[cfg(test)]
+pub(crate) fn backdrop_extra_rems() -> f32 {
+    backdrop_fade().extra_rems
+}
+
+#[cfg(test)]
+fn backdrop_fade() -> &'static BackdropFade {
+    &FADES[PREVIEW_FADE.load(std::sync::atomic::Ordering::Relaxed)]
+}
+
 impl ArtistPage {
     pub(super) fn new(backend: BackendHandle, cx: &mut Context<Self>) -> Self {
         let track_list = cx.new(|cx| TrackList::new(cx).with_inline_rows());
@@ -2419,7 +2483,8 @@ impl ArtistPage {
         let header_height = (tokens::ARTIST_ARTWORK.size + DETAIL_HEADER_PADDING * 2.)
             .to_pixels(window.rem_size())
             + overlay_inset;
-        let backdrop_height = header_height + Rems(2.875).to_pixels(window.rem_size());
+        let fade = backdrop_fade();
+        let backdrop_height = header_height + Rems(fade.extra_rems).to_pixels(window.rem_size());
         // One full-size gradient avoids joins between separately rasterized
         // bands at fractional Windows DPI/zoom. Finish early on page colour;
         // the borderless end fill below handles renderer colour rounding.
@@ -2433,12 +2498,14 @@ impl ArtistPage {
             .h(backdrop_height)
             .overflow_hidden()
             .children(backdrop.map(|image| div().absolute().inset_0().size_full().child(image)))
-            .child(div().absolute().inset_0().bg(gpui_kit::rgba(0x10101455)))
-            .child(div().absolute().inset_0().bg(gpui_kit::linear_gradient(
-                180.,
-                gpui_kit::linear_color_stop(rgb(palette.surface).opacity(0.), 0.58),
-                gpui_kit::linear_color_stop(rgb(palette.surface), 0.96),
-            )))
+            .child(div().absolute().inset_0().bg(gpui_kit::rgba(fade.tint)))
+            .children(fade.layers.iter().map(|&(from, to, strength)| {
+                div().absolute().inset_0().bg(gpui_kit::linear_gradient(
+                    180.,
+                    gpui_kit::linear_color_stop(rgb(palette.surface).opacity(0.), from),
+                    gpui_kit::linear_color_stop(rgb(palette.surface).opacity(strength), to),
+                ))
+            }))
             // Keep both fills unrounded and borderless: Windows can use its
             // hard-edged quad path instead of antialiasing over the image.
             // This fill starts after the fade is already opaque.

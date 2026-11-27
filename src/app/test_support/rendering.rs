@@ -1326,7 +1326,8 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 "backdrop must cover the full header width for every source aspect ratio"
             );
             // Fractional zoom levels round layout to whole pixels.
-            let expected = header.size.height + Rems(2.875).to_pixels(window.rem_size());
+            let expected = header.size.height
+                + Rems(crate::app::catalog::backdrop_extra_rems()).to_pixels(window.rem_size());
             assert!(
                 (f32::from(backdrop.size.height) - f32::from(expected)).abs() <= 1.,
                 "backdrop must extend past the header by the fade height"
@@ -1571,6 +1572,33 @@ pub(crate) fn run() {
                 .store(weight, std::sync::atomic::Ordering::Relaxed);
             let image = capture(Scene::Artist, ThemePreference::Dark, 1620.);
             let path = previews.join(format!("artist-{name}.png"));
+            save_artifact(&image, &path);
+            println!("{}", path.display());
+        }
+        return;
+    }
+    if std::env::args().any(|argument| argument == "--artist-fade-preview") {
+        let previews = artifacts.with_file_name("artist-fade-previews");
+        std::fs::create_dir_all(&previews).unwrap();
+        // SAFETY: this preview runs on one thread before any scene is built.
+        unsafe {
+            std::env::set_var("CADENCE_PREVIEW_ARTIST", "glaive");
+            std::env::set_var("CADENCE_PREVIEW_LISTENERS", "4213555");
+        }
+        for (name, variant) in [
+            "a-current",
+            "b-longer",
+            "c-eased",
+            "d-eased-lighter",
+            "e-very-soft",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, n)| (n, i))
+        {
+            crate::app::catalog::PREVIEW_FADE.store(variant, std::sync::atomic::Ordering::Relaxed);
+            let image = capture(Scene::Artist, ThemePreference::Dark, 1620.);
+            let path = previews.join(format!("fade-{name}.png"));
             save_artifact(&image, &path);
             println!("{}", path.display());
         }
