@@ -670,8 +670,9 @@ const FADES: [BackdropFade; 5] = [
     },
 ];
 
-/// Which of `FADES` the page uses.
-const FADE: usize = 0;
+/// Which of `FADES` the page uses: 0 current, 1 longer, 2 eased, 3 eased and
+/// lighter, 4 very soft. Change this one number to try another.
+const FADE: usize = 2;
 
 #[cfg(not(test))]
 fn backdrop_fade() -> &'static BackdropFade {
