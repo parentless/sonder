@@ -23,8 +23,8 @@ const MIXES_STALE_TIME: Duration = Duration::from_secs(10 * 60);
 const MIXES_RETRY: Duration = Duration::from_secs(5 * 60);
 /// While playback connects, Made for you is asked for again this often, this
 /// many times, before the page treats it as a failure.
-const MIXES_WAIT: Duration = Duration::from_secs(1);
-const MIXES_WAITS: u32 = 60;
+const MIXES_WAIT: Duration = Duration::from_millis(500);
+const MIXES_WAITS: u32 = 120;
 /// Releases listed in the rail before "Show all".
 const RAIL_ROWS: usize = 4;
 /// The rail's width and the gap between the two panes, at 100% zoom.
