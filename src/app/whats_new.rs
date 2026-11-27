@@ -42,28 +42,63 @@ const MONTHS: &[Month] = &[
         days: &[
             Day {
                 date: "Nov 27, 2026",
-                releases: &[Release {
-                    version: "0.8.73",
-                    notes: &[
-                        Note(
-                            Better,
-                            "Sonder opens larger, wide enough to show four albums in New from artists you play.",
-                        ),
-                        Note(
-                            Better,
-                            "The account menu opens with a quick fade and slide.",
-                        ),
-                        Note(
-                            Fixed,
-                            "Reopening the sidebar no longer makes What’s new and the version flicker while it widens.",
-                        ),
-                        Note(
-                            Better,
-                            "Lyrics glide from line to line more smoothly, even when the next line comes early, and sit on a slightly darker background.",
-                        ),
-                        Note(Better, "Save as playlist is gone from albums."),
-                    ],
-                }],
+                releases: &[
+                    Release {
+                        version: "0.8.74",
+                        notes: &[
+                            Note(
+                                New,
+                                "Mini player: a small window with the cover, controls and a seek bar, or a slim strip for a corner of the screen. Open it from the player bar or with Ctrl+Shift+M.",
+                            ),
+                            Note(
+                                New,
+                                "Repeat button: off, all or one, remembered between launches.",
+                            ),
+                            Note(
+                                New,
+                                "Click the cover in the player bar to open a page with a large cover beside the lyrics.",
+                            ),
+                            Note(
+                                Better,
+                                "Made for you opens right away from what it showed last time, and Release Radar and Daily Mix tracks load in one request.",
+                            ),
+                            Note(
+                                Better,
+                                "Popular on an artist now follows Spotify's own ranking, and listener counts show a skeleton while they load.",
+                            ),
+                            Note(
+                                Better,
+                                "Rail rows highlight with the panel's own rounding and more room, and the artist backdrop fades out above Popular. The Everyone and You tabs are gone.",
+                            ),
+                            Note(
+                                Fixed,
+                                "Resizing the window no longer makes the mix shelves flicker, and clicking your avatar again closes its menu.",
+                            ),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.73",
+                        notes: &[
+                            Note(
+                                Better,
+                                "Sonder opens larger, wide enough to show four albums in New from artists you play.",
+                            ),
+                            Note(
+                                Better,
+                                "The account menu opens with a quick fade and slide.",
+                            ),
+                            Note(
+                                Fixed,
+                                "Reopening the sidebar no longer makes What’s new and the version flicker while it widens.",
+                            ),
+                            Note(
+                                Better,
+                                "Lyrics glide from line to line more smoothly, even when the next line comes early, and sit on a slightly darker background.",
+                            ),
+                            Note(Better, "Save as playlist is gone from albums."),
+                        ],
+                    },
+                ],
             },
             Day {
                 date: "Nov 26, 2026",
