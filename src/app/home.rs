@@ -21,6 +21,10 @@ const MIXES_STALE_TIME: Duration = Duration::from_secs(10 * 60);
 /// After a failed read the page waits this long before asking again, so
 /// opening Home over and over does not hammer a private service that is down.
 const MIXES_RETRY: Duration = Duration::from_secs(5 * 60);
+/// While playback connects, Made for you is asked for again this often, this
+/// many times, before the page treats it as a failure.
+const MIXES_WAIT: Duration = Duration::from_secs(3);
+const MIXES_WAITS: u32 = 20;
 /// Releases listed in the rail before "Show all".
 const RAIL_ROWS: usize = 4;
 /// The rail's width and the gap between the two panes, at 100% zoom.
@@ -95,6 +99,8 @@ pub(super) struct HomePage {
     mixes_loading: bool,
     /// When the last read failed, so the next visit does not retry at once.
     mixes_failed_at: Option<SystemTime>,
+    /// Retries so far while playback was not yet connected.
+    mixes_waits: u32,
     mixes_request: Option<gpui_kit::Task<()>>,
     /// Which shelves "Show all" has opened out.
     expanded: Vec<Shelf>,
@@ -135,6 +141,7 @@ impl HomePage {
             mixes: None,
             mixes_loading: false,
             mixes_failed_at: None,
+            mixes_waits: 0,
             mixes_request: None,
             expanded: Vec::new(),
             playing_release: None,
@@ -185,6 +192,7 @@ impl HomePage {
         self.mixes = None;
         self.mixes_loading = false;
         self.mixes_failed_at = None;
+        self.mixes_waits = 0;
         self.mixes_request = None;
         self.expanded.clear();
         self.playing_release = None;
@@ -279,10 +287,19 @@ impl HomePage {
                 match result {
                     Ok(shelves) => {
                         page.mixes_failed_at = None;
+                        page.mixes_waits = 0;
                         page.mixes = Some(Mixes {
                             shelves,
                             loaded_at: SystemTime::now(),
                         });
+                    }
+                    Err(error)
+                        if error.contains(crate::made_for_you::PlaybackNotConnected::MESSAGE) =>
+                    {
+                        // Playback is still connecting, as just after launch:
+                        // not a failure, so look again shortly.
+                        log::info!("home: Made for you is waiting for playback to connect");
+                        page.retry_mixes_soon(cx);
                     }
                     Err(error) => {
                         page.mixes_failed_at = Some(SystemTime::now());
@@ -290,6 +307,23 @@ impl HomePage {
                     }
                 }
                 cx.notify();
+            });
+        }));
+    }
+
+    /// Asks for the mixes again in a few seconds, while playback connects.
+    fn retry_mixes_soon(&mut self, cx: &mut Context<Self>) {
+        if self.mixes_waits >= MIXES_WAITS {
+            self.mixes_failed_at = Some(SystemTime::now());
+            self.mixes_waits = 0;
+            return;
+        }
+        self.mixes_waits += 1;
+        self.mixes_request = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(MIXES_WAIT).await;
+            let _ = this.update(cx, |page, cx| {
+                page.mixes_request = None;
+                page.load_mixes_if_needed(cx);
             });
         }));
     }

@@ -3302,7 +3302,7 @@ impl CatalogFetches {
             respond,
             "Made for you request",
             async move {
-                let session = session.context("Spotify playback is not connected")?;
+                let session = session.ok_or(crate::made_for_you::PlaybackNotConnected)?;
                 let token = spotify.access_token().await?;
                 crate::made_for_you::load(&session, token, force).await
             },

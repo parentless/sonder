@@ -21,6 +21,24 @@ use tokio::sync::Mutex;
 
 use crate::model::{HomeMix, HomeMixes, Playlist, Provider};
 
+/// The playback session is not up yet, as at launch. Not a failure of the
+/// read itself: the page asks again once playback has connected.
+#[derive(Debug)]
+pub(crate) struct PlaybackNotConnected;
+
+impl PlaybackNotConnected {
+    /// What the error says; the page, which only receives text, looks for it.
+    pub(crate) const MESSAGE: &'static str = "Spotify playback is not connected";
+}
+
+impl std::fmt::Display for PlaybackNotConnected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(Self::MESSAGE)
+    }
+}
+
+impl std::error::Error for PlaybackNotConnected {}
+
 const ENDPOINT: &str = "https://api-partner.spotify.com/pathfinder/v2/query";
 const MADE_FOR_YOU: &str = "spotify:section:0JQ5DAUnp4wcj0bCb3wh3S";
 const TOP_MIXES: &str = "spotify:section:0JQ5DAnM3wGh0gz1MXnu89";
