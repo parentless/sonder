@@ -286,7 +286,7 @@ impl HomePage {
                     }
                     Err(error) => {
                         page.mixes_failed_at = Some(SystemTime::now());
-                        log::info!("home: could not load Made for you: {error}");
+                        log::warn!("home: could not load Made for you: {error:#}");
                     }
                 }
                 cx.notify();

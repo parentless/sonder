@@ -197,7 +197,9 @@ async fn read_section(request: &Request<'_>, section: &str) -> Result<Vec<HomeMi
             return Err(SectionError::RateLimited(wait));
         }
         if !status.is_success() {
-            return Err(anyhow!("Home request answered {status}").into());
+            let body = response.bytes().await.unwrap_or_default();
+            let snippet: String = String::from_utf8_lossy(&body).chars().take(300).collect();
+            return Err(anyhow!("Home request answered {status}: {snippet}").into());
         }
         let body: Value = serde_json::from_slice(
             &response
