@@ -57,6 +57,10 @@ const MONTHS: &[Month] = &[
                             Fixed,
                             "Reopening the sidebar no longer makes What’s new and the version flicker while it widens.",
                         ),
+                        Note(
+                            Better,
+                            "Lyrics glide from line to line more smoothly, even when the next line comes early, and sit on a slightly darker background.",
+                        ),
                         Note(Better, "Save as playlist is gone from albums."),
                     ],
                 }],

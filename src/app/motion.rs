@@ -18,6 +18,13 @@ pub(super) fn sidebar_spring() -> Transition {
     Transition::Spring(Spring::visual(SIDEBAR_SETTLE, 0.).unwrap_or_default())
 }
 
+/// Lyrics moving on to the next line: a spring with no bounce that is
+/// 90% of the way there in 260ms. It carries its speed over
+/// when the next line arrives early.
+pub(super) fn lyrics_spring() -> Transition {
+    Transition::Spring(Spring::visual(Duration::from_millis(260), 0.).unwrap_or_default())
+}
+
 /// A menu opening from its button: a short tween on a strong ease-out, so it
 /// answers the click at once. Closing is quicker still, because by then the
 /// listener has already moved on.

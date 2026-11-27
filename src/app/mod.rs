@@ -103,6 +103,8 @@ const BLOCKING_SCRIM: gpui_kit::Hsla = gpui_kit::Hsla {
 struct CadencePalette {
     canvas: u32,
     surface: u32,
+    /// The lyrics view's ground: a step darker than the page, so it reads as its own place.
+    lyrics_backdrop: u32,
     surface_raised: u32,
     surface_hover: u32,
     control: u32,
@@ -129,6 +131,7 @@ impl CadencePalette {
     const LIGHT: Self = Self {
         canvas: 0xFBFAF9,
         surface: 0xFFFFFF,
+        lyrics_backdrop: 0xF3F1EE,
         surface_raised: 0xF2F0ED,
         surface_hover: 0xF8F7F4,
         control: 0xF6F4EF,
@@ -158,6 +161,7 @@ impl CadencePalette {
     const DARK: Self = Self {
         canvas: 0x121212,
         surface: 0x1A1A1A,
+        lyrics_backdrop: 0x0F0F0F,
         surface_raised: 0x292929,
         surface_hover: 0x242424,
         control: 0x303030,

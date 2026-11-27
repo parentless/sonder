@@ -24,8 +24,6 @@ const CACHE_ENTRIES: usize = 16;
 const MIN_DELAY_MS: u32 = 30;
 /// The most lines drawn for one song.
 const MAX_LINES: usize = 300;
-/// How long moving on to the next line takes.
-const TRANSITION: Duration = Duration::from_millis(380);
 /// Where the current line sits, as a share of the height.
 const CURRENT_AT: f32 = 0.34;
 
@@ -59,18 +57,28 @@ pub(super) struct LyricsPane {
 }
 
 /// Where the glide from one line to the next has got to.
-#[derive(Default)]
 struct Motion {
     /// The line (by style anchor, -1 before the first) the view is laid out for.
     target: Option<isize>,
-    /// The line the sizes are easing away from.
-    from: isize,
-    /// Where the new line was on screen when the glide began.
-    from_y: Pixels,
-    started: Option<std::time::Instant>,
+    /// Which line is in focus, as a position that eases from line to line. A
+    /// line that arrives while it is still moving takes it over smoothly.
+    focus: gpui_motion_kit::ValueState,
+    /// Whether the focus was still moving at the last draw.
+    moving: bool,
     /// Frames still to re-place the view after a jump, so it follows the layout
     /// of the lines it has just been given rather than the previous song's.
     settling: u8,
+}
+
+impl Default for Motion {
+    fn default() -> Self {
+        Self {
+            target: None,
+            focus: gpui_motion_kit::ValueState::new(0.),
+            moving: false,
+            settling: 0,
+        }
+    }
 }
 
 /// Type sizes for one way of showing the lines.
@@ -134,7 +142,7 @@ impl LyricsPane {
 
     #[cfg(test)]
     pub(super) fn gliding(&self) -> bool {
-        self.motion.started.is_some() || self.motion.settling > 0
+        self.motion.moving || self.motion.settling > 0
     }
 
     /// The pane was just opened: place the lines without a glide.
@@ -355,87 +363,87 @@ impl LyricsPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let now = cx.background_executor().now();
         let reduce_motion = cx.reduce_motion();
         let count = lyrics.lines.len().min(MAX_LINES);
         // Before the first line the whole song is still ahead.
         let style_anchor = current.map_or(-1, |index| index as isize);
-        let layout_anchor = (style_anchor.max(0) as usize).min(count - 1);
 
-        // Where the line to centre was last laid out, from the top of the view.
-        // The lines are children 1..; child 0 is the space above them.
+        // Where a line was last laid out, from the top of the view. The lines
+        // are children 1..; child 0 is the space above them.
         let area = self.scroll.bounds();
         let anchor_y = area.size.height * CURRENT_AT;
-        let line_y = self
-            .scroll
-            .bounds_for_item(layout_anchor + 1)
-            .map(|bounds| bounds.top() - area.top());
-        let place = |scroll: &gpui_kit::ScrollHandle, line_y: Pixels, y: Pixels| {
-            scroll.set_offset(point(px(0.), y - line_y));
+        let top_of = |index: isize| {
+            let index = index.clamp(0, count as isize - 1) as usize;
+            self.scroll
+                .bounds_for_item(index + 1)
+                .map(|bounds| bounds.top() - area.top())
         };
-        let mut progress = 1.;
-        match line_y {
-            None => window.request_animation_frame(),
-            Some(line_y) => {
-                if self.motion.target != Some(style_anchor) {
-                    match self.motion.target {
-                        Some(previous) if !reduce_motion && self.motion.settling == 0 => {
-                            self.motion.from = previous;
-                            self.motion.from_y = line_y + self.scroll.offset().y;
-                            self.motion.started = Some(now);
-                        }
-                        _ => {
-                            self.motion.started = None;
-                            self.motion.settling = 2;
-                        }
-                    }
-                    self.motion.target = Some(style_anchor);
-                }
-                if let Some(started) = self.motion.started {
-                    let elapsed = now.saturating_duration_since(started);
-                    let t = elapsed.as_secs_f32() / TRANSITION.as_secs_f32();
-                    if t >= 1. {
-                        self.motion.started = None;
-                        place(&self.scroll, line_y, anchor_y);
-                    } else {
-                        progress = ease_out_quint()(t);
-                        let y = self.motion.from_y + (anchor_y - self.motion.from_y) * progress;
-                        place(&self.scroll, line_y, y);
-                        window.request_animation_frame();
-                    }
-                } else {
-                    place(&self.scroll, line_y, anchor_y);
-                    if self.motion.settling > 0 {
-                        self.motion.settling -= 1;
-                        window.request_animation_frame();
-                    }
-                }
+        let laid_out = top_of(style_anchor).is_some() && top_of(style_anchor + 1).is_some();
+        if !laid_out {
+            window.request_animation_frame();
+        } else if self.motion.target != Some(style_anchor) {
+            if self.motion.target.is_none() || reduce_motion || self.motion.settling > 0 {
+                // A first placement, or a jump: put the lines straight in place.
+                self.motion.focus = gpui_motion_kit::ValueState::new(style_anchor as f64);
+                self.motion.settling = 2;
+            }
+            self.motion.target = Some(style_anchor);
+        }
+        let focus = if self.motion.target.is_some() {
+            let frame = self.motion.focus.frame(
+                style_anchor as f64,
+                super::motion::lyrics_spring(),
+                window,
+                cx,
+            );
+            self.motion.moving = frame.is_animating();
+            frame.value() as f32
+        } else {
+            self.motion.moving = false;
+            style_anchor as f32
+        };
+        if laid_out {
+            // The point between two lines the view is centred on, so the column
+            // follows the focus exactly as it moves.
+            let whole = focus.floor();
+            let between = focus - whole;
+            let upper = whole as isize;
+            if let (Some(top), Some(next)) = (top_of(upper), top_of(upper + 1)) {
+                let at = top + (next - top) * between;
+                self.scroll.set_offset(point(px(0.), anchor_y - at));
+            }
+            if self.motion.settling > 0 && !self.motion.moving {
+                self.motion.settling -= 1;
+                window.request_animation_frame();
             }
         }
         let shown = self.motion.target.is_some() && self.motion.settling == 0;
 
-        // Bigger and stronger the nearer a line is to the current one.
-        let look_at = |distance: isize| match distance.unsigned_abs() {
-            0 => (scale.current.0, 1.),
-            1 => (scale.near.0, 0.55),
-            2 => (scale.near.0, 0.38),
-            _ => (scale.near.0, 0.26),
+        // Bigger and stronger the nearer a line is to the focus, fading in
+        // between so the look follows the focus as it moves.
+        let look_at = |distance: f32| {
+            let distance = distance.abs();
+            let size = scale.current.0 + (scale.near.0 - scale.current.0) * distance.min(1.);
+            let strength = if distance <= 1. {
+                1. + (0.55 - 1.) * distance
+            } else if distance <= 2. {
+                0.55 + (0.38 - 0.55) * (distance - 1.)
+            } else if distance <= 3. {
+                0.38 + (0.26 - 0.38) * (distance - 2.)
+            } else {
+                0.26
+            };
+            (size, strength)
         };
         let look = Look {
             scale,
             palette,
             synced: true,
         };
-        let from = self.motion.from;
         let mut children = Vec::with_capacity(count + 2);
         children.push(div().h(relative(CURRENT_AT)).flex_none().into_any_element());
         for index in 0..count {
-            let (mut size, mut strength) = look_at(index as isize - style_anchor);
-            if progress < 1. {
-                let (old_size, old_strength) = look_at(index as isize - from);
-                size = old_size + (size - old_size) * progress;
-                strength = old_strength + (strength - old_strength) * progress;
-            }
+            let (size, strength) = look_at(index as f32 - focus);
             children.push(self.line(index, &lyrics.lines[index], Rems(size), strength, look, cx));
         }
         // Room below, so the last lines can still rise to the centre.
@@ -519,7 +527,7 @@ impl Render for LyricsPane {
                 .items_center()
                 .justify_center()
                 .px_6()
-                .bg(rgb(palette.surface))
+                .bg(rgb(palette.lyrics_backdrop))
                 .border_t_1()
                 .border_color(rgb(palette.border))
                 .child(
@@ -577,7 +585,7 @@ impl Render for LyricsPane {
                 .top_0()
                 .right_0()
                 .bottom_0()
-                .bg(rgb(palette.surface))
+                .bg(rgb(palette.lyrics_backdrop))
                 .flex()
                 .flex_col()
         };

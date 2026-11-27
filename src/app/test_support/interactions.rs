@@ -4739,33 +4739,99 @@ fn moving_to_the_next_line_glides_and_then_goes_quiet() {
         });
         fixture.cx.advance_clock(Duration::from_millis(20));
     }
+    // Playback reaches the first line, and the view settles on it.
+    fixture.update(|window, cx| window.click(("lyric-line", 0usize), cx));
+    let _ = fixture.backend.commands.try_recv();
+    for _ in 0..90 {
+        fixture.update(|window, cx| {
+            window.simulate_next_frame(cx);
+        });
+        fixture.cx.advance_clock(Duration::from_millis(16));
+    }
     let (resting, gliding) = fixture.lyrics_scroll();
     assert!(!gliding, "the first placement is done");
     // Playback reaches the second line.
     fixture.update(|window, cx| window.click(("lyric-line", 1usize), cx));
     let _ = fixture.backend.commands.try_recv();
     let mut offsets = vec![resting];
+    // Where the new current line sits on screen: it should only rise to its place.
+    let mut tops = Vec::new();
     let mut frames_with_work = 0;
-    for _ in 0..40 {
+    for _ in 0..90 {
         let work = fixture.update(|window, cx| window.simulate_next_frame(cx));
         frames_with_work += usize::from(work > 0);
         fixture.cx.advance_clock(Duration::from_millis(16));
         offsets.push(fixture.lyrics_scroll().0);
+        tops.push(
+            fixture
+                .update(|window, _| f32::from(window.find(("lyric-line", 1usize)).bounds().top())),
+        );
     }
     let (last, gliding) = fixture.lyrics_scroll();
     assert!(!gliding, "the glide finished");
     assert!(frames_with_work > 3, "the glide spans several frames");
     assert!(
-        frames_with_work < 40,
+        frames_with_work < 90,
         "and then stops asking for frames: {frames_with_work}"
     );
-    // The column only ever moves one way, in steps, and ends somewhere new.
-    let moved: Vec<f32> = offsets.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    // The new line only ever rises to its place (the column's own offset may
+    // wobble a little as the lines above it shrink), and the column ends
+    // somewhere new.
     assert!(
-        moved.iter().all(|step| *step <= 0.01) || moved.iter().all(|step| *step >= -0.01),
-        "one direction: {offsets:?}"
+        tops.windows(2).all(|pair| pair[1] <= pair[0] + 0.5),
+        "one direction: {tops:?}"
     );
     assert!((last - resting).abs() > 1., "it moved: {offsets:?}");
+}
+
+#[test]
+fn a_line_arriving_mid_glide_carries_on_without_stepping_back() {
+    let mut fixture = Fixture::new(true);
+    fixture.play(track(0));
+    fixture.scroll_settings_to_the_end();
+    fixture.update(|window, cx| window.click("lyrics-toggle", cx));
+    let BackendCommand::LoadLyrics { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected a lyrics lookup")
+    };
+    respond.send(Ok(synced_fixture_lyrics())).unwrap();
+    fixture.cx.run_until_parked();
+    let frame = |fixture: &mut Fixture| {
+        fixture.update(|window, cx| {
+            window.simulate_next_frame(cx);
+        });
+        fixture.cx.advance_clock(Duration::from_millis(16));
+    };
+    for _ in 0..6 {
+        frame(&mut fixture);
+    }
+    fixture.update(|window, cx| window.click(("lyric-line", 0usize), cx));
+    let _ = fixture.backend.commands.try_recv();
+    for _ in 0..90 {
+        frame(&mut fixture);
+    }
+    // The next line arrives, and the one after it a few frames later, while the
+    // column is still moving.
+    fixture.update(|window, cx| window.click(("lyric-line", 1usize), cx));
+    let _ = fixture.backend.commands.try_recv();
+    for _ in 0..5 {
+        frame(&mut fixture);
+    }
+    fixture.update(|window, cx| window.click(("lyric-line", 2usize), cx));
+    let _ = fixture.backend.commands.try_recv();
+    let mut tops = Vec::new();
+    for _ in 0..90 {
+        frame(&mut fixture);
+        tops.push(
+            fixture
+                .update(|window, _| f32::from(window.find(("lyric-line", 2usize)).bounds().top())),
+        );
+    }
+    assert!(
+        tops.windows(2).all(|pair| pair[1] <= pair[0] + 0.5),
+        "the third line only rises to its place: {tops:?}"
+    );
+    assert!(!fixture.lyrics_scroll().1, "and then it goes quiet");
 }
 
 #[test]
