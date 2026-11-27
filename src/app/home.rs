@@ -676,7 +676,6 @@ impl HomePage {
         mixes: &[model::HomeMix],
         loading: bool,
         count: usize,
-        cover: f32,
         palette: CadencePalette,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
@@ -684,19 +683,17 @@ impl HomePage {
             return None;
         }
         let cache = services::AppServices::image_cache(cx);
-        let size = tokens::ArtworkSize {
-            size: rem(cover),
-            radius: rem(14.),
-        };
+        let radius = rem(14.);
         let expanded = self.is_expanded(shelf);
         let cards: Vec<AnyElement> = if mixes.is_empty() {
             // Placeholders hold the shelf's height while Spotify answers.
             (0..count)
                 .map(|_| {
                     div()
-                        .size(size.size)
-                        .flex_none()
-                        .rounded(size.radius)
+                        .flex_1()
+                        .min_w_0()
+                        .aspect_square()
+                        .rounded(radius)
                         .bg(rgb(palette.card))
                         .into_any_element()
                 })
@@ -710,15 +707,15 @@ impl HomePage {
                     let playlist = mix.playlist.clone();
                     components::button(palette, (id, index))
                         .test_support()
-                        .w(size.size)
-                        .flex_none()
+                        .flex_1()
+                        .min_w_0()
                         .flex_col()
                         .items_start()
-                        .child(components::artwork(
+                        .child(components::fluid_artwork(
                             palette,
                             &cache,
                             mix.playlist.artwork_url.as_deref(),
-                            size,
+                            radius,
                             CadenceIcon::Playlist,
                         ))
                         .child(
@@ -747,6 +744,27 @@ impl HomePage {
                 })
                 .collect()
         };
+        // Rows of `count` that share the width between them, so the covers
+        // follow the layout itself and a row can neither wrap nor leave a gap.
+        // The last row is padded so its covers match the others.
+        let mut cards = cards.into_iter();
+        let mut rows = Vec::new();
+        loop {
+            let row: Vec<AnyElement> = cards.by_ref().take(count.max(1)).collect();
+            if row.is_empty() {
+                break;
+            }
+            let missing = count.max(1) - row.len();
+            rows.push(
+                div()
+                    .w_full()
+                    .flex()
+                    .gap(rem(GRID_GAP))
+                    .children(row)
+                    .children((0..missing).map(|_| div().flex_1().min_w_0()))
+                    .into_any_element(),
+            );
+        }
         let more = mixes.len() > count;
         Some(
             div()
@@ -779,9 +797,9 @@ impl HomePage {
                         .test_support()
                         .w_full()
                         .flex()
-                        .flex_wrap()
+                        .flex_col()
                         .gap(rem(GRID_GAP))
-                        .children(cards),
+                        .children(rows),
                 )
                 .into_any_element(),
         )
@@ -1004,7 +1022,6 @@ impl Render for HomePage {
             &made_for_you,
             mixes_loading,
             layout.mix_count,
-            layout.mix_cover,
             palette,
             cx,
         );
@@ -1015,7 +1032,6 @@ impl Render for HomePage {
             &top_mixes,
             mixes_loading,
             layout.mix_count,
-            layout.mix_cover,
             palette,
             cx,
         );
@@ -1103,6 +1119,9 @@ struct Layout {
     tile_columns: u16,
     /// Mixes per row and how wide each cover is, so a row fills the pane.
     mix_count: usize,
+    /// What the layout works out for each cover; the shelf lets the row share
+    /// its width itself, so this only backs the tests.
+    #[cfg(test)]
     mix_cover: f32,
 }
 
@@ -1124,11 +1143,13 @@ impl Layout {
         } else {
             fits
         };
+        #[cfg(test)]
         let mix_cover = ((main - GRID_GAP * (mix_count - 1) as f32) / mix_count as f32).floor();
         Self {
             stacked,
             tile_columns: if main >= 560. { 2 } else { 1 },
             mix_count,
+            #[cfg(test)]
             mix_cover,
         }
     }

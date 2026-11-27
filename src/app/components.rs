@@ -579,7 +579,33 @@ pub(super) fn artwork_flush_right(
         artwork_size,
         artwork_size.size,
         fallback_icon,
-        true,
+        CoverShape::FlushRight,
+    )
+}
+
+/// A square cover that takes the width its parent gives it, for shelves whose
+/// covers share a row's room. The frame follows the layout instead of a size
+/// worked out beforehand, so it can never wrap or leave a gap when the two
+/// differ by a pixel.
+pub(super) fn fluid_artwork(
+    palette: CadencePalette,
+    image_cache: &Entity<image_cache::BoundedImageCache>,
+    url: Option<&str>,
+    radius: Rems,
+    fallback_icon: CadenceIcon,
+) -> gpui_kit::AnyElement {
+    let artwork_size = tokens::ArtworkSize {
+        size: Rems(3.),
+        radius,
+    };
+    shaped_artwork(
+        palette,
+        image_cache,
+        url,
+        artwork_size,
+        artwork_size.size,
+        fallback_icon,
+        CoverShape::Fluid,
     )
 }
 
@@ -600,8 +626,18 @@ pub(super) fn rectangular_artwork(
         artwork_size,
         width,
         fallback_icon,
-        false,
+        CoverShape::Round,
     )
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CoverShape {
+    /// Rounded on every corner, at a fixed size.
+    Round,
+    /// Round only on the left, for a cover flush against a card's edge.
+    FlushRight,
+    /// Takes the width it is given and stays square.
+    Fluid,
 }
 
 fn shaped_artwork(
@@ -611,14 +647,19 @@ fn shaped_artwork(
     artwork_size: tokens::ArtworkSize,
     width: Rems,
     fallback_icon: CadenceIcon,
-    flush_right: bool,
+    shape: CoverShape,
 ) -> gpui_kit::AnyElement {
-    let frame = div()
-        .w(width)
-        .h(artwork_size.size)
-        .relative()
-        .flex_none()
-        .overflow_hidden();
+    let flush_right = shape == CoverShape::FlushRight;
+    let frame = if shape == CoverShape::Fluid {
+        div().w_full().aspect_square().relative().overflow_hidden()
+    } else {
+        div()
+            .w(width)
+            .h(artwork_size.size)
+            .relative()
+            .flex_none()
+            .overflow_hidden()
+    };
     let frame = if flush_right {
         frame
             .rounded_tl(artwork_size.radius)
