@@ -13,6 +13,7 @@ mod link_download;
 pub mod local_files;
 mod local_time;
 pub mod lyrics;
+mod made_for_you;
 mod memory;
 pub mod model;
 mod musicbrainz;

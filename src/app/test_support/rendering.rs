@@ -439,36 +439,39 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             artwork_url: None,
                         }).collect();
                         crate::app::top_listening::TopListening::existing(cx).update(cx, |top, cx| top.seed(model::HomeRange::AllTime, all_time, Vec::new(), cx));
-                        let suggestion = |name: &str, id: &str, percent: u8, because: &[&str]| model::ArtistSuggestion {
-                            artist: model::Artist { genres: Vec::new(),
+                        let mix = |name: &str, description: &str, id: &str| model::HomeMix {
+                            playlist: model::Playlist {
                                 provider: model::Provider::Spotify,
-                                source_id: id.into(),
-                                spotify_uri: None,
+                                source_id: id.to_owned(),
                                 name: name.to_owned().into(),
+                                owner: "Spotify".into(),
+                                track_count: 0,
                                 artwork_url: None,
                             },
-                            match_percent: percent,
-                            because: because.iter().map(|name| (*name).to_owned()).collect(),
+                            description: Some(description.to_owned()),
                         };
-                        let offered = vec![
-                            suggestion("Ericdoa", "sug-1", 94, &["glaive", "Glasser"]),
-                            suggestion("Brakence", "sug-2", 91, &["glaive"]),
-                            suggestion("Jane Remover", "sug-3", 88, &["glaive"]),
-                            suggestion("Alt-J", "sug-4", 86, &["Glass Animals"]),
-                            suggestion("Julia Holter", "sug-5", 84, &["Glasser"]),
-                        ];
-                        workspace.home.update(cx, |home, cx| {
-                            home.fixture_discover(
-                                offered.clone(),
-                                super::gallery_results().tracks.into_iter().take(3).collect(),
-                                cx,
-                            )
-                        });
-                        // Home's request for artists to try gets the same answer;
+                        let mixes = model::HomeMixes {
+                            made_for_you: vec![
+                                mix("glaive Mix", "glaive, Ericdoa, 2hollis and more", "37i9dQZF1E3aaaaaaaaaa1"),
+                                mix("Late night Mix", "Quiet songs for after midnight", "37i9dQZF1E3aaaaaaaaaa2"),
+                                mix("On repeat", "Songs you keep coming back to", "37i9dQZF1E3aaaaaaaaaa3"),
+                                mix("Throwback Mix", "What you played a year ago", "37i9dQZF1E3aaaaaaaaaa4"),
+                            ],
+                            top_mixes: vec![
+                                mix("Top mix 1", "Ericdoa, brakence, midwxst", "37i9dQZF1E3aaaaaaaaaa5"),
+                                mix("Top mix 2", "glaive, underscores, jane remover", "37i9dQZF1E3aaaaaaaaaa6"),
+                                mix("Top mix 3", "Quiet pop and slow beats", "37i9dQZF1E3aaaaaaaaaa7"),
+                                mix("Top mix 4", "Fast, loud, and short", "37i9dQZF1E3aaaaaaaaaa8"),
+                            ],
+                        };
+                        workspace
+                            .home
+                            .update(cx, |home, cx| home.fixture_mixes(mixes.clone(), cx));
+                        // Home's request for the mixes gets the same answer;
                         // nothing else is asked for while a scene is photographed.
                         while let Ok(command) = backend.commands.try_recv() {
-                            if let BackendCommand::LoadDiscover { respond } = command {
-                                respond.send(Ok(offered.clone())).unwrap();
+                            if let BackendCommand::LoadMadeForYou { respond, .. } = command {
+                                respond.send(Ok(mixes.clone())).unwrap();
                             }
                         }
                         // The first-launch intro, held at one moment of its 2.3 s.
@@ -1537,6 +1540,20 @@ pub(crate) fn run() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/glaive-profile.png");
         save_artifact(&screenshot, &path);
         println!("{}", path.display());
+        return;
+    }
+    if std::env::args().any(|argument| argument == "--home-wide-preview") {
+        let previews = artifacts.with_file_name("home-previews");
+        std::fs::create_dir_all(&previews).unwrap();
+        for (name, theme) in [
+            ("dark", ThemePreference::Dark),
+            ("light", ThemePreference::Light),
+        ] {
+            let image = capture(Scene::Home, theme, 1620.);
+            let path = previews.join(format!("home-wide-{name}.png"));
+            save_artifact(&image, &path);
+            println!("{}", path.display());
+        }
         return;
     }
     if std::env::args().any(|argument| argument == "--artist-overlay-preview") {

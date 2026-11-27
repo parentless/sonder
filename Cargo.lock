@@ -963,6 +963,7 @@ dependencies = [
  "gpui-kit",
  "gpui-motion-kit",
  "gpui-pre-reqwest",
+ "iana-time-zone",
  "image",
  "keyring",
  "libc",

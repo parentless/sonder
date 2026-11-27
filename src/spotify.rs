@@ -1492,6 +1492,22 @@ impl Spotify {
         self.pacer.acquire().await;
     }
 
+    /// A current Web API access token, for the one private read that carries
+    /// it alongside the playback session's own.
+    pub async fn access_token(&self) -> Result<String> {
+        self.gated(async {
+            self.client
+                .token
+                .lock()
+                .await
+                .map_err(|_| anyhow!("could not lock Spotify token state"))?
+                .as_ref()
+                .map(|token| token.access_token.clone())
+                .ok_or_else(|| NotAuthorized.into())
+        })
+        .await
+    }
+
     async fn refresh_if_needed(&self) -> Result<()> {
         let _refresh_guard = self.refresh_lock.lock().await;
         let previous = self

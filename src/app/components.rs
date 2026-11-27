@@ -257,31 +257,6 @@ pub(super) fn icon(glyph: CadenceIcon, size: Rems, color: u32) -> Icon {
     Icon::new(glyph).size(size).text_color(rgb(color))
 }
 
-/// A pill with a leading icon.
-pub(super) fn icon_pill(
-    palette: CadencePalette,
-    id: impl Into<ElementId>,
-    glyph: CadenceIcon,
-    label: impl Into<SharedString>,
-    primary: bool,
-) -> Stateful<Div> {
-    let hover_background = if primary {
-        rgb(palette.accent_hover)
-    } else {
-        rgb(palette.control_hover)
-    };
-    let foreground = if primary {
-        palette.surface
-    } else {
-        palette.text_primary
-    };
-    pill_surface(palette, filled_button(palette, id), primary)
-        .gap_2()
-        .hover(move |style| style.bg(hover_background))
-        .child(icon(glyph, tokens::INLINE_ICON, foreground))
-        .child(label.into())
-}
-
 pub(super) fn pill(
     palette: CadencePalette,
     id: impl Into<ElementId>,

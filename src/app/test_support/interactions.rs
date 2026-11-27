@@ -3736,25 +3736,6 @@ fn open_discography(fixture: &mut Fixture, id: &str, page: model::ArtistAlbumPag
     fixture.update(|_, _| {});
 }
 
-/// Wheels Home down by `distance` logical pixels.
-fn scroll_home(fixture: &mut Fixture, distance: f32) {
-    fixture.update(|window, cx| {
-        window.dispatch_event(
-            gpui_kit::ScrollWheelEvent {
-                position: point(px(700.), px(400.)),
-                delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-distance))),
-                ..Default::default()
-            }
-            .to_platform_input(),
-            cx,
-        );
-    });
-    for _ in 0..30 {
-        fixture.update(|_, _| {});
-        fixture.cx.advance_clock(Duration::from_millis(16));
-    }
-}
-
 fn scroll_discography(fixture: &mut Fixture) {
     for _ in 0..4 {
         fixture.update(|window, cx| {
@@ -4050,52 +4031,27 @@ fn release_album() -> model::Album {
     }
 }
 
-/// Answers the new-releases request Home makes alongside its top items.
+/// Answers the new-releases request Home makes alongside its top items, and
+/// whatever else it asked for along with it.
 fn answer_new_releases(fixture: &mut Fixture, result: anyhow::Result<Vec<model::Album>>) {
     let BackendCommand::LoadNewReleases { respond } = fixture.backend.commands.try_recv().unwrap()
     else {
         panic!("expected a new-releases request")
     };
-    let answered = result.is_ok();
     respond.send(result).unwrap();
-    if !answered
-        && let Ok(BackendCommand::LoadDiscover { respond }) = fixture.backend.commands.try_recv()
-    {
-        respond
-            .send(Err(model::HomePermissionMissing.into()))
-            .unwrap();
-    }
-    if answered {
-        // Home asks for announced releases once the new ones are in.
-        fixture.update(|_, _| {});
-        // Home also fetches the next longer chart to see what is rising, and
-        // looks for artists to try; neither matters to these tests.
-        let mut next = fixture.backend.commands.try_recv().unwrap();
-        loop {
-            match next {
-                BackendCommand::LoadHome { respond, .. } => {
-                    respond.send(Ok(model::HomeData::default())).unwrap();
-                }
-                BackendCommand::LoadDiscover { respond } => respond.send(Ok(Vec::new())).unwrap(),
-                other => {
-                    next = other;
-                    break;
-                }
+    fixture.update(|_, _| {});
+    // Home also asks for Made for you; nothing here depends on it.
+    while let Ok(command) = fixture.backend.commands.try_recv() {
+        match command {
+            BackendCommand::LoadMadeForYou { respond, .. } => {
+                respond.send(Err(anyhow::anyhow!("not connected"))).unwrap();
             }
-            fixture.update(|_, _| {});
-            next = fixture.backend.commands.try_recv().unwrap();
+            BackendCommand::LoadHome { respond, .. } => {
+                respond.send(Ok(model::HomeData::default())).unwrap();
+            }
+            _ => {}
         }
-        let BackendCommand::LoadUpcoming { respond } = next else {
-            panic!("expected an announced-releases request")
-        };
-        respond
-            .send(Ok(vec![model::UpcomingRelease {
-                artist: "Top Artist".into(),
-                title: "Next Record".into(),
-                date: "2099-01-02".into(),
-                kind: "Album".into(),
-            }]))
-            .unwrap();
+        fixture.update(|_, _| {});
     }
 }
 
@@ -4178,7 +4134,6 @@ fn home_lists_new_releases_from_top_artists_and_opens_one() {
     fixture.update(|_, _| {});
     fixture.update(|window, _| {
         assert!(window.try_find("home-releases-loading").is_some());
-        assert!(window.try_find("home-discover-loading").is_some());
         assert!(window.try_find(("home-release", 0usize)).is_none());
     });
     answer_new_releases(&mut fixture, Ok(vec![release_album()]));
@@ -4187,16 +4142,13 @@ fn home_lists_new_releases_from_top_artists_and_opens_one() {
         assert!(window.try_find("home-releases-loading").is_none());
         assert!(window.try_find("home-releases-heading").is_some());
         assert!(window.try_find(("home-release", 0usize)).is_some());
-        // The announced release sits beside the artist to try.
-        assert!(window.try_find("home-discover-heading").is_some());
-        assert!(window.try_find("home-upcoming").is_some());
     });
     fixture.update(|window, cx| window.click(("home-release", 0usize), cx));
     assert_eq!(fixture.route(), Route::Album);
 }
 
 #[test]
-fn home_opens_with_shortcuts_back_into_the_library_and_the_song_to_carry_on_with() {
+fn home_opens_with_shortcuts_back_into_the_library() {
     let mut fixture = Fixture::new(false);
     fixture.play(track(0));
     fixture.update(|window, cx| window.click("nav-home", cx));
@@ -4211,9 +4163,6 @@ fn home_opens_with_shortcuts_back_into_the_library_and_the_song_to_carry_on_with
         // Liked Songs and Recently played always lead.
         assert!(window.try_find(("home-shortcut", 0usize)).is_some());
         assert!(window.try_find(("home-shortcut", 1usize)).is_some());
-        // The song that was playing waits, paused, with where it stopped.
-        assert!(window.try_find("home-continue").is_some());
-        assert!(window.try_find("home-continue-progress").is_some());
     });
 
     // The play button on a tile starts its songs without leaving Home.
@@ -4231,15 +4180,6 @@ fn home_opens_with_shortcuts_back_into_the_library_and_the_song_to_carry_on_with
     fixture.update(|window, cx| window.click("nav-home", cx));
     fixture.update(|window, cx| window.click(("home-shortcut", 1usize), cx));
     assert_eq!(fixture.route(), Route::Recent);
-
-    // Carrying on resumes the paused song rather than starting another.
-    fixture.update(|window, cx| window.click("nav-home", cx));
-    while fixture.backend.commands.try_recv().is_ok() {}
-    fixture.update(|window, cx| window.click("home-continue-play", cx));
-    assert!(matches!(
-        fixture.backend.commands.try_recv(),
-        Ok(BackendCommand::Resume)
-    ));
 }
 
 #[test]
@@ -5701,68 +5641,39 @@ fn pressing_the_dim_area_closes_the_credits() {
     fixture.update(|window, _| assert!(window.try_find("credits-dialog").is_none()));
 }
 
-fn suggestion(name: &str, id: &str, percent: u8) -> model::ArtistSuggestion {
-    model::ArtistSuggestion {
-        artist: model::Artist {
-            genres: Vec::new(),
+fn home_mix(name: &str, id: &str) -> model::HomeMix {
+    model::HomeMix {
+        playlist: model::Playlist {
             provider: model::Provider::Spotify,
-            source_id: id.into(),
-            spotify_uri: Some(format!("spotify:artist:{id}")),
+            source_id: id.to_owned(),
             name: name.to_owned().into(),
+            owner: "Spotify".into(),
+            track_count: 0,
             artwork_url: None,
         },
-        match_percent: percent,
-        because: vec!["Top Artist".into()],
+        description: Some("glaive, Ericdoa and more".to_owned()),
     }
 }
 
-/// Opens Home with one top artist and answers its requests, giving the
-/// discovery request `suggestions`.
-fn home_offering(
-    suggestions: Vec<model::ArtistSuggestion>,
-    first_songs: Vec<model::Track>,
-) -> Fixture {
+/// Opens Home and answers what it asks with one release and `mixes`; `None`
+/// answers Made for you with a failure.
+fn home_with_mixes(mixes: Option<model::HomeMixes>) -> Fixture {
     let mut fixture = Fixture::new(false);
     fixture.update(|window, cx| window.click("nav-home", cx));
-    let BackendCommand::LoadHome { respond, .. } = fixture.backend.commands.try_recv().unwrap()
-    else {
-        panic!("expected a Home request")
-    };
-    respond
-        .send(Ok(model::HomeData {
-            artists: vec![model::Artist {
-                genres: Vec::new(),
-                provider: model::Provider::Spotify,
-                source_id: "artist-1".into(),
-                spotify_uri: None,
-                name: "Top Artist".into(),
-                artwork_url: None,
-            }],
-            tracks: vec![credited_track()],
-        }))
-        .unwrap();
-    fixture.update(|_, _| {});
-    let mut found = Some(suggestions);
     let mut released = false;
+    let mut mixes = mixes;
+    fixture.update(|_, _| {});
     while let Ok(command) = fixture.backend.commands.try_recv() {
         match command {
-            BackendCommand::LoadNewReleases { respond } => {
-                respond.send(Ok(Vec::new())).unwrap();
-                released = true;
-            }
-            BackendCommand::LoadDiscover { respond } => {
-                respond.send(Ok(found.take().unwrap_or_default())).unwrap();
-            }
             BackendCommand::LoadHome { respond, .. } => {
                 respond.send(Ok(model::HomeData::default())).unwrap();
             }
-            BackendCommand::LoadUpcoming { respond } => respond.send(Ok(Vec::new())).unwrap(),
-            BackendCommand::LoadArtist { source_id, respond } => respond
-                .send(Ok((
-                    offered_artist(&source_id),
-                    first_songs.clone(),
-                    empty_albums(),
-                )))
+            BackendCommand::LoadNewReleases { respond } => {
+                respond.send(Ok(vec![release_album()])).unwrap();
+                released = true;
+            }
+            BackendCommand::LoadMadeForYou { respond, .. } => respond
+                .send(mixes.take().ok_or_else(|| anyhow::anyhow!("unavailable")))
                 .unwrap(),
             _ => {}
         }
@@ -5772,61 +5683,83 @@ fn home_offering(
     fixture
 }
 
-fn offered_artist(source_id: &str) -> model::Artist {
-    model::Artist {
-        genres: Vec::new(),
-        provider: model::Provider::Spotify,
-        source_id: source_id.to_owned(),
-        spotify_uri: None,
-        name: "x".into(),
-        artwork_url: None,
-    }
-}
-
-fn empty_albums() -> model::ArtistAlbumPage {
-    model::ArtistAlbumPage {
-        albums: Vec::new(),
-        next_offset: None,
-        total: 0,
-    }
-}
-
-/// Answers the artist page Home loads for the artist on offer.
-fn answer_offered_artist(fixture: &mut Fixture, expected_id: &str, songs: Vec<model::Track>) {
-    let BackendCommand::LoadArtist { source_id, respond } = fixture
-        .backend
-        .commands
-        .try_recv()
-        .expect("an artist request")
-    else {
-        panic!("expected an artist request")
-    };
-    assert_eq!(source_id, expected_id);
-    respond
-        .send(Ok((offered_artist(&source_id), songs, empty_albums())))
-        .unwrap();
-    fixture.update(|_, _| {});
+#[test]
+fn home_shows_made_for_you_and_your_top_mixes_and_opens_one() {
+    let mut fixture = home_with_mixes(Some(model::HomeMixes {
+        made_for_you: vec![home_mix("glaive Mix", "37i9dQZF1E39Q6ggt8iyvY")],
+        top_mixes: vec![home_mix("Top mix 1", "37i9dQZF1E3aaaaaaaaaaa")],
+    }));
+    fixture.update(|window, _| {
+        assert!(window.try_find("home-made-heading").is_some());
+        assert!(window.try_find("home-top-heading").is_some());
+        assert!(window.try_find(("home-made", 0usize)).is_some());
+        // Fewer cards than a row holds leave no "Show all" to press.
+        assert!(window.try_find("home-made-show-all").is_none());
+    });
+    fixture.update(|window, cx| window.click(("home-made", 0usize), cx));
+    assert_eq!(fixture.route(), Route::Playlist);
 }
 
 #[test]
-fn home_offers_an_artist_to_try_plays_a_sample_and_steps_on_when_dismissed() {
-    let mut fixture = home_offering(
-        vec![
-            suggestion("Ericdoa", "sug-1", 94),
-            suggestion("Brakence", "sug-2", 81),
-        ],
-        vec![track(1), track(2)],
-    );
+fn home_leaves_the_mix_shelves_out_when_spotify_will_not_say() {
+    let mut fixture = home_with_mixes(None);
     fixture.update(|window, _| {
-        assert!(window.try_find("home-discover").is_some());
-        assert!(window.try_find("home-discover-play").is_some());
-        assert!(window.try_find("home-discover-pending").is_none());
+        assert!(window.try_find("home-made-heading").is_none());
+        assert!(window.try_find("home-top-heading").is_none());
+        // Everything else is still there.
+        assert!(window.try_find("home-shortcuts").is_some());
+        assert!(window.try_find("home-releases-heading").is_some());
     });
+}
 
-    // The artist to try sits below the shortcuts and what is new.
-    scroll_home(&mut fixture, 420.);
-    // Playing the sample hands the artist's songs to the player.
-    fixture.update(|window, cx| window.click("home-discover-play", cx));
+#[test]
+fn show_all_opens_a_shelf_out_and_closes_it_again() {
+    let mixes = (0..9)
+        .map(|n| home_mix(&format!("Mix {n}"), &format!("37i9dQZF1E3{n:011}")))
+        .collect::<Vec<_>>();
+    let mut fixture = home_with_mixes(Some(model::HomeMixes {
+        made_for_you: mixes,
+        top_mixes: Vec::new(),
+    }));
+    fixture.update(|window, _| {
+        assert!(window.try_find(("home-made", 3usize)).is_some());
+        assert!(window.try_find(("home-made", 8usize)).is_none());
+    });
+    fixture.update(|window, cx| window.click("home-made-show-all", cx));
+    fixture.update(|window, _| assert!(window.try_find(("home-made", 8usize)).is_some()));
+    fixture.update(|window, cx| window.click("home-made-show-all", cx));
+    fixture.update(|window, _| assert!(window.try_find(("home-made", 8usize)).is_none()));
+}
+
+#[test]
+fn a_rail_release_plays_from_its_button_without_leaving_home() {
+    let mut fixture = home_with_mixes(None);
+    fixture.update(|window, cx| window.click(("home-release-play", 0usize), cx));
+    let BackendCommand::LoadAlbum { source_id, respond } = fixture
+        .backend
+        .commands
+        .try_recv()
+        .expect("the album is fetched")
+    else {
+        panic!("expected an album request")
+    };
+    assert_eq!(source_id, "release-1");
+    respond
+        .send(Ok((
+            model::Album {
+                provider: model::Provider::Spotify,
+                source_id: "release-1".into(),
+                spotify_uri: None,
+                name: "Fresh Release".into(),
+                artists: Vec::new(),
+                release_date: None,
+                artwork_url: None,
+                track_count: None,
+            },
+            vec![track(0), track(1)],
+        )))
+        .unwrap();
+    fixture.update(|_, _| {});
     let BackendCommand::PlayContext { tracks, index } = fixture
         .backend
         .commands
@@ -5836,36 +5769,7 @@ fn home_offers_an_artist_to_try_plays_a_sample_and_steps_on_when_dismissed() {
         panic!("expected playback")
     };
     assert_eq!((tracks.len(), index), (2, 0));
-
-    // "Not for me" is remembered, and the next artist takes the place.
-    fixture.update(|window, cx| window.click("home-discover-dismiss", cx));
-    let BackendCommand::DismissSuggestion { source_id } = fixture
-        .backend
-        .commands
-        .try_recv()
-        .expect("the answer is saved")
-    else {
-        panic!("expected the dismissal to be saved")
-    };
-    assert_eq!(source_id, "sug-1");
-    answer_offered_artist(&mut fixture, "sug-2", vec![track(3)]);
-    fixture.update(|window, _| {
-        assert!(window.try_find("home-discover").is_some());
-        assert!(window.try_find("home-discover-play").is_some());
-    });
-
-    // Opening the artist goes to their page.
-    fixture.update(|window, cx| window.click("home-discover-open", cx));
-    assert_eq!(fixture.route(), Route::Artist);
-}
-
-#[test]
-fn home_keeps_its_other_rows_when_there_is_nobody_to_suggest() {
-    let mut fixture = home_offering(Vec::new(), Vec::new());
-    fixture.update(|window, _| {
-        assert!(window.try_find("home-discover").is_none());
-        assert!(window.try_find("home-shortcuts").is_some());
-    });
+    assert_eq!(fixture.route(), Route::Home);
 }
 
 #[test]

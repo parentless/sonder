@@ -386,6 +386,12 @@ pub enum BackendCommand {
     DismissSuggestion {
         source_id: String,
     },
+    /// Spotify's Made for you and Your top mixes. `force` skips what was
+    /// read in the last few minutes.
+    LoadMadeForYou {
+        force: bool,
+        respond: Reply<crate::model::HomeMixes>,
+    },
     SearchCatalog {
         query: String,
         respond: Reply<crate::model::CatalogSearchResults>,
@@ -1265,6 +1271,11 @@ impl Drop for Worker {
 }
 
 impl Worker {
+    /// The Spotify session behind playback, for reads only it can make.
+    fn playback_session(&self) -> Option<librespot::core::session::Session> {
+        self.connection.player.as_ref()?.session().cloned()
+    }
+
     fn new(startup: Startup, events: EventSender) -> Self {
         let queue = PlayQueue::from_snapshot(startup.playback_snapshot);
         let history_end = queue.index.unwrap_or(0);
@@ -1439,13 +1450,20 @@ impl Worker {
                 self.catalog.search(self.spotify.clone(), query, respond);
                 Ok(())
             }
+            BackendCommand::LoadMadeForYou { force, respond } => {
+                let session = self.playback_session();
+                self.catalog
+                    .made_for_you(self.spotify.clone(), session, force, respond);
+                Ok(())
+            }
             BackendCommand::LoadPlaylist {
                 playlist,
                 offset,
                 respond,
             } => {
+                let session = self.playback_session();
                 self.catalog
-                    .playlist(self.spotify.clone(), playlist, offset, respond);
+                    .playlist(self.spotify.clone(), session, playlist, offset, respond);
                 Ok(())
             }
             BackendCommand::LoadArtist { source_id, respond } => {
@@ -2565,13 +2583,14 @@ impl Worker {
             return;
         };
         let spotify = self.spotify.clone();
+        let session = self.playback_session();
         let source_id = playlist.source_id.clone();
         let offset = *offset;
         self.playlist_prefetch = Some(tokio::spawn(async move {
             run_with_timeout(
                 CATALOG_TIMEOUT_SECONDS,
                 "Spotify playlist playback page",
-                spotify.playlist_tracks_page(&source_id, offset),
+                playlist_page(&spotify, session, &source_id, offset),
             )
             .await
         }));
@@ -3018,6 +3037,7 @@ struct CatalogFetches {
     new_releases: Option<tokio::task::JoinHandle<()>>,
     upcoming: Option<tokio::task::JoinHandle<()>>,
     discover: Option<tokio::task::JoinHandle<()>>,
+    made_for_you: Option<tokio::task::JoinHandle<()>>,
     playlist: Option<tokio::task::JoinHandle<()>>,
     artist: Option<tokio::task::JoinHandle<()>>,
     artist_albums: Option<tokio::task::JoinHandle<()>>,
@@ -3189,6 +3209,7 @@ impl CatalogFetches {
     ) {
         // MusicBrainz allows one request a second, so a sweep outlasts the
         // catalog timeout; it keeps partial results and bounds itself instead.
+        abort_task(&mut self.made_for_you);
         abort_task(&mut self.upcoming);
         let mut respond = respond;
         self.upcoming = Some(tokio::spawn(async move {
@@ -3256,6 +3277,7 @@ impl CatalogFetches {
     fn playlist(
         &mut self,
         spotify: Spotify,
+        session: Option<librespot::core::session::Session>,
         playlist: Playlist,
         offset: u32,
         respond: Reply<crate::model::PlaylistTrackPage>,
@@ -3264,10 +3286,25 @@ impl CatalogFetches {
             &mut self.playlist,
             respond,
             "Spotify playlist request",
+            async move { playlist_page(&spotify, session, &playlist.source_id, offset).await },
+        );
+    }
+
+    fn made_for_you(
+        &mut self,
+        spotify: Spotify,
+        session: Option<librespot::core::session::Session>,
+        force: bool,
+        respond: Reply<crate::model::HomeMixes>,
+    ) {
+        Self::start(
+            &mut self.made_for_you,
+            respond,
+            "Made for you request",
             async move {
-                spotify
-                    .playlist_tracks_page(&playlist.source_id, offset)
-                    .await
+                let session = session.context("Spotify playback is not connected")?;
+                let token = spotify.access_token().await?;
+                crate::made_for_you::load(&session, token, force).await
             },
         );
     }
@@ -3336,6 +3373,7 @@ impl CatalogFetches {
         abort_task(&mut self.profile_saved);
         abort_task(&mut self.new_releases);
         abort_task(&mut self.upcoming);
+        abort_task(&mut self.made_for_you);
         abort_task(&mut self.discover);
         abort_task(&mut self.playlist);
         abort_task(&mut self.artist);
@@ -3343,6 +3381,32 @@ impl CatalogFetches {
         abort_task(&mut self.album);
         // The next account's library must not compare equal to this one's.
         self.seed_fingerprint(None);
+    }
+}
+
+/// A playlist page from the Web API, or, when Spotify refuses it, as the
+/// playback session lists it: Spotify's own algorithmic playlists answer only
+/// the second way.
+async fn playlist_page(
+    spotify: &Spotify,
+    session: Option<librespot::core::session::Session>,
+    source_id: &str,
+    offset: u32,
+) -> Result<crate::model::PlaylistTrackPage> {
+    let error = match spotify.playlist_tracks_page(source_id, offset).await {
+        Ok(page) => return Ok(page),
+        Err(error) => error,
+    };
+    let Some(session) = session else {
+        return Err(error);
+    };
+    match crate::made_for_you::session_playlist_page(&session, spotify, source_id, offset).await {
+        Ok(page) if !page.tracks.is_empty() => Ok(page),
+        Ok(_) => Err(error),
+        Err(fallback) => {
+            log::info!("playlist: the session read failed too: {fallback:#}");
+            Err(error)
+        }
     }
 }
 

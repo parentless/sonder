@@ -106,6 +106,20 @@ pub struct Playlist {
     pub artwork_url: Option<String>,
 }
 
+/// One of Spotify's made-for-you playlists, with the line it shows beneath.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HomeMix {
+    pub playlist: Playlist,
+    pub description: Option<String>,
+}
+
+/// Home's two personalized shelves, in Spotify's order.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct HomeMixes {
+    pub made_for_you: Vec<HomeMix>,
+    pub top_mixes: Vec<HomeMix>,
+}
+
 /// What a cheap reload compares before committing to a full walk: the first
 /// pages and Spotify's totals for both collections. The totals catch
 /// removals past the first page; the heads catch additions and renames; the

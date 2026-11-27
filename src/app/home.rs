@@ -1,34 +1,34 @@
-//! The Home page. It starts with a greeting and shortcuts back into the
-//! library, then what you were playing and what is new from artists you play.
-//! Below that: two short rows (an artist to try next, found because they sound
-//! like ones you play, and the next announced release).
+//! The Home page. It starts with a greeting, then two panes. On the left:
+//! shortcuts back into the library, then Spotify's own "Made for you" and
+//! "Your top mixes". On the right: a rail of what is new from artists you play.
 //!
-//! Who sounds like whom comes from ListenBrainz (see `similar.rs`), looked up
-//! once every few days and kept on disk. Two small Spotify requests per time
-//! range, made only when the page is opened and its data is more than half an
-//! hour old. Nothing runs in the background.
+//! The two mix shelves are read the way Spotify's own apps read them, through
+//! the playback session (see `made_for_you.rs`); when that read fails the
+//! shelves are simply left out. Two small Spotify requests per time range,
+//! made only when the page is opened and its data is more than half an hour
+//! old. Nothing runs in the background.
 use super::page::PageEvent;
 use super::top_listening::{TopEvent, TopListening};
 use super::*;
 use gpui_kit::TestSupportExt as _;
-use std::time::{Instant, SystemTime};
+use std::time::SystemTime;
 
-/// New releases move more slowly, and finding them costs a request per artist.
-/// Announced dates change slowly, and each lookup costs MusicBrainz about 20 requests.
-const UPCOMING_STALE_TIME: Duration = Duration::from_secs(24 * 60 * 60);
+/// New releases move slowly, and finding them costs a request per artist.
 const RELEASES_STALE_TIME: Duration = Duration::from_secs(6 * 60 * 60);
-/// The backend keeps its own answer for days; this only avoids asking it on every visit.
-const DISCOVER_STALE_TIME: Duration = Duration::from_secs(6 * 60 * 60);
-/// Songs shown for the artist on offer.
-const DISCOVER_SONGS: usize = 3;
-/// Artists whose songs are kept, so stepping back and forth asks for nothing.
-const DISCOVER_SONGS_KEPT: usize = 8;
-/// The fewest and most new albums in a row.
-const RELEASES_MIN: usize = 2;
-const RELEASES_MAX: usize = 6;
-/// A shelf cover's width and the space between covers, at 100% zoom.
-const SHELF_COVER: f32 = 148.;
-const SHELF_GAP: f32 = 12.;
+/// The backend keeps its own answer for ten minutes; this only avoids asking
+/// it on every visit.
+const MIXES_STALE_TIME: Duration = Duration::from_secs(10 * 60);
+/// After a failed read the page waits this long before asking again, so
+/// opening Home over and over does not hammer a private service that is down.
+const MIXES_RETRY: Duration = Duration::from_secs(5 * 60);
+/// Releases listed in the rail before "Show all".
+const RAIL_ROWS: usize = 4;
+/// The rail's width and the gap between the two panes, at 100% zoom.
+const RAIL_WIDTH: f32 = 412.;
+const PANE_GAP: f32 = 32.;
+/// The narrowest a mix cover is allowed to get before a card is dropped.
+const MIX_COVER_MIN: f32 = 190.;
+const MIX_COVER_MAX_COUNT: usize = 6;
 /// The hue of the Liked Songs tile.
 const LIKED_HUE: f32 = 340.;
 /// Home reads the stretch Spotify calls medium term (about six months).
@@ -66,19 +66,22 @@ fn greeting() -> &'static str {
     greeting_for(crate::local_time::hour())
 }
 
-struct Upcoming {
-    releases: Arc<[model::UpcomingRelease]>,
-    loaded_at: SystemTime,
-}
-
-struct Discover {
-    suggestions: Arc<[model::ArtistSuggestion]>,
-    loaded_at: SystemTime,
-}
-
 struct Releases {
     albums: Arc<[model::Album]>,
     loaded_at: SystemTime,
+}
+
+struct Mixes {
+    shelves: model::HomeMixes,
+    loaded_at: SystemTime,
+}
+
+/// The shelves that can be opened out to show every card.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Shelf {
+    MadeForYou,
+    TopMixes,
+    Releases,
 }
 
 pub(super) struct HomePage {
@@ -88,17 +91,16 @@ pub(super) struct HomePage {
     releases: Option<Releases>,
     releases_loading: bool,
     releases_request: Option<gpui_kit::Task<()>>,
-    upcoming: Option<Upcoming>,
-    upcoming_loading: bool,
-    upcoming_request: Option<gpui_kit::Task<()>>,
-    discover: Option<Discover>,
-    discover_loading: bool,
-    discover_request: Option<gpui_kit::Task<()>>,
-    /// Which suggestion is on offer.
-    discover_index: usize,
-    /// The songs of artists on offer, by Spotify id.
-    discover_songs: Vec<(String, Arc<[model::Track]>)>,
-    discover_songs_request: Option<gpui_kit::Task<()>>,
+    mixes: Option<Mixes>,
+    mixes_loading: bool,
+    /// When the last read failed, so the next visit does not retry at once.
+    mixes_failed_at: Option<SystemTime>,
+    mixes_request: Option<gpui_kit::Task<()>>,
+    /// Which shelves "Show all" has opened out.
+    expanded: Vec<Shelf>,
+    /// The album a rail row's play button is fetching, so a second click
+    /// while it loads does not start it twice.
+    playing_release: Option<(String, gpui_kit::Task<()>)>,
     error: Option<SharedString>,
     visible: bool,
     scroll: gpui_kit::ScrollHandle,
@@ -119,8 +121,7 @@ impl HomePage {
                 this.handle_top_event(event, cx)
             }),
             cx.observe(&top, |_, _, cx| cx.notify()),
-            // The shortcuts and the song to continue follow the library and
-            // the player.
+            // The shortcuts follow the library and the player.
             cx.observe(&services::AppServices::library(cx), |_, _, cx| cx.notify()),
             cx.observe(&services::AppServices::player(cx), |_, _, cx| cx.notify()),
         ];
@@ -131,15 +132,12 @@ impl HomePage {
             releases: None,
             releases_loading: false,
             releases_request: None,
-            upcoming: None,
-            upcoming_loading: false,
-            upcoming_request: None,
-            discover: None,
-            discover_loading: false,
-            discover_request: None,
-            discover_index: 0,
-            discover_songs: Vec::new(),
-            discover_songs_request: None,
+            mixes: None,
+            mixes_loading: false,
+            mixes_failed_at: None,
+            mixes_request: None,
+            expanded: Vec::new(),
+            playing_release: None,
             error: None,
             visible: false,
             scroll: gpui_kit::ScrollHandle::new(),
@@ -158,7 +156,7 @@ impl HomePage {
                 if self.visible {
                     self.load_if_needed(cx);
                     self.load_releases_if_needed(cx);
-                    self.load_discover_if_needed(cx);
+                    self.load_mixes_if_needed(cx);
                 }
             }
             _ => {}
@@ -184,15 +182,12 @@ impl HomePage {
         self.releases = None;
         self.releases_loading = false;
         self.releases_request = None;
-        self.upcoming = None;
-        self.upcoming_loading = false;
-        self.upcoming_request = None;
-        self.discover = None;
-        self.discover_loading = false;
-        self.discover_request = None;
-        self.discover_index = 0;
-        self.discover_songs.clear();
-        self.discover_songs_request = None;
+        self.mixes = None;
+        self.mixes_loading = false;
+        self.mixes_failed_at = None;
+        self.mixes_request = None;
+        self.expanded.clear();
+        self.playing_release = None;
         self.error = None;
         cx.notify();
     }
@@ -210,7 +205,7 @@ impl HomePage {
         }
         self.load_if_needed(cx);
         self.load_releases_if_needed(cx);
-        self.load_discover_if_needed(cx);
+        self.load_mixes_if_needed(cx);
     }
 
     fn load_if_needed(&mut self, cx: &mut Context<Self>) {
@@ -251,204 +246,108 @@ impl HomePage {
                     Err(error) => log::warn!("home: could not load new releases: {error}"),
                 }
                 cx.notify();
-                // After the releases, so the page's own data is never kept waiting.
-                page.load_upcoming_if_needed(cx);
             });
         }));
     }
 
-    fn load_upcoming_if_needed(&mut self, cx: &mut Context<Self>) {
-        let fresh = self.upcoming.as_ref().is_some_and(|upcoming| {
-            upcoming
+    /// Made for you and Your top mixes. A failure leaves both shelves out and
+    /// the next visit asks again; the backend paces itself if Spotify asked it
+    /// to slow down.
+    fn load_mixes_if_needed(&mut self, cx: &mut Context<Self>) {
+        let fresh = self.mixes.as_ref().is_some_and(|mixes| {
+            mixes
                 .loaded_at
                 .elapsed()
-                .is_ok_and(|elapsed| elapsed < UPCOMING_STALE_TIME)
+                .is_ok_and(|elapsed| elapsed < MIXES_STALE_TIME)
         });
-        if fresh || self.upcoming_loading || self.top.read(cx).permission_missing() || !self.visible
-        {
+        let failed_lately = self
+            .mixes_failed_at
+            .is_some_and(|at| at.elapsed().is_ok_and(|elapsed| elapsed < MIXES_RETRY));
+        if fresh || failed_lately || self.mixes_loading || !self.visible {
             return;
         }
-        self.upcoming_loading = true;
-        let reply = catalog::request(&self.backend, |respond| BackendCommand::LoadUpcoming {
+        self.mixes_loading = true;
+        let reply = catalog::request(&self.backend, |respond| BackendCommand::LoadMadeForYou {
+            force: false,
             respond,
         });
-        self.upcoming_request = Some(cx.spawn(async move |this, cx| {
+        self.mixes_request = Some(cx.spawn(async move |this, cx| {
             let result = reply.await;
             let _ = this.update(cx, |page, cx| {
-                page.upcoming_request = None;
-                page.upcoming_loading = false;
+                page.mixes_request = None;
+                page.mixes_loading = false;
                 match result {
-                    Ok(releases) => {
-                        page.upcoming = Some(Upcoming {
-                            releases: releases.into(),
+                    Ok(shelves) => {
+                        page.mixes_failed_at = None;
+                        page.mixes = Some(Mixes {
+                            shelves,
                             loaded_at: SystemTime::now(),
                         });
                     }
-                    Err(error) => log::debug!("home: could not load announced releases: {error}"),
+                    Err(error) => {
+                        page.mixes_failed_at = Some(SystemTime::now());
+                        log::info!("home: could not load Made for you: {error}");
+                    }
                 }
                 cx.notify();
             });
         }));
     }
 
-    /// Artists that sound like the listener's top ones. Asked for once the
-    /// page's own data is on its way; a failure leaves the page as it was.
-    fn load_discover_if_needed(&mut self, cx: &mut Context<Self>) {
-        let fresh = self.discover.as_ref().is_some_and(|discover| {
-            discover
-                .loaded_at
-                .elapsed()
-                .is_ok_and(|elapsed| elapsed < DISCOVER_STALE_TIME)
-        });
-        if fresh || self.discover_loading || self.top.read(cx).permission_missing() || !self.visible
-        {
-            return;
-        }
-        self.discover_loading = true;
-        let reply = catalog::request(&self.backend, |respond| BackendCommand::LoadDiscover {
-            respond,
-        });
-        self.discover_request = Some(cx.spawn(async move |this, cx| {
-            let result = reply.await;
-            let _ = this.update(cx, |page, cx| {
-                page.discover_request = None;
-                page.discover_loading = false;
-                let suggestions = match result {
-                    Ok(suggestions) => suggestions,
-                    Err(error) => {
-                        log::debug!("home: could not find artists to discover: {error}");
-                        Vec::new()
-                    }
-                };
-                page.discover_index = 0;
-                page.discover = Some(Discover {
-                    suggestions: suggestions.into(),
-                    loaded_at: SystemTime::now(),
-                });
-                page.load_discover_songs(cx);
-                cx.notify();
-            });
-        }));
-    }
-
-    /// Puts suggestions and their songs on the page without asking, for
-    /// screenshots.
-    #[cfg(test)]
-    pub(super) fn fixture_discover(
-        &mut self,
-        suggestions: Vec<model::ArtistSuggestion>,
-        songs: Vec<model::Track>,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(first) = suggestions.first() {
-            self.discover_songs
-                .push((first.artist.source_id.clone(), songs.into()));
-        }
-        self.discover = Some(Discover {
-            suggestions: suggestions.into(),
-            loaded_at: SystemTime::now(),
-        });
-        self.discover_loading = false;
-        cx.notify();
-    }
-
-    fn suggestion(&self) -> Option<&model::ArtistSuggestion> {
-        self.discover
+    /// Starts an album from the rail without leaving Home.
+    fn play_release(&mut self, source_id: String, cx: &mut Context<Self>) {
+        if self
+            .playing_release
             .as_ref()
-            .and_then(|discover| discover.suggestions.get(self.discover_index))
-    }
-
-    fn songs_of(&self, source_id: &str) -> Option<&Arc<[model::Track]>> {
-        self.discover_songs
-            .iter()
-            .find(|(id, _)| id == source_id)
-            .map(|(_, songs)| songs)
-    }
-
-    /// The songs to hear from the artist on offer, from their artist page.
-    fn load_discover_songs(&mut self, cx: &mut Context<Self>) {
-        let Some(source_id) = self
-            .suggestion()
-            .map(|suggestion| suggestion.artist.source_id.clone())
-        else {
-            return;
-        };
-        if self.songs_of(&source_id).is_some() {
+            .is_some_and(|(loading, _)| *loading == source_id)
+        {
             return;
         }
         let reply = catalog::request(&self.backend, {
             let source_id = source_id.clone();
-            |respond| BackendCommand::LoadArtist { source_id, respond }
+            |respond| BackendCommand::LoadAlbum { source_id, respond }
         });
-        self.discover_songs_request = Some(cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             let result = reply.await;
             let _ = this.update(cx, |page, cx| {
-                page.discover_songs_request = None;
-                let songs: Arc<[model::Track]> = match result {
-                    Ok((_, tracks, _)) => tracks.into_iter().take(DISCOVER_SONGS).collect(),
-                    Err(error) => {
-                        log::debug!("home: could not load songs to sample: {error}");
-                        Arc::from([])
+                page.playing_release = None;
+                match result {
+                    Ok((_, tracks)) if !tracks.is_empty() => {
+                        let player = services::AppServices::player(cx);
+                        player.update(cx, |player, cx| player.play_context(tracks, 0, cx));
                     }
-                };
-                page.discover_songs.push((source_id, songs));
-                if page.discover_songs.len() > DISCOVER_SONGS_KEPT {
-                    page.discover_songs.remove(0);
+                    Ok(_) => {}
+                    Err(error) => log::warn!("home: could not start the release: {error}"),
                 }
                 cx.notify();
             });
-        }));
+        });
+        self.playing_release = Some((source_id, task));
     }
 
-    /// "Not for me": remembered for good, and the next artist takes the place.
-    fn dismiss_suggestion(&mut self, cx: &mut Context<Self>) {
-        let Some(discover) = self.discover.as_mut() else {
-            return;
-        };
-        let index = self.discover_index;
-        let Some(gone) = discover.suggestions.get(index).cloned() else {
-            return;
-        };
-        self.backend.send(BackendCommand::DismissSuggestion {
-            source_id: gone.artist.source_id.clone(),
+    /// Puts the two mix shelves on the page without asking, for screenshots.
+    #[cfg(test)]
+    pub(super) fn fixture_mixes(&mut self, shelves: model::HomeMixes, cx: &mut Context<Self>) {
+        self.mixes = Some(Mixes {
+            shelves,
+            loaded_at: SystemTime::now(),
         });
-        discover.suggestions = discover
-            .suggestions
-            .iter()
-            .filter(|suggestion| suggestion.artist.source_id != gone.artist.source_id)
-            .cloned()
-            .collect();
-        self.discover_index = index.min(discover.suggestions.len().saturating_sub(1));
-        self.load_discover_songs(cx);
+        self.mixes_loading = false;
         cx.notify();
     }
 
-    /// Plays the artist's songs from `first`, so the listener hears them
-    /// without leaving Home.
-    fn play_sample(&mut self, first: usize, cx: &mut Context<Self>) {
-        let Some(songs) = self
-            .suggestion()
-            .and_then(|suggestion| self.songs_of(&suggestion.artist.source_id))
-            .cloned()
-        else {
-            return;
-        };
-        if songs.is_empty() {
-            return;
-        }
-        let player = services::AppServices::player(cx);
-        player.update(cx, |player, cx| player.play_context(songs, first, cx));
+    fn is_expanded(&self, shelf: Shelf) -> bool {
+        self.expanded.contains(&shelf)
     }
 
-    fn open_suggested_artist(&mut self, cx: &mut Context<Self>) {
-        if let Some(suggestion) = self.suggestion() {
-            let artist = &suggestion.artist;
-            cx.emit(PageEvent::OpenArtist(model::ArtistRef {
-                name: artist.name.clone(),
-                source_id: Some(artist.source_id.clone()),
-                spotify_uri: artist.spotify_uri.clone(),
-            }));
+    /// "Show all" opens a shelf out; the same link closes it again.
+    fn toggle_expanded(&mut self, shelf: Shelf, cx: &mut Context<Self>) {
+        if let Some(index) = self.expanded.iter().position(|open| *open == shelf) {
+            self.expanded.remove(index);
+        } else {
+            self.expanded.push(shelf);
         }
+        cx.notify();
     }
 
     /// The ways back into the library, in the order they are shown. A tile is
@@ -675,182 +574,191 @@ impl HomePage {
             .into_any_element()
     }
 
-    /// The song to carry on with: the one that is playing or paused, or else
-    /// the latest in Recently played.
-    fn continue_card(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let player = services::AppServices::player(cx);
-        let library = services::AppServices::library(cx);
-        let (current, playing, position) = {
-            let player = player.read(cx);
-            (
-                player.now_playing().cloned(),
-                player.playing(),
-                player.position_ms(Instant::now()),
-            )
-        };
-        let resuming = current.is_some();
-        let track = match current {
-            Some(track) => track,
-            None => library.read(cx).recently_played().first().cloned()?,
-        };
+    /// "Show all" beside a shelf's heading, which opens it out and closes it.
+    fn show_all(
+        &self,
+        id: &'static str,
+        shelf: Shelf,
+        palette: CadencePalette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .id(id)
+            .test_support()
+            .cursor_pointer()
+            .text_size(rem(14.))
+            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+            .text_color(rgb(palette.text_muted))
+            .hover(|style| style.text_color(rgb(palette.text_primary)))
+            .child(if self.is_expanded(shelf) {
+                "Show less"
+            } else {
+                "Show all"
+            })
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_expanded(shelf, cx)))
+    }
+
+    /// A shelf of Spotify's mixes: a heading with "Show all", and covers that
+    /// fit the column, or every cover in rows once it is opened out.
+    #[allow(clippy::too_many_arguments)]
+    fn mix_shelf(
+        &self,
+        id: &'static str,
+        title: &'static str,
+        shelf: Shelf,
+        mixes: &[model::HomeMix],
+        loading: bool,
+        count: usize,
+        cover: f32,
+        palette: CadencePalette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if mixes.is_empty() && !loading {
+            return None;
+        }
         let cache = services::AppServices::image_cache(cx);
-        let art = components::artwork(
-            palette,
-            &cache,
-            track.artwork_url.as_deref(),
-            tokens::ArtworkSize {
-                size: Rems(7.625),
-                radius: Rems((CARD_RADIUS - CARD_PADDING) / 16.),
-            },
-            CadenceIcon::MusicNote,
-        );
-        let (label, icon) = if !resuming {
-            ("Play", CadenceIcon::Play)
-        } else if playing {
-            ("Pause", CadenceIcon::Pause)
-        } else {
-            ("Resume", CadenceIcon::Play)
+        let size = tokens::ArtworkSize {
+            size: rem(cover),
+            radius: rem(14.),
         };
-        // A running song would need a timer to keep its bar honest, so the bar
-        // shows only while paused, when it cannot move.
-        let progress = (resuming && !playing && track.duration_ms > 0).then(|| {
-            let position = position.min(track.duration_ms);
-            (
-                position as f32 / track.duration_ms as f32,
-                format_duration(position),
-                format_duration(track.duration_ms),
-            )
-        });
-        let muted = |text: String, size: f32| {
-            div()
-                .text_size(rem(size))
-                .line_height(rem(size * 1.4))
-                .text_color(rgb(palette.text_muted))
-                .child(text)
-        };
-        Some(
-            div()
-                .id("home-continue")
-                .test_support()
-                .w_full()
-                .p(rem(CARD_PADDING))
-                .flex()
-                .gap(rem(16.))
-                .rounded(rem(CARD_RADIUS))
-                .bg(rgb(palette.card))
-                .child(art)
-                .child(
+        let expanded = self.is_expanded(shelf);
+        let cards: Vec<AnyElement> = if mixes.is_empty() {
+            // Placeholders hold the shelf's height while Spotify answers.
+            (0..count)
+                .map(|_| {
                     div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
+                        .size(size.size)
+                        .flex_none()
+                        .rounded(size.radius)
+                        .bg(rgb(palette.card))
+                        .into_any_element()
+                })
+                .collect()
+        } else {
+            mixes
+                .iter()
+                .take(if expanded { mixes.len() } else { count })
+                .enumerate()
+                .map(|(index, mix)| {
+                    let playlist = mix.playlist.clone();
+                    components::button(palette, (id, index))
+                        .test_support()
+                        .w(size.size)
+                        .flex_none()
                         .flex_col()
-                        .justify_between()
+                        .items_start()
+                        .child(components::artwork(
+                            palette,
+                            &cache,
+                            mix.playlist.artwork_url.as_deref(),
+                            size,
+                            CadenceIcon::Playlist,
+                        ))
                         .child(
                             div()
-                                .child(
-                                    div()
-                                        .truncate()
-                                        .text_size(rem(20.))
-                                        .line_height(rem(28.))
-                                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                        .text_color(rgb(palette.text_primary))
-                                        .child(track.title.clone()),
-                                )
-                                .child(muted(track.artist.to_string(), 16.).truncate()),
+                                .w_full()
+                                .mt(rem(12.))
+                                .truncate()
+                                .text_size(rem(16.))
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .text_color(rgb(palette.text_primary))
+                                .child(mix.playlist.name.clone()),
                         )
                         .child(
                             div()
-                                .flex()
-                                .flex_col()
-                                .items_start()
-                                .when_some(progress, |column, (fraction, at, total)| {
-                                    column
-                                        .w_full()
-                                        .child(
-                                            div()
-                                                .w_full()
-                                                .flex()
-                                                .justify_between()
-                                                .child(muted(at, 12.))
-                                                .child(muted(total, 12.)),
-                                        )
-                                        .child(
-                                            div()
-                                                .id("home-continue-progress")
-                                                .test_support()
-                                                .w_full()
-                                                .h(rem(5.))
-                                                .mt(rem(4.))
-                                                .rounded_full()
-                                                .bg(rgb(palette.card_hover))
-                                                .child(
-                                                    div()
-                                                        .h_full()
-                                                        .w(relative(fraction))
-                                                        .rounded_full()
-                                                        .bg(rgb(palette.text_primary)),
-                                                ),
-                                        )
-                                })
-                                .child(
-                                    div().mt(rem(12.)).child(
-                                        compact(components::icon_pill(
-                                            palette,
-                                            "home-continue-play",
-                                            icon,
-                                            label,
-                                            true,
-                                        ))
-                                        .test_support()
-                                        .on_click(
-                                            cx.listener(move |_, _, _, cx| {
-                                                if resuming {
-                                                    player
-                                                        .update(cx, |player, cx| player.toggle(cx));
-                                                } else {
-                                                    let list =
-                                                        library.read(cx).recently_played().clone();
-                                                    player.update(cx, |player, cx| {
-                                                        player.play_context(list, 0, cx);
-                                                    });
-                                                }
-                                            }),
-                                        ),
-                                    ),
-                                ),
-                        ),
+                                .w_full()
+                                .mt(rem(3.))
+                                .truncate()
+                                .text_size(rem(14.))
+                                .text_color(rgb(palette.text_muted))
+                                .child(mix.description.clone().unwrap_or_default()),
+                        )
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            cx.emit(PageEvent::OpenPlaylist(playlist.clone()))
+                        }))
+                        .into_any_element()
+                })
+                .collect()
+        };
+        let more = mixes.len() > count;
+        Some(
+            div()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .justify_between()
+                        .mb(rem(12.))
+                        .child(heading(palette, format!("{id}-heading"), title.into(), 22.))
+                        .when(more, |header| {
+                            header.child(self.show_all(
+                                if shelf == Shelf::MadeForYou {
+                                    "home-made-show-all"
+                                } else {
+                                    "home-top-show-all"
+                                },
+                                shelf,
+                                palette,
+                                cx,
+                            ))
+                        }),
+                )
+                .child(
+                    div()
+                        .id(format!("{id}-row"))
+                        .test_support()
+                        .w_full()
+                        .flex()
+                        .flex_wrap()
+                        .gap(rem(GRID_GAP))
+                        .children(cards),
                 )
                 .into_any_element(),
         )
     }
 
-    /// The newest albums from artists you play, as covers.
-    fn releases_shelf(
-        &self,
-        count: usize,
-        palette: CadencePalette,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    /// What is new from artists you play, as a panel of rows with a date and
+    /// a play button.
+    fn releases_rail(&self, palette: CadencePalette, cx: &mut Context<Self>) -> Option<AnyElement> {
         let cache = services::AppServices::image_cache(cx);
-        let size = tokens::ArtworkSize {
-            size: rem(SHELF_COVER),
-            radius: Rems(0.875),
+        let cover = tokens::ArtworkSize {
+            size: rem(56.),
+            radius: rem(10.),
+        };
+        let panel = || {
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .rounded(rem(22.))
+                .bg(rgb(palette.card))
+                .pt(rem(18.))
+                .px(rem(18.))
+                .pb(rem(10.))
         };
         let Some(releases) = self.releases.as_ref() else {
-            // Placeholders hold the shelf's height while Spotify answers.
+            // Placeholders hold the panel's height while Spotify answers.
             return self.releases_loading.then(|| {
-                div()
+                panel()
                     .id("home-releases-loading")
                     .test_support()
-                    .w_full()
-                    .flex()
-                    .justify_between()
-                    .children((0..count).map(|_| {
+                    .gap(rem(12.))
+                    .pb(rem(18.))
+                    .child(heading(
+                        palette,
+                        "home-releases-heading".to_owned(),
+                        "New from artists you play".into(),
+                        20.,
+                    ))
+                    .children((0..RAIL_ROWS).map(|_| {
                         div()
-                            .size(size.size)
-                            .rounded(size.radius)
-                            .bg(rgb(palette.card))
+                            .h(cover.size)
+                            .w_full()
+                            .rounded(rem(12.))
+                            .bg(rgb(palette.card_hover))
                     }))
                     .into_any_element()
             });
@@ -858,226 +766,113 @@ impl HomePage {
         if releases.albums.is_empty() {
             return None;
         }
-        let mut shelf = div()
-            .id("home-releases")
-            .test_support()
-            .w_full()
-            .flex()
-            .map(|row| {
-                // A full row spreads to both edges; a short one keeps its gap.
-                if releases.albums.len() >= count {
-                    row.justify_between()
-                } else {
-                    row.gap(rem(SHELF_GAP))
-                }
-            });
-        for (index, album) in releases.albums.iter().take(count).enumerate() {
-            let mut artist = album
-                .artists
-                .iter()
-                .map(|artist| artist.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            if release_watch::is_new(&album.source_id, cx) {
-                artist = format!("New · {artist}");
-            }
-            let target = model::AlbumRef {
-                name: album.name.clone(),
-                source_id: Some(album.source_id.clone()),
-                spotify_uri: album.spotify_uri.clone(),
-                artwork_url: album.artwork_url.clone(),
-            };
-            shelf = shelf.child(
-                components::button(palette, ("home-release", index))
-                    .test_support()
-                    .w(size.size)
-                    .flex_none()
-                    .flex_col()
-                    .items_start()
-                    .child(components::artwork(
-                        palette,
-                        &cache,
-                        album.artwork_url.as_deref(),
-                        size,
-                        CadenceIcon::MusicNote,
-                    ))
-                    .child(
-                        div()
-                            .w_full()
-                            .mt(rem(8.))
-                            .truncate()
-                            .text_size(rem(13.5))
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .text_color(rgb(palette.text_primary))
-                            .child(album.name.clone()),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .truncate()
-                            .text_size(rem(12.))
-                            .text_color(rgb(palette.text_muted))
-                            .child(artist),
-                    )
-                    .on_click(cx.listener(move |_, _, _, cx| {
-                        cx.emit(PageEvent::OpenAlbum(target.clone()))
-                    })),
-            );
-        }
-        Some(shelf.into_any_element())
-    }
-
-    /// An artist to try and the next announced release, as two short rows.
-    fn worth_a_listen(
-        &self,
-        palette: CadencePalette,
-        columns: u16,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let cache = services::AppServices::image_cache(cx);
-        // A row fills its grid column, so it ends where the Continue card and
-        // the shelf above it end; a lone row keeps the left column's width.
-        let card = |id: &'static str| {
-            div()
-                .id(id)
-                .test_support()
-                .w_full()
-                .min_w_0()
-                .h(rem(60.))
-                .flex()
-                .items_center()
-                .rounded(rem(TILE_RADIUS))
-                .bg(rgb(palette.card))
-        };
-        let artist_row = if let Some(suggestion) = self
-            .discover
-            .as_ref()
-            .and_then(|discover| discover.suggestions.get(self.discover_index))
-        {
-            let artist = &suggestion.artist;
-            let because = match suggestion.because.as_slice() {
-                [] => "Try this next".to_owned(),
-                [first, ..] => format!("Try this next · sounds like {first}"),
-            };
-            let ready = self
-                .songs_of(&artist.source_id)
-                .is_some_and(|songs| !songs.is_empty());
-            Some(
-                card("home-discover")
-                    .child(
-                        components::button(palette, "home-discover-open")
-                            .test_support()
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .justify_start()
-                            .rounded(rem(TILE_RADIUS))
-                            .hover(|style| style.bg(rgb(palette.card_hover)))
-                            .child(div().ml(rem(10.)).child(components::artwork(
-                                palette,
-                                &cache,
-                                artist.artwork_url.as_deref(),
-                                tokens::ArtworkSize {
-                                    size: Rems(2.5),
-                                    radius: Rems(1.25),
-                                },
-                                CadenceIcon::Person,
-                            )))
-                            .child(row_text(palette, artist.name.clone(), because).ml(rem(12.)))
-                            .on_click(cx.listener(|this, _, _, cx| this.open_suggested_artist(cx))),
-                    )
-                    .child(div().flex_none().mr(rem(6.)).child(if ready {
-                        compact(components::icon_pill(
-                            palette,
-                            "home-discover-play",
-                            CadenceIcon::Play,
-                            "Sample",
-                            true,
-                        ))
-                        .test_support()
-                        .on_click(cx.listener(|this, _, _, cx| this.play_sample(0, cx)))
-                        .into_any_element()
-                    } else {
-                        compact(components::pending_pill(
-                            palette,
-                            "home-discover-pending",
-                            "Sample",
-                        ))
-                        .px(rem(14.))
-                        .opacity(0.35)
-                        .into_any_element()
-                    }))
-                    .child(
-                        components::icon_button_sized(
-                            palette,
-                            "home-discover-dismiss",
-                            CadenceIcon::Close,
-                            tokens::INLINE_ICON,
-                        )
-                        .test_support()
-                        .size_8()
-                        .mr(rem(10.))
-                        .on_click(cx.listener(|this, _, _, cx| this.dismiss_suggestion(cx))),
-                    )
-                    .into_any_element(),
-            )
-        } else if self.discover.is_none() && self.discover_loading {
-            Some(card("home-discover-loading").into_any_element())
+        let expanded = self.is_expanded(Shelf::Releases);
+        let shown = if expanded {
+            releases.albums.len()
         } else {
-            None
+            RAIL_ROWS
         };
-        let release_row = self
-            .upcoming
-            .as_ref()
-            .and_then(|upcoming| upcoming.releases.first())
-            .map(|release| {
-                let when = release_label(&release.date).unwrap_or_else(|| release.date.clone());
-                card("home-upcoming")
-                    .child(
-                        div()
-                            .ml(rem(10.))
-                            .flex_none()
-                            .size(rem(40.))
-                            .rounded(rem(TILE_RADIUS - 10.))
-                            .bg(rgb(palette.card_hover))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(components::icon(
-                                CadenceIcon::MusicNote,
-                                Rems(1.0625),
-                                palette.text_muted,
-                            )),
-                    )
-                    .child(
-                        row_text(
+        let rows: Vec<AnyElement> =
+            releases
+                .albums
+                .iter()
+                .take(shown)
+                .enumerate()
+                .map(|(index, album)| {
+                    let mut detail = album
+                        .artists
+                        .iter()
+                        .map(|artist| artist.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if let Some(date) = album.release_date.as_deref().and_then(release_label) {
+                        detail = format!("{detail} · {date}");
+                    }
+                    if release_watch::is_new(&album.source_id, cx) {
+                        detail = format!("New · {detail}");
+                    }
+                    let target = model::AlbumRef {
+                        name: album.name.clone(),
+                        source_id: Some(album.source_id.clone()),
+                        spotify_uri: album.spotify_uri.clone(),
+                        artwork_url: album.artwork_url.clone(),
+                    };
+                    let source_id = album.source_id.clone();
+                    components::button(palette, ("home-release", index))
+                        .test_support()
+                        .relative()
+                        .w_full()
+                        .min_w_0()
+                        .justify_start()
+                        .gap(rem(14.))
+                        .px(rem(6.))
+                        .py(rem(9.))
+                        .rounded(rem(12.))
+                        .hover(|style| style.bg(rgb(palette.card_hover)))
+                        .child(components::artwork(
                             palette,
-                            format!("{} · new {}", release.artist, release.kind.to_lowercase()),
-                            format!("Announced for {when}"),
+                            &cache,
+                            album.artwork_url.as_deref(),
+                            cover,
+                            CadenceIcon::MusicNote,
+                        ))
+                        .child(row_text(palette, album.name.clone(), detail).pr(rem(44.)))
+                        .child(
+                            components::button(palette, ("home-release-play", index))
+                                .test_support()
+                                .absolute()
+                                .right(rem(6.))
+                                .top(rem(21.))
+                                .size(rem(32.))
+                                .rounded_full()
+                                .bg(rgb(palette.card_hover))
+                                .child(components::icon(
+                                    CadenceIcon::Play,
+                                    Rems(0.6875),
+                                    palette.text_primary,
+                                ))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.play_release(source_id.clone(), cx);
+                                })),
                         )
-                        .ml(rem(12.)),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .mr(rem(14.))
-                            .text_size(rem(12.5))
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .text_color(rgb(palette.text_primary))
-                            .child("Coming soon"),
-                    )
-                    .into_any_element()
-            });
-        if artist_row.is_none() && release_row.is_none() {
-            return None;
-        }
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            cx.emit(PageEvent::OpenAlbum(target.clone()))
+                        }))
+                        .into_any_element()
+                })
+                .collect();
         Some(
-            div()
-                .grid()
-                .grid_cols(columns)
-                .gap(rem(GRID_GAP))
-                .children(artist_row)
-                .children(release_row)
+            panel()
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .justify_between()
+                        .mb(rem(10.))
+                        .child(heading(
+                            palette,
+                            "home-releases-heading".to_owned(),
+                            "New from artists you play".into(),
+                            20.,
+                        ))
+                        .when(releases.albums.len() > RAIL_ROWS, |header| {
+                            header.child(self.show_all(
+                                "home-releases-show-all",
+                                Shelf::Releases,
+                                palette,
+                                cx,
+                            ))
+                        }),
+                )
+                .child(
+                    div()
+                        .id("home-releases")
+                        .test_support()
+                        .flex()
+                        .flex_col()
+                        .children(rows),
+                )
                 .into_any_element(),
         )
     }
@@ -1120,83 +915,84 @@ impl Render for HomePage {
         // Room for the page in the pixels it comes to at 100% zoom: the window
         // less the sidebar and the page's own margins.
         let room = window.viewport_size().width / window.rem_size() * 16. - PAGE_CHROME;
-        let tile_columns: u16 = if room >= 1000. {
-            3
-        } else if room >= 620. {
-            2
-        } else {
-            1
-        };
-        let pair_columns: u16 = if room >= 860. { 2 } else { 1 };
-        let heading = |id, text: SharedString| {
-            div()
-                .id(id)
-                .test_support()
-                .text_xl()
-                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                .text_color(rgb(palette.text_primary))
-                .child(text)
-        };
-        // A heading with its content beneath, as in the opening sections.
-        let section = |id, title: &str, body: AnyElement| {
-            div()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(heading(id, title.to_owned().into()))
-                .child(body)
-        };
+        let layout = Layout::for_room(room);
         let shortcuts: Vec<AnyElement> = self
             .shortcuts(cx)
             .into_iter()
             .enumerate()
             .map(|(index, shortcut)| self.shortcut_tile(index, shortcut, palette, cx))
             .collect();
-        let continue_card = self.continue_card(palette, cx);
-        let shelf_count = shelf_count(room, pair_columns);
-        let shelf = self.releases_shelf(shelf_count, palette, cx);
-        let worth = self.worth_a_listen(palette, pair_columns, cx);
-        let first = div()
+        let (made_for_you, top_mixes, mixes_loading) = match self.mixes.as_ref() {
+            Some(mixes) => (
+                mixes.shelves.made_for_you.clone(),
+                mixes.shelves.top_mixes.clone(),
+                false,
+            ),
+            None => (Vec::new(), Vec::new(), self.mixes_loading),
+        };
+        let made = self.mix_shelf(
+            "home-made",
+            "Made for you",
+            Shelf::MadeForYou,
+            &made_for_you,
+            mixes_loading,
+            layout.mix_count,
+            layout.mix_cover,
+            palette,
+            cx,
+        );
+        let top = self.mix_shelf(
+            "home-top",
+            "Your top mixes",
+            Shelf::TopMixes,
+            &top_mixes,
+            // Only Made for you holds a place while loading; Your top mixes
+            // appears with it, or not at all.
+            false,
+            layout.mix_count,
+            layout.mix_cover,
+            palette,
+            cx,
+        );
+        let rail = self.releases_rail(palette, cx);
+
+        let main = div()
+            .min_w_0()
+            .when(!layout.stacked, |main| main.flex_1())
+            .when(layout.stacked, |main| main.w_full())
             .flex()
             .flex_col()
-            .gap_6()
-            .when(!shortcuts.is_empty(), |block| {
-                block.child(
+            .gap(rem(22.))
+            .when(!shortcuts.is_empty(), |main| {
+                main.child(
                     div()
                         .id("home-shortcuts")
                         .test_support()
                         .grid()
-                        .grid_cols(tile_columns)
-                        .gap(rem(GRID_GAP))
+                        .grid_cols(layout.tile_columns)
+                        .gap(rem(12.))
                         .children(shortcuts),
                 )
             })
-            .when(continue_card.is_some() || shelf.is_some(), |block| {
-                block.child(
-                    div()
-                        .grid()
-                        .grid_cols(pair_columns)
-                        .gap(rem(GRID_GAP))
-                        .children(
-                            continue_card
-                                .map(|card| section("home-continue-heading", "Continue", card)),
-                        )
-                        .children(shelf.map(|shelf| {
-                            section("home-releases-heading", "New from artists you play", shelf)
-                        })),
-                )
-            })
-            .when_some(worth, |block, worth| {
-                block.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_3()
-                        .child(heading("home-discover-heading", "Worth a listen".into()))
-                        .child(worth),
-                )
-            });
+            .children(made)
+            .children(top);
+        let panes = div()
+            .id("home-panes")
+            .test_support()
+            .w_full()
+            .flex()
+            .when(layout.stacked, |panes| panes.flex_col())
+            .gap(rem(if layout.stacked { 22. } else { PANE_GAP }))
+            .child(main)
+            .children(rail.map(|rail| {
+                div()
+                    .flex_none()
+                    .when(!layout.stacked, |rail_column| {
+                        rail_column.w(rem(RAIL_WIDTH))
+                    })
+                    .when(layout.stacked, |rail_column| rail_column.w_full())
+                    .child(rail)
+            }));
 
         // The only thing below the rows is the ask for the permission they need.
         let permission = self
@@ -1223,50 +1019,67 @@ impl Render for HomePage {
                             .pt_3()
                             .pr(px(48.))
                             .w_full()
-                            .child(components::page_heading(
-                                palette,
-                                greeting(),
-                                "Pick up where you left off",
-                            ))
-                            .child(first)
+                            .child(
+                                div()
+                                    .mb(rem(14.))
+                                    .child(components::page_title(palette, greeting())),
+                            )
+                            .child(panes)
                             .children(permission.map(|prompt| div().mt_6().child(prompt))),
                     ),
             )
     }
 }
 
+/// How the page divides its room, from the width left for it.
+struct Layout {
+    /// The rail sits under the main pane instead of beside it.
+    stacked: bool,
+    tile_columns: u16,
+    /// Mixes per row and how wide each cover is, so a row fills the pane.
+    mix_count: usize,
+    mix_cover: f32,
+}
+
+impl Layout {
+    /// `room` is the page's width in pixels at 100% zoom.
+    fn for_room(room: f32) -> Self {
+        let stacked = room < STACK_BELOW;
+        let main = if stacked {
+            room
+        } else {
+            room - PANE_GAP - RAIL_WIDTH
+        };
+        let mix_count = (((main + GRID_GAP) / (MIX_COVER_MIN + GRID_GAP)) as usize)
+            .clamp(2, MIX_COVER_MAX_COUNT);
+        let mix_cover = ((main - GRID_GAP * (mix_count - 1) as f32) / mix_count as f32).floor();
+        Self {
+            stacked,
+            tile_columns: if main >= 560. { 2 } else { 1 },
+            mix_count,
+            mix_cover,
+        }
+    }
+}
+
+/// Under this the rail no longer fits beside the main pane.
+const STACK_BELOW: f32 = 1000.;
 /// The sidebar and the page's margins, in pixels at 100% zoom.
 const PAGE_CHROME: f32 = 312.;
 /// The space between neighbours in every grid, so edges line up.
 const GRID_GAP: f32 = 16.;
-/// Corner radius of the shortcut tiles and the Worth a listen rows.
+/// Corner radius of the shortcut tiles.
 const TILE_RADIUS: f32 = 18.;
-/// The Continue card: its cover's radius is the card's less the padding, so
-/// the corners run parallel.
-const CARD_RADIUS: f32 = 24.;
-const CARD_PADDING: f32 = 14.;
 
-/// Covers per row: as many as fit the shelf's column, so a wider window shows
-/// more albums instead of spreading three apart. `room` is the page's width in
-/// pixels at 100% zoom.
-fn shelf_count(room: f32, pair_columns: u16) -> usize {
-    let width = if pair_columns == 2 {
-        (room - GRID_GAP) / 2.
-    } else {
-        room
-    };
-    (((width + SHELF_GAP) / (SHELF_COVER + SHELF_GAP)) as usize).clamp(RELEASES_MIN, RELEASES_MAX)
-}
-
-/// A pill sized for a card or a row: 32 high, so it sits quietly inside the
-/// card it is on instead of out-weighing it.
-fn compact(pill: Stateful<Div>) -> Stateful<Div> {
-    pill.h(rem(32.))
-        .pl(rem(12.))
-        .pr(rem(14.))
-        .text_size(rem(13.5))
-        // Pressing sinks it a little, so it feels like it heard the click.
-        .active(|style| style.opacity(0.85))
+/// A shelf or panel heading at `size` pixels.
+fn heading(palette: CadencePalette, id: String, text: SharedString, size: f32) -> impl IntoElement {
+    div()
+        .id(SharedString::from(id))
+        .test_support()
+        .text_size(rem(size))
+        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+        .text_color(rgb(palette.text_primary))
+        .child(text)
 }
 
 /// A length that follows the interface zoom, written in the pixels it comes to
@@ -1323,7 +1136,7 @@ fn release_label(date: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{greeting_for, release_label, shelf_count};
+    use super::{GRID_GAP, Layout, PAGE_CHROME, PANE_GAP, RAIL_WIDTH, greeting_for, release_label};
 
     #[test]
     fn the_greeting_follows_the_hour() {
@@ -1339,24 +1152,29 @@ mod tests {
     }
 
     #[test]
-    fn the_shelf_shows_more_albums_as_the_window_widens() {
-        // A 1280 window: two columns of about 476, so three covers.
-        assert_eq!(shelf_count(968., 2), 3);
-        // The window Sonder opens with shows at least four.
+    fn the_layout_follows_the_window() {
+        // The window Sonder opens with: the rail beside the main pane, and
+        // four mixes across it.
+        let wide = Layout::for_room(super::super::windows::DEFAULT_WINDOW_WIDTH - PAGE_CHROME);
+        assert!(!wide.stacked);
+        assert_eq!(wide.tile_columns, 2);
+        assert_eq!(wide.mix_count, 4);
+        // A row of covers fills the pane exactly, to the pixel.
+        let main =
+            super::super::windows::DEFAULT_WINDOW_WIDTH - PAGE_CHROME - PANE_GAP - RAIL_WIDTH;
+        let row = wide.mix_cover * wide.mix_count as f32 + GRID_GAP * (wide.mix_count - 1) as f32;
         assert!(
-            shelf_count(
-                super::super::windows::DEFAULT_WINDOW_WIDTH - super::PAGE_CHROME,
-                2
-            ) >= 4
+            (main - row).abs() < wide.mix_count as f32,
+            "{main} vs {row}"
         );
-        // Wider windows add covers rather than gaps.
-        assert_eq!(shelf_count(1400., 2), 4);
-        assert_eq!(shelf_count(2200., 2), 6);
-        assert_eq!(shelf_count(5000., 2), 6);
-        // One column holds the whole width.
-        assert_eq!(shelf_count(700., 1), 4);
-        // Never fewer than two, however narrow.
-        assert_eq!(shelf_count(200., 1), 2);
+        // Wider windows add covers rather than stretching them.
+        assert!(Layout::for_room(2200.).mix_count > wide.mix_count);
+        assert!(Layout::for_room(5000.).mix_count <= 6);
+        // Narrower ones put the rail under the main pane.
+        let narrow = Layout::for_room(800.);
+        assert!(narrow.stacked);
+        assert!(narrow.mix_count >= 2);
+        assert_eq!(Layout::for_room(400.).tile_columns, 1);
     }
 
     #[test]

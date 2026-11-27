@@ -363,6 +363,15 @@ impl Playback {
         }
     }
 
+    /// The Spotify session Home's private reads go through: the player's own,
+    /// or the built-in one kept beside Soloist for radio.
+    pub fn session(&self) -> Option<&Session> {
+        match self {
+            Self::BuiltIn(player) => Some(&player.session),
+            Self::Soloist { radio, .. } => radio.as_ref().map(|radio| &radio.session),
+        }
+    }
+
     pub async fn radio_track_uris(&self, seed_uri: &str) -> Result<Vec<String>> {
         match self {
             Self::BuiltIn(player) => player.radio_track_uris(seed_uri).await,
