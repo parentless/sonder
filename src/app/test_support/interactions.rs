@@ -1595,7 +1595,7 @@ fn player_bar_opens_each_credited_artist_and_the_album_separately() {
     assert_eq!(fixture.requested_artist(), "artist-valli");
     assert_eq!(fixture.route(), Route::Artist);
 
-    fixture.update(|window, cx| window.click("player-artwork", cx));
+    fixture.update(|window, cx| window.click("player-title", cx));
     assert_eq!(fixture.requested_album(), "album-grease");
     assert_eq!(fixture.route(), Route::Album);
 
@@ -1634,7 +1634,6 @@ fn player_bar_title_opens_the_album_from_the_keyboard() {
 fn player_bar_credits_without_references_stay_plain() {
     let mut fixture = Fixture::new(false);
     fixture.update(|window, _| {
-        assert!(window.try_find("player-artwork").is_none());
         assert!(window.try_find("player-title").is_none());
         assert!(window.try_find(("player-artist", 0usize)).is_none());
     });
@@ -4124,7 +4123,7 @@ fn an_album_queues_whole_after_the_current_song() {
     let mut fixture = Fixture::new(false);
     fixture.play(credited_track());
     fixture.no_commands();
-    fixture.update(|window, cx| window.click("player-artwork", cx));
+    fixture.update(|window, cx| window.click("player-title", cx));
     let BackendCommand::LoadAlbum { respond, .. } = fixture.backend.commands.try_recv().unwrap()
     else {
         panic!("expected an album request")
@@ -4654,6 +4653,28 @@ fn songs_without_lyrics_say_so_and_the_choice_of_view_changes_the_place() {
     fixture.update(|window, _| {
         assert!(window.try_find("lyrics-page").is_some());
         assert!(window.try_find("lyrics-strip").is_none());
+    });
+}
+
+#[test]
+fn the_cover_opens_the_now_playing_page_and_closes_it_again() {
+    let mut fixture = Fixture::new(true);
+    fixture.play(track(0));
+    fixture.update(|window, _| assert!(window.try_find("lyrics-page").is_none()));
+    fixture.update(|window, cx| window.click("player-artwork", cx));
+    fixture.update(|window, _| {
+        // Whatever place lyrics usually open in, the cover shows the page.
+        assert!(window.try_find("lyrics-page").is_some());
+        assert!(window.try_find("lyrics-panel").is_none());
+        assert!(window.try_find("now-playing-cover").is_some());
+    });
+    fixture.update(|window, cx| window.click("player-artwork", cx));
+    fixture.update(|window, _| assert!(window.try_find("lyrics-page").is_none()));
+    // The lyrics button still opens them where the listener put them.
+    fixture.update(|window, cx| window.click("lyrics-toggle", cx));
+    fixture.update(|window, _| {
+        assert!(window.try_find("lyrics-panel").is_some());
+        assert!(window.try_find("lyrics-page").is_none());
     });
 }
 

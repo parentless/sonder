@@ -24,6 +24,13 @@ const CACHE_ENTRIES: usize = 16;
 const MIN_DELAY_MS: u32 = 30;
 /// The most lines drawn for one song.
 const MAX_LINES: usize = 300;
+/// The cover on the Now playing page, and the narrowest window (in rems) that
+/// still has room for it beside the lyrics.
+const NOW_PLAYING_COVER: tokens::ArtworkSize = tokens::ArtworkSize {
+    size: Rems(24.),
+    radius: Rems(1.),
+};
+const NOW_PLAYING_MIN_WIDTH: f32 = 62.;
 /// Where the current line sits, as a share of the height.
 const CURRENT_AT: f32 = 0.34;
 
@@ -590,13 +597,82 @@ impl Render for LyricsPane {
                 .flex_col()
         };
         if page {
+            // The cover goes beside the lyrics when the page is wide enough
+            // for both, and alone and centred when the song has no lyrics.
+            let beside = window.viewport_size().width >= window.rem_size() * NOW_PLAYING_MIN_WIDTH;
+            let cover = track.as_ref().filter(|_| beside).map(|track| {
+                let cache = services::AppServices::image_cache(cx);
+                div()
+                    .id("now-playing-cover")
+                    .test_support()
+                    .flex_none()
+                    .w(NOW_PLAYING_COVER.size)
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .child(components::artwork(
+                        palette,
+                        &cache,
+                        track.artwork_url.as_deref(),
+                        NOW_PLAYING_COVER,
+                        CadenceIcon::MusicNote,
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(Rems(1.5))
+                                    .font_weight(gpui_kit::FontWeight::BOLD)
+                                    .text_color(rgb(palette.text_primary))
+                                    .child(track.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(tokens::BODY_TEXT)
+                                    .text_color(rgb(palette.text_muted))
+                                    .child(SharedString::from(format!(
+                                        "{} · {}",
+                                        track.artist, track.album
+                                    ))),
+                            ),
+                    )
+            });
+            let lyrics_column = div().flex_1().min_w_0().min_h_0().child(body);
+            let content = match (cover, lyrics.is_some()) {
+                (Some(cover), true) => div()
+                    .flex_1()
+                    .min_h_0()
+                    .mt_4()
+                    .flex()
+                    .items_center()
+                    .gap_12()
+                    .child(cover)
+                    .child(lyrics_column),
+                (Some(cover), false) => div()
+                    .flex_1()
+                    .min_h_0()
+                    .mt_4()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap_6()
+                    .child(cover)
+                    .child(Self::note(palette, status(&self.state))),
+                (None, _) => div().flex_1().min_h_0().mt_4().child(lyrics_column),
+            };
             container("lyrics-page")
                 .left_0()
                 .px_12()
                 .pt_6()
                 .pb_8()
                 .child(header)
-                .child(div().flex_1().min_h_0().mt_4().child(body))
+                .child(content)
                 .into_any_element()
         } else {
             container("lyrics-panel")

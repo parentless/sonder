@@ -31,8 +31,12 @@ pub(super) struct PlayerBar {
     player: Entity<player::Player>,
     metadata: Entity<PlayerMetadata>,
     _metadata_events: Subscription,
+    _now_playing_events: Subscription,
     queue_open: bool,
     lyrics_open: bool,
+    /// Lyrics are showing as the Now playing page (opened from the cover),
+    /// whatever place the listener chose for them otherwise.
+    now_playing_view: bool,
     scrubber: scrubber::Scrubber,
 }
 
@@ -97,12 +101,21 @@ impl PlayerBar {
                 _artwork_events: artwork_events,
             }
         });
+        let now_playing_events = cx.subscribe(&metadata, |this, _, _: &NowPlayingPressed, cx| {
+            // The same cover opens and closes the Now playing page.
+            let open = !this.now_playing_view();
+            this.now_playing_view = open;
+            this.set_lyrics_open(open, cx);
+            cx.emit(ToggleLyrics);
+        });
         Self {
             player,
             _metadata_events: page::forward(&metadata, cx),
+            _now_playing_events: now_playing_events,
             metadata,
             queue_open: false,
             lyrics_open: services::AppServices::lyrics_open(cx),
+            now_playing_view: false,
             scrubber: scrubber::Scrubber::new(cx),
         }
     }
@@ -127,7 +140,14 @@ impl PlayerBar {
         self.lyrics_open
     }
 
+    pub(super) fn now_playing_view(&self) -> bool {
+        self.lyrics_open && self.now_playing_view
+    }
+
     pub(super) fn set_lyrics_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if !open {
+            self.now_playing_view = false;
+        }
         if self.lyrics_open != open {
             self.lyrics_open = open;
             services::AppServices::set_lyrics_open(open, cx);
@@ -166,6 +186,7 @@ impl PlayerBar {
                 palette.text_primary,
             ))
             .on_click(cx.listener(|this, _, _, cx| {
+                this.now_playing_view = false;
                 this.set_lyrics_open(!this.lyrics_open, cx);
                 cx.emit(ToggleLyrics);
             }))
@@ -507,6 +528,10 @@ struct PlayerMetadata {
     image_cache: Entity<image_cache::BoundedImageCache>,
 }
 impl EventEmitter<page::PageEvent> for PlayerMetadata {}
+
+/// The cover was pressed.
+struct NowPlayingPressed;
+impl EventEmitter<NowPlayingPressed> for PlayerMetadata {}
 impl PlayerMetadata {
     /// Whether the playing song is liked, and whether a like change is in flight.
     fn read_heart(&self, cx: &App) -> (bool, bool) {
@@ -599,24 +624,17 @@ impl PlayerMetadata {
             tokens::PLAYER_ARTWORK,
             CadenceIcon::MusicNote,
         );
-        match playing_album(Some(track)) {
-            Some(album) => gpui_kit::base::Button::new("player-artwork")
-                .role(gpui_kit::Role::Link)
-                .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
-                    window.prevent_default();
-                })
-                .tab_stop(false)
-                .accessibility_label(album.name.clone())
-                .flex_none()
-                .cursor_pointer()
-                .on_click(Self::navigate_on_click(
-                    page::PageEvent::OpenAlbum(album),
-                    cx,
-                ))
-                .child(artwork)
-                .into_any_element(),
-            None => artwork,
-        }
+        gpui_kit::base::Button::new("player-artwork")
+            .on_mouse_down(gpui_kit::MouseButton::Left, |_, window, _| {
+                window.prevent_default();
+            })
+            .tab_stop(false)
+            .accessibility_label("Now playing")
+            .flex_none()
+            .cursor_pointer()
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(NowPlayingPressed)))
+            .child(artwork)
+            .into_any_element()
     }
 
     fn title_line(

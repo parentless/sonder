@@ -641,11 +641,12 @@ impl Render for Workspace {
         let overlay_toolbar = route == Route::Artist;
         // Lyrics show when opened, in the chosen place.
         let lyrics_preferences = services::AppServices::preferences(cx);
-        let lyrics_view = self
-            .player_bar
-            .read(cx)
-            .lyrics_open()
-            .then_some(lyrics_preferences.lyrics_view);
+        let bar = self.player_bar.read(cx);
+        let lyrics_view = bar.lyrics_open().then_some(if bar.now_playing_view() {
+            LyricsView::Page
+        } else {
+            lyrics_preferences.lyrics_view
+        });
         if let Some(view) = lyrics_view {
             self.lyrics
                 .update(cx, |lyrics, cx| lyrics.set_view(view, cx));

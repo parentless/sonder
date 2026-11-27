@@ -1282,7 +1282,7 @@ struct Worker {
     repeat: crate::model::Repeat,
     /// Where the list started, kept only while repeating all, so it can begin
     /// again after the played songs have been dropped from the queue.
-    repeat_origin: Option<(Arc<[Track]>, Option<(Playlist, u32)>)>,
+    repeat_origin: Option<RepeatOrigin>,
     priority_next: usize,
     history_end: usize,
     connection: PlaybackConnection,
@@ -2892,6 +2892,9 @@ impl Worker {
 }
 
 /// The queue as last handed to the player and saved to disk.
+/// The list repeat-all starts again, and where its remaining pages continue.
+type RepeatOrigin = (Arc<[Track]>, Option<(Playlist, u32)>);
+
 #[derive(Default)]
 struct PlayQueue {
     tracks: Vec<Track>,
