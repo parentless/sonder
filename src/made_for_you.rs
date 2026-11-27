@@ -457,6 +457,41 @@ pub(crate) async fn session_playlist_page(
     })
 }
 
+/// An artist's popular tracks, in Spotify's own order, for the listener's
+/// country (or the worldwide list). This is the ranking Spotify's apps show;
+/// the Web API's top-tracks call is refused to new apps. Returns track URIs;
+/// the caller resolves their details.
+pub(crate) async fn artist_top_track_uris(
+    session: &Session,
+    source_id: &str,
+) -> Result<Vec<String>> {
+    use librespot::{
+        core::SpotifyUri,
+        metadata::{Artist as SessionArtist, Metadata as _},
+    };
+
+    let uri = SpotifyUri::from_uri(&format!("spotify:artist:{source_id}"))
+        .context("invalid artist id")?;
+    let artist = SessionArtist::get(session, &uri)
+        .await
+        .map_err(|error| anyhow!("the playback session could not read this artist: {error}"))?;
+    let country = session.country();
+    let ranking = artist
+        .top_tracks
+        .iter()
+        .find(|top| !country.is_empty() && top.country == country)
+        .or_else(|| artist.top_tracks.iter().find(|top| top.country == "ZZ"))
+        .or_else(|| artist.top_tracks.iter().find(|top| top.country.is_empty()))
+        .ok_or_else(|| anyhow!("no popular tracks for this market"))?;
+    Ok(ranking
+        .tracks
+        .iter()
+        .filter_map(|uri| uri.to_uri().ok())
+        .filter(|uri| uri.starts_with("spotify:track:"))
+        .take(10)
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

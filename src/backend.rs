@@ -1507,8 +1507,9 @@ impl Worker {
                 Ok(())
             }
             BackendCommand::LoadArtist { source_id, respond } => {
+                let session = self.playback_session();
                 self.catalog
-                    .artist(self.spotify.clone(), source_id, respond);
+                    .artist(self.spotify.clone(), session, source_id, respond);
                 Ok(())
             }
             BackendCommand::LoadArtistAlbums {
@@ -3373,12 +3374,39 @@ impl CatalogFetches {
         );
     }
 
-    fn artist(&mut self, spotify: Spotify, source_id: String, respond: Reply<ArtistDetails>) {
+    fn artist(
+        &mut self,
+        spotify: Spotify,
+        session: Option<librespot::core::session::Session>,
+        source_id: String,
+        respond: Reply<ArtistDetails>,
+    ) {
         Self::start(
             &mut self.artist,
             respond,
             "Spotify artist request",
-            async move { spotify.artist(&source_id).await },
+            async move {
+                // The playback session knows the ranking Spotify's own apps
+                // show. If it is not connected yet or does not answer in
+                // time, the page uses the Web API instead.
+                let ranked = match session {
+                    Some(session) => match tokio::time::timeout(
+                        Duration::from_secs(4),
+                        crate::made_for_you::artist_top_track_uris(&session, &source_id),
+                    )
+                    .await
+                    {
+                        Ok(Ok(uris)) => Some(uris),
+                        Ok(Err(error)) => {
+                            log::info!("artist: no session popular tracks: {error:#}");
+                            None
+                        }
+                        Err(_) => None,
+                    },
+                    None => None,
+                };
+                spotify.artist(&source_id, ranked).await
+            },
         );
     }
 

@@ -1259,16 +1259,21 @@ impl Spotify {
         .await
     }
 
+    /// `ranked` is the artist's popular tracks as the playback session read
+    /// them, in Spotify's order; without it the Web API and then a search are
+    /// the fallbacks, and neither matches what Spotify's apps show.
     pub async fn artist(
         &self,
         source_id: &str,
+        ranked: Option<Vec<String>>,
     ) -> Result<(Artist, Vec<Track>, crate::model::ArtistAlbumPage)> {
-        self.gated(self.artist_request(source_id)).await
+        self.gated(self.artist_request(source_id, ranked)).await
     }
 
     async fn artist_request(
         &self,
         source_id: &str,
+        ranked: Option<Vec<String>>,
     ) -> Result<(Artist, Vec<Track>, crate::model::ArtistAlbumPage)> {
         let artist_id = ArtistId::from_id(source_id)?;
         let artist = self
@@ -1283,6 +1288,16 @@ impl Spotify {
                 .albums
                 .iter()
                 .find_map(|album| album.artwork_url.clone());
+        }
+        if let Some(uris) = ranked.filter(|uris| !uris.is_empty()) {
+            // Looked up inside this gated request, so no second gate.
+            let tracks = self
+                .resolve_ranked_tracks(&uris)
+                .await
+                .context("could not load Spotify popular tracks")?;
+            if !tracks.is_empty() {
+                return Ok((artist, tracks, albums));
+            }
         }
         let tracks = self.artist_popular_tracks(artist_id, &artist).await?;
         Ok((artist, tracks, albums))
@@ -1442,42 +1457,55 @@ impl Spotify {
         market: Option<Market>,
         concurrency: usize,
     ) -> Result<Vec<Track>> {
-        self.gated(async {
-            let ids: Vec<TrackId<'static>> = uris
-                .iter()
-                .filter_map(|uri| TrackId::from_uri(uri).ok())
-                .map(TrackId::into_static)
-                .collect();
-            let mut tracks = Vec::with_capacity(ids.len());
-            'batches: for batch in ids.chunks(concurrency) {
-                let lookups = batch.iter().map(|id| self.client.track(id.clone(), market));
-                for result in futures::future::join_all(lookups).await {
-                    let track = match result {
-                        Ok(track) => track,
-                        Err(error) => {
-                            let error = anyhow::Error::from(error);
-                            match classify_error(&error) {
-                                ErrorKind::RateLimited { retry_after } => {
-                                    self.gate.trip(retry_after);
-                                    break 'batches;
-                                }
-                                ErrorKind::AuthExpired => return Err(error),
-                                _ => continue,
+        self.gated(self.resolve_tracks_ungated(uris, market, concurrency))
+            .await
+    }
+
+    /// For callers already inside a gated request.
+    async fn resolve_ranked_tracks(&self, uris: &[String]) -> Result<Vec<Track>> {
+        self.resolve_tracks_ungated(uris, Some(Market::FromToken), RESOLVE_CONCURRENCY_WIDE)
+            .await
+    }
+
+    async fn resolve_tracks_ungated(
+        &self,
+        uris: &[String],
+        market: Option<Market>,
+        concurrency: usize,
+    ) -> Result<Vec<Track>> {
+        let ids: Vec<TrackId<'static>> = uris
+            .iter()
+            .filter_map(|uri| TrackId::from_uri(uri).ok())
+            .map(TrackId::into_static)
+            .collect();
+        let mut tracks = Vec::with_capacity(ids.len());
+        'batches: for batch in ids.chunks(concurrency) {
+            let lookups = batch.iter().map(|id| self.client.track(id.clone(), market));
+            for result in futures::future::join_all(lookups).await {
+                let track = match result {
+                    Ok(track) => track,
+                    Err(error) => {
+                        let error = anyhow::Error::from(error);
+                        match classify_error(&error) {
+                            ErrorKind::RateLimited { retry_after } => {
+                                self.gate.trip(retry_after);
+                                break 'batches;
                             }
+                            ErrorKind::AuthExpired => return Err(error),
+                            _ => continue,
                         }
-                    };
-                    if track.is_local || track.is_playable == Some(false) || track.id.is_none() {
-                        continue;
                     }
-                    let track = convert_track(track)?;
-                    if track.is_displayable() {
-                        tracks.push(track);
-                    }
+                };
+                if track.is_local || track.is_playable == Some(false) || track.id.is_none() {
+                    continue;
+                }
+                let track = convert_track(track)?;
+                if track.is_displayable() {
+                    tracks.push(track);
                 }
             }
-            Ok(tracks)
-        })
-        .await
+        }
+        Ok(tracks)
     }
 
     /// Runs one Web API request behind the rate-limit gate: fail fast while
