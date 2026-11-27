@@ -110,6 +110,7 @@ impl AppServices {
             cx.new(|cx| player::Player::new(handle.clone(), cx.background_executor().now()));
         player.update(cx, |player, _| {
             player.restore_shuffle(preferences.shuffle);
+            player.restore_repeat(preferences.repeat);
             player.restore_volume(preferences.volume_percent);
         });
         let session = cx.new(|_| session::Session::new(handle.clone()));
@@ -528,6 +529,18 @@ impl AppServices {
             .map(|store| store.set_shuffle(shuffle))
         {
             log::warn!("could not save shuffle: {error:#}");
+        }
+    }
+
+    pub(super) fn set_repeat(repeat: model::Repeat, cx: &mut App) {
+        let services = cx.global_mut::<Self>();
+        services.preferences.repeat = repeat;
+        if let Some(Err(error)) = services
+            .store
+            .as_mut()
+            .map(|store| store.set_repeat(repeat))
+        {
+            log::warn!("could not save repeat: {error:#}");
         }
     }
 

@@ -31,6 +31,7 @@ pub(super) struct Player {
     context: Arc<[model::Track]>,
     playing: bool,
     shuffle: bool,
+    repeat: model::Repeat,
     loading: bool,
     /// Position and play state to reapply once a reconnected player is ready.
     restore: Option<(u32, bool)>,
@@ -63,6 +64,7 @@ impl Player {
             context: Arc::default(),
             playing: false,
             shuffle: false,
+            repeat: model::Repeat::Off,
             loading: false,
             restore: None,
             history_pending: false,
@@ -247,6 +249,27 @@ impl Player {
             self.shuffle = enabled;
             super::services::AppServices::set_shuffle(enabled, cx);
             cx.notify();
+        }
+    }
+
+    pub(super) fn repeat(&self) -> model::Repeat {
+        self.repeat
+    }
+
+    /// Off, then the whole list, then the current song, then off again.
+    pub(super) fn cycle_repeat(&mut self, cx: &mut Context<Self>) {
+        let repeat = self.repeat.next();
+        if self.deliver(BackendCommand::SetRepeat(repeat), cx) {
+            self.repeat = repeat;
+            super::services::AppServices::set_repeat(repeat, cx);
+            cx.notify();
+        }
+    }
+
+    /// Applies the repeat mode the listener left on at the last launch.
+    pub(super) fn restore_repeat(&mut self, repeat: model::Repeat) {
+        if repeat != model::Repeat::Off && self.backend.send(BackendCommand::SetRepeat(repeat)) {
+            self.repeat = repeat;
         }
     }
 
@@ -602,7 +625,8 @@ impl Player {
                 if self.restore.is_none() && self.live_track_matches(&spotify_uri) {
                     self.set_playback(false, cx);
                     self.loading = false;
-                    self.backend.send(BackendCommand::Next);
+                    // Not a press of Next: repeat one plays the song again.
+                    self.backend.send(BackendCommand::TrackEnded);
                 }
             }
             BackendEvent::PositionChanged {

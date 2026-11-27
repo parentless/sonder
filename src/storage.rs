@@ -140,6 +140,7 @@ pub struct AppPreferences {
     pub autoplay: bool,
     /// Shuffle stays as the listener left it when Sonder closes.
     pub shuffle: bool,
+    pub repeat: crate::model::Repeat,
     /// Player volume, 0 to 100, as the listener left it.
     pub volume_percent: u8,
     /// Evens out loudness between songs. Off unless the listener turns it on.
@@ -205,6 +206,7 @@ impl Default for AppPreferences {
             // Autoplay is on unless the listener turned it off.
             autoplay: true,
             shuffle: false,
+            repeat: crate::model::Repeat::Off,
             volume_percent: 72,
             normalise_volume: false,
             keep_in_tray: false,
@@ -447,6 +449,7 @@ impl Store {
         };
         let autoplay = self.preference("autoplay")?.as_deref() != Some("false");
         let shuffle = self.preference("shuffle")?.as_deref() == Some("true");
+        let repeat = crate::model::Repeat::from_saved(self.preference("repeat")?.as_deref());
         let volume_percent = self
             .preference("volume_percent")?
             .and_then(|value| value.parse::<u8>().ok())
@@ -497,6 +500,7 @@ impl Store {
                 .unwrap_or_default(),
             autoplay,
             shuffle,
+            repeat,
             volume_percent,
             normalise_volume,
             keep_in_tray,
@@ -606,6 +610,10 @@ impl Store {
 
     pub fn set_shuffle(&mut self, shuffle: bool) -> Result<()> {
         self.set_preference("shuffle", if shuffle { "true" } else { "false" })
+    }
+
+    pub fn set_repeat(&mut self, repeat: crate::model::Repeat) -> Result<()> {
+        self.set_preference("repeat", repeat.as_str())
     }
 
     pub fn set_volume_percent(&mut self, percent: u8) -> Result<()> {
@@ -1540,6 +1548,7 @@ mod tests {
         store.set_theme_preference(ThemePreference::Dark).unwrap();
         store.set_autoplay(false).unwrap();
         store.set_shuffle(true).unwrap();
+        store.set_repeat(crate::model::Repeat::One).unwrap();
         store.set_volume_percent(35).unwrap();
         let eq = crate::equalizer::Settings {
             enabled: true,
@@ -1563,6 +1572,7 @@ mod tests {
                 ui_zoom: super::UiZoom::default(),
                 autoplay: false,
                 shuffle: true,
+                repeat: crate::model::Repeat::One,
                 volume_percent: 35,
                 normalise_volume: true,
                 keep_in_tray: true,

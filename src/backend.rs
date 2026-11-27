@@ -505,6 +505,10 @@ pub enum BackendCommand {
         position_ms: u32,
     },
     SetShuffle(bool),
+    SetRepeat(crate::model::Repeat),
+    /// The playing song reached its end by itself, unlike `Next`, which the
+    /// listener pressed.
+    TrackEnded,
     SetVolume(f32),
     Shutdown {
         acknowledged: StdSender<()>,
@@ -1275,6 +1279,10 @@ struct Worker {
     catalog_generation: Arc<AtomicU64>,
     queue: PlayQueue,
     shuffle: bool,
+    repeat: crate::model::Repeat,
+    /// Where the list started, kept only while repeating all, so it can begin
+    /// again after the played songs have been dropped from the queue.
+    repeat_origin: Option<(Arc<[Track]>, Option<(Playlist, u32)>)>,
     priority_next: usize,
     history_end: usize,
     connection: PlaybackConnection,
@@ -1316,6 +1324,8 @@ impl Worker {
             queue,
             history_end,
             shuffle: false,
+            repeat: crate::model::Repeat::Off,
+            repeat_origin: None,
             priority_next: 0,
             connection: PlaybackConnection::default(),
             catalog: CatalogFetches::default(),
@@ -1713,6 +1723,23 @@ impl Worker {
                 self.shuffle = enabled;
                 Ok(())
             }
+            BackendCommand::SetRepeat(repeat) => {
+                self.repeat = repeat;
+                if repeat != crate::model::Repeat::All {
+                    self.repeat_origin = None;
+                }
+                Ok(())
+            }
+            BackendCommand::TrackEnded => {
+                match self
+                    .queue
+                    .index
+                    .filter(|_| self.repeat == crate::model::Repeat::One)
+                {
+                    Some(index) => self.load_queue_track(index).await,
+                    None => self.next_track().await,
+                }
+            }
             BackendCommand::Next => self.next_track().await,
             BackendCommand::Previous => self.previous_track().await,
             BackendCommand::Seek(position_ms) => self.seek(position_ms).await,
@@ -1939,6 +1966,12 @@ impl Worker {
                 self.queue.tracks = tracks;
                 self.priority_next = 0;
                 self.history_end = index;
+                if self.repeat == crate::model::Repeat::All {
+                    self.repeat_origin = Some((
+                        Arc::from(self.queue.tracks.as_slice()),
+                        self.playlist_cursor.clone(),
+                    ));
+                }
                 self.commit_loaded_queue(index).await;
             }
             Err(error) => {
@@ -2101,6 +2134,11 @@ impl Worker {
             .checked_add(1)
             .filter(|index| *index < self.queue.tracks.len());
         let Some(index) = next else {
+            // Repeating all starts the list again, unless more of it is still
+            // to be fetched (the fetch continues into it on arrival).
+            if self.repeat == crate::model::Repeat::All && self.playlist_cursor.is_none() {
+                return self.restart_context().await;
+            }
             // Nothing left to play: keep the last track current, but rewind
             // the seeker so Play visibly means "from the start". Skipping
             // forward mid-song lands here too, so silence the player rather
@@ -2133,6 +2171,20 @@ impl Worker {
             self.queue.tracks[index..=chosen].rotate_left(1);
         }
         result
+    }
+
+    /// Begins the list again from its first song.
+    async fn restart_context(&mut self) -> Result<()> {
+        let (tracks, cursor) = match self.repeat_origin.clone() {
+            Some((tracks, cursor)) => (tracks.to_vec(), cursor),
+            // Not started under repeat: the songs still in the queue.
+            None => (self.queue.tracks.clone(), None),
+        };
+        if tracks.is_empty() {
+            return Ok(());
+        }
+        self.pending_playlist_cursor = Some(cursor);
+        self.play_context(tracks, 0).await
     }
 
     async fn previous_track(&mut self) -> Result<()> {

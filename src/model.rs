@@ -350,3 +350,41 @@ pub struct CatalogSearchResults {
     pub albums: Vec<Album>,
     pub tracks: Vec<Track>,
 }
+
+/// What happens when the queue or a song reaches its end.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Repeat {
+    #[default]
+    Off,
+    /// The whole list starts again once its last song has played.
+    All,
+    /// The current song plays again, until the listener moves on.
+    One,
+}
+
+impl Repeat {
+    /// The mode one press of the repeat button moves to.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off => Self::All,
+            Self::All => Self::One,
+            Self::One => Self::Off,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::All => "all",
+            Self::One => "one",
+        }
+    }
+
+    pub fn from_saved(value: Option<&str>) -> Self {
+        match value {
+            Some("all") => Self::All,
+            Some("one") => Self::One,
+            _ => Self::Off,
+        }
+    }
+}

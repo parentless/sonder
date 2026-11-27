@@ -221,6 +221,7 @@ impl PlayerBar {
         let now_playing = player.shared_now_playing();
         let playing = player.playing();
         let shuffle = player.shuffle();
+        let repeat = player.repeat();
         let position_ms = player.position_ms(cx.background_executor().now());
         let volume = player.volume();
         self.metadata.update(cx, |metadata, cx| {
@@ -348,7 +349,36 @@ impl PlayerBar {
                                         this.player.update(cx, |player, cx| player.next(cx));
                                     })),
                             ))
-                            // Balances the shuffle button on the other side.
+                            .child(components::press_feedback(
+                                "repeat-feedback",
+                                components::icon_button(
+                                    palette,
+                                    "repeat",
+                                    if repeat == model::Repeat::One {
+                                        CadenceIcon::RepeatOne
+                                    } else {
+                                        CadenceIcon::Repeat
+                                    },
+                                )
+                                .when(repeat != model::Repeat::Off, |button| {
+                                    button.bg(rgb(palette.selection))
+                                })
+                                .tooltip(move |window, cx| {
+                                    gpui_kit::component::tooltip::Tooltip::new(match repeat {
+                                        model::Repeat::Off => "Repeat off",
+                                        model::Repeat::All => "Repeat all",
+                                        model::Repeat::One => "Repeat one",
+                                    })
+                                    .build(window, cx)
+                                })
+                                .test_support()
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.player
+                                            .update(cx, |player, cx| player.cycle_repeat(cx));
+                                    },
+                                )),
+                            ))
                             .child(self.lyrics_button(palette, window, cx)),
                     )
                     .child(

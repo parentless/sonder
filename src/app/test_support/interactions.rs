@@ -2026,7 +2026,8 @@ fn tab_reaches_the_sidebar_rows_and_enter_opens_the_focused_row() {
 fn space_activates_a_focused_transport_control_instead_of_toggling_playback() {
     let mut fixture = Fixture::new(false);
     fixture.tab_to("progress-slider");
-    // Back past the lyrics button to Next.
+    // Back past the lyrics and repeat buttons to Next.
+    fixture.press("shift-tab");
     fixture.press("shift-tab");
     fixture.press("shift-tab");
 
@@ -2035,6 +2036,19 @@ fn space_activates_a_focused_transport_control_instead_of_toggling_playback() {
         fixture.backend.commands.try_recv().expect("next track"),
         BackendCommand::Next
     ));
+    fixture.no_commands();
+}
+
+#[test]
+fn the_repeat_button_cycles_all_then_one_then_off_and_tells_the_backend() {
+    let mut fixture = Fixture::new(false);
+    for expected in [model::Repeat::All, model::Repeat::One, model::Repeat::Off] {
+        fixture.update(|window, cx| window.click("repeat", cx));
+        match fixture.backend.commands.try_recv().expect("repeat mode") {
+            BackendCommand::SetRepeat(mode) => assert_eq!(mode, expected),
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
     fixture.no_commands();
 }
 
