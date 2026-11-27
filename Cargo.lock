@@ -975,6 +975,7 @@ dependencies = [
  "objc",
  "open",
  "percent-encoding",
+ "protobuf",
  "raw-window-handle",
  "regex",
  "reqwest",

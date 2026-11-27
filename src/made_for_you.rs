@@ -438,7 +438,18 @@ pub(crate) async fn session_playlist_page(
     let start = (offset as usize).min(uris.len());
     let end = (start + SESSION_PAGE).min(uris.len());
     let window = &uris[start..end];
-    let tracks = spotify.resolve_playable_track_uris(window).await?;
+    // One metadata request over the session, as Spotify's own apps make. The
+    // Web API has no batch lookup, so it needs a request per song and was
+    // what made these playlists slow to open.
+    let tracks = match session_tracks(session, window).await {
+        Ok(tracks) if !tracks.is_empty() || window.is_empty() => tracks,
+        other => {
+            if let Err(error) = other {
+                log::info!("playlist: session track details failed: {error:#}");
+            }
+            spotify.resolve_playable_track_uris_wide(window).await?
+        }
+    };
     let source_offsets = tracks
         .iter()
         .map(|track| {
@@ -490,6 +501,121 @@ pub(crate) async fn artist_top_track_uris(
         .filter(|uri| uri.starts_with("spotify:track:"))
         .take(10)
         .collect())
+}
+
+/// Details for `uris` in one metadata request over the playback session, in
+/// the order asked. Songs Spotify has no record of are left out.
+pub(crate) async fn session_tracks(
+    session: &Session,
+    uris: &[String],
+) -> Result<Vec<crate::model::Track>> {
+    use librespot::{
+        metadata::Track as SessionTrack,
+        protocol::{
+            extended_metadata::{BatchedEntityRequest, EntityRequest, ExtensionQuery},
+            extension_kind::ExtensionKind,
+        },
+    };
+    use protobuf::{EnumOrUnknown, Message as _};
+
+    let mut request = BatchedEntityRequest::new();
+    for uri in uris {
+        request.entity_request.push(EntityRequest {
+            entity_uri: uri.clone(),
+            query: vec![ExtensionQuery {
+                extension_kind: EnumOrUnknown::new(ExtensionKind::TRACK_V4),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+    }
+    let response = session
+        .spclient()
+        .get_extended_metadata(request)
+        .await
+        .map_err(|error| anyhow!("the playback session could not read track details: {error}"))?;
+    let mut found = std::collections::HashMap::new();
+    for array in response.extended_metadata {
+        if !matches!(array.header.provider_error_status, 0 | 200) {
+            bail!(
+                "track metadata provider answered {}",
+                array.header.provider_error_status
+            );
+        }
+        if array.extension_kind.enum_value() != Ok(ExtensionKind::TRACK_V4) {
+            continue;
+        }
+        for data in array.extension_data {
+            if !matches!(data.header.status_code, 0 | 200) {
+                continue;
+            }
+            let Some(bytes) = data.extension_data.as_ref().map(|any| &any.value) else {
+                continue;
+            };
+            let Ok(message) = librespot::protocol::metadata::Track::parse_from_bytes(bytes) else {
+                continue;
+            };
+            let Ok(track) = SessionTrack::try_from(&message) else {
+                continue;
+            };
+            found.insert(data.entity_uri, track);
+        }
+    }
+    Ok(uris
+        .iter()
+        .filter_map(|uri| found.get(uri))
+        .filter_map(model_track)
+        .collect())
+}
+
+fn model_track(track: &librespot::metadata::Track) -> Option<crate::model::Track> {
+    use crate::model::{AlbumRef, ArtistRef, Provider, Track};
+
+    let source_id = track.id.to_id().ok()?;
+    let artists: Vec<ArtistRef> = track
+        .artists
+        .iter()
+        .map(|artist| ArtistRef {
+            name: artist.name.clone().into(),
+            source_id: artist.id.to_id().ok(),
+            spotify_uri: artist.id.to_uri().ok(),
+        })
+        .collect();
+    // Close to 300 pixels wide, as the Web API path picks.
+    let cover = {
+        let covers = &track.album.covers;
+        covers
+            .iter()
+            .filter(|image| image.width >= 300)
+            .min_by_key(|image| image.width)
+            .or_else(|| covers.iter().max_by_key(|image| image.width))
+            .map(|image| format!("https://i.scdn.co/image/{}", image.id))
+    };
+    let album_id = track.album.id.to_id().ok();
+    let album = AlbumRef {
+        name: track.album.name.clone().into(),
+        spotify_uri: track.album.id.to_uri().ok(),
+        source_id: album_id,
+        artwork_url: cover.clone(),
+    };
+    Some(Track {
+        provider: Provider::Spotify,
+        spotify_uri: track.id.to_uri().ok(),
+        source_id,
+        isrc: None,
+        title: track.name.clone().into(),
+        artist: artists
+            .iter()
+            .map(|artist| artist.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+            .into(),
+        artists,
+        album: album.name.clone(),
+        album_ref: Some(album),
+        duration_ms: u32::try_from(track.duration).ok()?,
+        artwork_url: cover,
+    })
 }
 
 #[cfg(test)]
