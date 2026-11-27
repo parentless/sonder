@@ -1,4 +1,5 @@
 use super::{BackendProbe, initialize, press_key, settle, tab_to, track, workspace};
+use crate::app::mini_player::{MiniPlayer, Shape};
 use crate::app::{
     COLLAPSED_SIDEBAR_WIDTH, EXPANDED_SIDEBAR_WIDTH, Route, Workspace, appearance, assets,
     components, onboarding, services, windows,
@@ -2051,6 +2052,63 @@ fn the_repeat_button_cycles_all_then_one_then_off_and_tells_the_backend() {
     fixture.no_commands();
 }
 
+/// Opens the small player the way the app does, in a window beside the main one.
+fn open_mini(fixture: &mut Fixture, shape: Shape) -> WindowHandle<MiniPlayer> {
+    let (width, height) = shape.size();
+    let handle = fixture
+        .cx
+        .open_window(size(px(width), px(height)), |_, cx| {
+            cx.new(|cx| MiniPlayer::new(shape, cx))
+        })
+        .expect("mini player window");
+    settle(&mut fixture.cx, handle.into());
+    handle
+}
+
+#[test]
+fn the_mini_player_controls_drive_the_shared_player() {
+    let mut fixture = Fixture::new(false);
+    fixture.play(track(0));
+    let mini = open_mini(&mut fixture, Shape::Mini);
+    for (button, check) in [
+        ("mini-play", "resume"),
+        ("mini-next", "next"),
+        ("mini-repeat", "repeat"),
+    ] {
+        fixture
+            .cx
+            .update_window(mini.into(), |_, window, cx| window.click(button, cx))
+            .expect("click mini button");
+        settle(&mut fixture.cx, mini.into());
+        let command = fixture.backend.commands.try_recv().expect(check);
+        match (check, command) {
+            ("resume", BackendCommand::Resume) => {}
+            ("next", BackendCommand::Next) => {}
+            ("repeat", BackendCommand::SetRepeat(model::Repeat::All)) => {}
+            (_, other) => panic!("{button} sent {other:?}"),
+        }
+    }
+    fixture.no_commands();
+}
+
+#[test]
+fn the_mini_player_switches_between_its_two_shapes() {
+    let mut fixture = Fixture::new(false);
+    fixture.play(track(0));
+    let mini = open_mini(&mut fixture, Shape::Mini);
+    for expected in [Shape::Strip, Shape::Mini] {
+        fixture
+            .cx
+            .update_window(mini.into(), |_, window, cx| window.click("mini-shape", cx))
+            .expect("click shape");
+        settle(&mut fixture.cx, mini.into());
+        let shape = mini
+            .read_with(&fixture.cx, |view, _| view.shape())
+            .expect("read shape");
+        assert_eq!(shape, expected);
+    }
+}
+
 #[test]
 fn a_pointer_press_leaves_keyboard_focus_with_the_workspace() {
     let mut fixture = Fixture::new(false);
@@ -2973,7 +3031,11 @@ fn volume_slider_uses_live_viewport_after_fullscreen_and_resize() {
                 cx,
             );
         });
-        assert!((*fixture.backend.volume.borrow_and_update() - fraction).abs() < 0.02);
+        assert!(
+            (*fixture.backend.volume.borrow_and_update() - fraction).abs() < 0.02,
+            "width {width} got {} want {fraction}",
+            *fixture.backend.volume.borrow()
+        );
         fixture.update(|window, cx| {
             let position = window.find("volume-slider").bounds().center();
             window.dispatch_event(

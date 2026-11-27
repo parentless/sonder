@@ -55,6 +55,7 @@ actions!(
     cadence,
     [
         OpenSearch,
+        ToggleMiniPlayer,
         TogglePlayback,
         Quit,
         CloseWindow,
@@ -205,9 +206,9 @@ fn resolve_dark_mode(preference: ThemePreference, appearance: WindowAppearance) 
 }
 const VOLUME_SLIDER_WIDTH: Rems = Rems(7.5);
 const VOLUME_SLIDER_RIGHT_INSET: Rems = Rems(9.);
-const PLAYER_LEFT_WIDTH: Rems = Rems(22.5);
+const PLAYER_LEFT_WIDTH: Rems = Rems(20.);
 const PLAYER_CENTER_WIDTH: Rems = Rems(27.5);
-const PLAYER_RIGHT_WIDTH: Rems = Rems(15.);
+const PLAYER_RIGHT_WIDTH: Rems = Rems(17.5);
 const PROGRESS_SLIDER_WIDTH: Rems = Rems(21.25);
 const PROGRESS_TIME_WIDTH: Rems = Rems(2.25);
 const PROGRESS_GAP: Rems = Rems(0.5);
@@ -382,6 +383,7 @@ mod link_downloads;
 mod link_popover;
 mod lyrics_view;
 mod media_controls;
+mod mini_player;
 mod motion;
 mod onboarding;
 mod page;

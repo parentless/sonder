@@ -140,6 +140,12 @@ impl PlayerBar {
         self.lyrics_open
     }
 
+    #[cfg(test)]
+    pub(super) fn show_now_playing(&mut self, cx: &mut Context<Self>) {
+        self.now_playing_view = true;
+        self.set_lyrics_open(true, cx);
+    }
+
     pub(super) fn now_playing_view(&self) -> bool {
         self.lyrics_open && self.now_playing_view
     }
@@ -437,6 +443,21 @@ impl PlayerBar {
                     .items_center()
                     .justify_end()
                     .gap_2()
+                    .when(!compact, |controls| {
+                        controls.child(
+                            components::icon_button(
+                                palette,
+                                "mini-player-toggle",
+                                CadenceIcon::MiniPlayer,
+                            )
+                            .test_support()
+                            .tooltip(|window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new("Mini player")
+                                    .build(window, cx)
+                            })
+                            .on_click(|_, _, cx| windows::toggle_mini_player(cx)),
+                        )
+                    })
                     .child(self.queue_button(palette, window, cx))
                     .child(
                         components::icon_button(palette, "volume", volume_icon)

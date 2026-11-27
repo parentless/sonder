@@ -53,6 +53,7 @@ enum Scene {
     LinkSaving,
     SettingsLocalFiles,
     Lyrics,
+    NowPlaying,
     Setup,
     SetupFilled,
     PremiumRequired,
@@ -125,6 +126,7 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("local-files-link-saving", Scene::LinkSaving),
         ("settings-local-files", Scene::SettingsLocalFiles),
         ("lyrics", Scene::Lyrics),
+        ("now-playing", Scene::NowPlaying),
         ("setup", Scene::Setup),
         ("setup-filled", Scene::SetupFilled),
         ("premium-required", Scene::PremiumRequired),
@@ -579,7 +581,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             .update(cx, |settings, cx| settings.show_local_files(cx));
                     }
                 }
-                Scene::Lyrics => {
+                Scene::Lyrics | Scene::NowPlaying => {
                     services::AppServices::player(cx).update(cx, |player, cx| {
                         player.handle_backend_event(
                             BackendEvent::PlaybackSnapshotLoaded {
@@ -590,9 +592,13 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                             cx,
                         );
                     });
-                    workspace
-                        .player_bar
-                        .update(cx, |bar, cx| bar.set_lyrics_open(true, cx));
+                    workspace.player_bar.update(cx, |bar, cx| {
+                        if matches!(scene, Scene::NowPlaying) {
+                            bar.show_now_playing(cx);
+                        } else {
+                            bar.set_lyrics_open(true, cx);
+                        }
+                    });
                     cx.notify();
                 }
                 Scene::Queue { open, .. } => {
@@ -1087,7 +1093,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 press_key(&mut cx, handle.into(), &character.to_string());
             }
         }
-        Scene::Lyrics => {
+        Scene::Lyrics | Scene::NowPlaying => {
             // Invented words, timed so the song's 1:12 falls on the middle line.
             let lyrics = crate::lyrics::parse_synced(
                 "[00:20.00]Harbour lights are low tonight\n[00:26.00]The tide keeps count of what we lost\n[00:50.00]Paper boats on silver water\n[00:56.00]Drifting where the shoreline crossed\n[01:02.00]Hold the line, don't let it fray\n[01:08.00]Morning finds us on the sand\n[01:14.00]Salt and glass and slow return\n[01:20.00]Every wave a steady hand\n[01:26.00]We were never really lost\n[01:32.00]Only turning toward the sea\n[01:38.00]Sing it back and let it show",

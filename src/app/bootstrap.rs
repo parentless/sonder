@@ -195,6 +195,15 @@ pub(super) fn bind_keys(cx: &mut App) {
             CloseWindow,
             None,
         ),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-shift-m"
+            } else {
+                "ctrl-shift-m"
+            },
+            ToggleMiniPlayer,
+            Some(WORKSPACE_KEY_CONTEXT),
+        ),
         KeyBinding::new("escape", DismissOverlay, Some(WORKSPACE_KEY_CONTEXT)),
         KeyBinding::new("escape", DismissOverlay, Some(ONBOARDING_KEY_CONTEXT)),
         KeyBinding::new("left", SeekBackward, Some(SCRUBBER_KEY_CONTEXT)),

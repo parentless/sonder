@@ -27,6 +27,7 @@ pub(super) struct AppServices {
     /// The open main and sign-in windows. Slots are cleared when gpui reports
     /// a window closed, so they are the authority on what is on screen.
     main_window: Option<gpui_kit::AnyWindowHandle>,
+    mini_window: Option<gpui_kit::AnyWindowHandle>,
     onboarding_window: Option<gpui_kit::AnyWindowHandle>,
     /// The last session state the window sync acted on.
     last_connection_state: ConnectionState,
@@ -80,6 +81,7 @@ impl AppServices {
             lastfm: None,
             root: None,
             main_window: None,
+            mini_window: None,
             onboarding_window: None,
             last_connection_state: ConnectionState::Starting,
             has_been_ready: false,
@@ -198,6 +200,7 @@ impl AppServices {
             lastfm,
             root: None,
             main_window: None,
+            mini_window: None,
             onboarding_window: None,
             last_connection_state: ConnectionState::Starting,
             has_been_ready: false,
@@ -743,6 +746,14 @@ impl AppServices {
         cx.global::<Self>().main_window
     }
 
+    pub(super) fn mini_window(cx: &App) -> Option<gpui_kit::AnyWindowHandle> {
+        cx.global::<Self>().mini_window
+    }
+
+    pub(super) fn set_mini_window(handle: Option<gpui_kit::AnyWindowHandle>, cx: &mut App) {
+        cx.global_mut::<Self>().mini_window = handle;
+    }
+
     pub(super) fn onboarding_window(cx: &App) -> Option<gpui_kit::AnyWindowHandle> {
         cx.global::<Self>().onboarding_window
     }
@@ -798,6 +809,12 @@ impl AppServices {
             .is_some_and(|handle| !open.contains(&handle))
         {
             services.main_window = None;
+        }
+        if services
+            .mini_window
+            .is_some_and(|handle| !open.contains(&handle))
+        {
+            services.mini_window = None;
         }
         if services
             .onboarding_window

@@ -642,7 +642,7 @@ impl Render for LyricsPane {
                             ),
                     )
             });
-            let lyrics_column = div().flex_1().min_w_0().min_h_0().child(body);
+            let lyrics_column = div().flex_1().min_w_0().h_full().child(body);
             let content = match (cover, lyrics.is_some()) {
                 (Some(cover), true) => div()
                     .flex_1()

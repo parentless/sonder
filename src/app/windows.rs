@@ -145,6 +145,52 @@ pub(super) fn open_main_window(cx: &mut App) {
     }
 }
 
+/// Opens the small player, or closes it if it is already open. It is an
+/// ordinary window of its own beside the main one, which stays as it is.
+pub(super) fn toggle_mini_player(cx: &mut App) {
+    if let Some(handle) = services::AppServices::mini_window(cx) {
+        services::AppServices::set_mini_window(None, cx);
+        close_window(Some(handle), cx);
+        return;
+    }
+    if services::AppServices::main_window(cx).is_none() {
+        return;
+    }
+    let shape = mini_player::Shape::Mini;
+    let (width, height) = shape.size();
+    let bounds = Bounds::centered(None, size(px(width), px(height)), cx);
+    let opened = gpui_kit::open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            is_resizable: false,
+            titlebar: Some(gpui_kit::TitlebarOptions {
+                title: Some("Sonder".into()),
+                appears_transparent: false,
+                traffic_light_position: None,
+            }),
+            ..Default::default()
+        },
+        cx,
+        |_, cx| {
+            let mini = cx.new(|cx| mini_player::MiniPlayer::new(shape, cx));
+            cx.subscribe(&mini, |_, _: &mini_player::ExpandRequested, cx| {
+                // Back to the full app: bring it forward, put this away.
+                if let Some(handle) = services::AppServices::mini_window(cx) {
+                    services::AppServices::set_mini_window(None, cx);
+                    close_window(Some(handle), cx);
+                }
+                show_app_window(cx);
+            })
+            .detach();
+            mini
+        },
+    );
+    match opened {
+        Ok((handle, _)) => services::AppServices::set_mini_window(Some(handle), cx),
+        Err(error) => log::error!("could not open the mini player: {error:#}"),
+    }
+}
+
 /// Opens the fixed-size sign-in window, or brings the open one forward. The
 /// size fits the onboarding layout (420px rail + content) above the compact
 /// breakpoint; the window is not resizable, so that is the only layout.

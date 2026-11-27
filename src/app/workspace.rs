@@ -662,6 +662,9 @@ impl Render for Workspace {
             .track_focus(&self.focus_handle)
             .capture_any_mouse_down(cx.listener(Self::focus_on_pointer_press))
             .on_action(cx.listener(Self::open_search))
+            .on_action(
+                cx.listener(|_, _: &ToggleMiniPlayer, _, cx| windows::toggle_mini_player(cx)),
+            )
             .on_action(cx.listener(Self::close_window))
             .on_action(cx.listener(Self::dismiss_overlay))
             .on_action(cx.listener(Self::toggle_playback))
