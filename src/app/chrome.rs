@@ -129,6 +129,9 @@ pub(super) struct Toolbar {
     library: Entity<library::Library>,
     pub(super) artist_header: Option<Entity<artist_header::ArtistHeader>>,
     menu_open: bool,
+    /// When a press outside the menu last closed it. The avatar's own click
+    /// lands just after, and must not open the menu again.
+    menu_dismissed_at: Option<std::time::Instant>,
     /// 0 when the account menu is closed, 1 when open; it eases between.
     menu_motion: gpui_motion_kit::ValueState,
     session: Entity<session::Session>,
@@ -194,6 +197,7 @@ impl Toolbar {
             library,
             artist_header: None,
             menu_open: false,
+            menu_dismissed_at: None,
             menu_motion: gpui_motion_kit::ValueState::new(0.),
             session: services::AppServices::session(cx),
             player: services::AppServices::player(cx),
@@ -928,7 +932,12 @@ impl Toolbar {
         components::solid_menu_surface(palette)
             .on_mouse_up_out(
                 gpui_kit::MouseButton::Left,
-                cx.listener(|this, _, _, cx| this.close_menu(cx)),
+                cx.listener(|this, _, _, cx| {
+                    if this.menu_open {
+                        this.menu_dismissed_at = Some(std::time::Instant::now());
+                    }
+                    this.close_menu(cx);
+                }),
             )
             .absolute()
             // Fades in and settles down from 4px above, so it reads as coming
@@ -1164,7 +1173,13 @@ impl Render for Toolbar {
                                 window,
                             ))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.menu_open = !this.menu_open;
+                                // A press on the avatar while the menu is open
+                                // already closed it as an outside press.
+                                let just_dismissed = this
+                                    .menu_dismissed_at
+                                    .take()
+                                    .is_some_and(|at| at.elapsed() < Duration::from_millis(300));
+                                this.menu_open = !this.menu_open && !just_dismissed;
                                 if this.menu_open {
                                     cx.emit(ToolbarEvent::MenuOpened);
                                 }

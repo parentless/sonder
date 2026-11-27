@@ -870,6 +870,20 @@ fn pressing_inside_the_account_menu_keeps_it_open_and_its_items_still_act() {
 }
 
 #[test]
+fn clicking_the_avatar_again_closes_the_account_menu() {
+    let mut fixture = Fixture::new(false);
+    fixture.update(|window, cx| window.click("account", cx));
+    fixture.update(|window, _| assert!(window.try_find("account-settings").is_some()));
+    // The press outside the menu closes it; the avatar's own click that
+    // follows must not open it again.
+    fixture.update(|window, cx| window.click("account", cx));
+    fixture.update(|window, _| assert!(window.try_find("account-settings").is_none()));
+    // And once closed, the next click opens it.
+    fixture.update(|window, cx| window.click("account", cx));
+    fixture.update(|window, _| assert!(window.try_find("account-settings").is_some()));
+}
+
+#[test]
 fn mute_sends_volume_and_restores_the_previous_level() {
     let mut fixture = Fixture::new(false);
     let initial = fixture.update(|_, cx| services::AppServices::player(cx).read(cx).volume());
