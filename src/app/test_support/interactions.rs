@@ -5468,11 +5468,11 @@ fn an_artist_shows_its_monthly_listeners_under_the_name_once_spotify_says() {
         )))
         .unwrap();
     fixture.update(|_, _| {});
-    // Until Spotify answers, the line is empty and the name is where it will stay.
+    // Until Spotify answers, a placeholder holds the line and the name is
+    // where it will stay.
     let before = fixture.update(|window, _| window.find("artist-moving-name").bounds());
-    fixture.update(|window, _| {
-        assert_eq!(window.find("artist-listeners").bounds().size.width, px(0.));
-    });
+    let placeholder = fixture.update(|window, _| window.find("artist-listeners").bounds().size);
+    assert!(placeholder.width > px(0.), "a placeholder holds the line");
     listeners
         .expect("the listener count is asked for")
         .send(Ok(Some(8_123_456)))

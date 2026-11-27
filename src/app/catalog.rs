@@ -776,10 +776,18 @@ impl ArtistPage {
         let reply = request(&self.backend, |respond| {
             BackendCommand::LoadArtistListeners { source_id, respond }
         });
+        self.header_motion.update(cx, |header, cx| {
+            header.listeners_loading = true;
+            cx.notify();
+        });
         self.listeners_request = Some(cx.spawn(async move |this, cx| {
             let result = reply.await;
             let _ = this.update(cx, |page, cx| {
                 page.listeners_request = None;
+                page.header_motion.update(cx, |header, cx| {
+                    header.listeners_loading = false;
+                    cx.notify();
+                });
                 match result {
                     Ok(listeners) => page.set_monthly_listeners(listeners, cx),
                     Err(error) => log::debug!("artist: no monthly listeners: {error}"),
@@ -840,6 +848,7 @@ impl ArtistPage {
                     .clone();
                 header.artwork = None;
                 header.listeners = None;
+                header.listeners_loading = false;
                 header.reset(cx);
             });
             self.monthly_listeners = None;
@@ -2446,25 +2455,6 @@ impl ArtistPage {
             .artist
             .as_ref()
             .and_then(|artist| artist.artwork_url.clone());
-        let detail = if self.loaded && self.error.is_none() {
-            if self.next_album_offset.is_some() {
-                format!(
-                    "Spotify artist · {} of {} releases",
-                    self.albums.len(),
-                    self.album_total
-                )
-            } else {
-                format!("Spotify artist · {} releases", self.albums.len())
-            }
-        } else {
-            "Spotify artist".to_owned()
-        };
-        let detail = match self.your_rank {
-            Some((rank, range)) => {
-                format!("{detail} · Your #{rank} artist · {}", range.short_label())
-            }
-            None => detail,
-        };
         let overlay_inset = tokens::TOOLBAR_HEIGHT.to_pixels(window.rem_size());
 
         let backdrop = artwork_url.clone().map(|url| {
@@ -2526,14 +2516,7 @@ impl ArtistPage {
             .w_full()
             .h(header_height)
             .flex_none()
-            .child(background)
-            .child(
-                div()
-                    .absolute()
-                    .left(artist_header::NAME_LEFT)
-                    .bottom(DETAIL_HEADER_PADDING)
-                    .child(components::page_detail(palette, detail)),
-            );
+            .child(background);
         header.into_any_element()
     }
 }

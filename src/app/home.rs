@@ -1013,9 +1013,7 @@ impl Render for HomePage {
             "Your top mixes",
             Shelf::TopMixes,
             &top_mixes,
-            // Only Made for you holds a place while loading; Your top mixes
-            // appears with it, or not at all.
-            false,
+            mixes_loading,
             layout.mix_count,
             layout.mix_cover,
             palette,

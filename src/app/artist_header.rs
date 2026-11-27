@@ -8,6 +8,8 @@ pub(super) struct ArtistHeader {
     pub artwork: Option<String>,
     /// "8,123,456 monthly listeners", once Spotify has said.
     pub listeners: Option<SharedString>,
+    /// Asked for and not yet answered: a placeholder holds the line.
+    pub listeners_loading: bool,
     cache: Entity<image_cache::BoundedImageCache>,
     pub target_bounds: Option<Bounds<Pixels>>,
     pub origin: gpui_kit::Point<Pixels>,
@@ -60,6 +62,7 @@ impl ArtistHeader {
             name: "Artist".into(),
             artwork: None,
             listeners: None,
+            listeners_loading: false,
             cache: services::AppServices::image_cache(cx),
             target_bounds: None,
             origin: point(px(0.), px(0.)),
@@ -214,7 +217,17 @@ impl Render for ArtistHeader {
                         .text_size(px(15.) * (rem / px(16.)))
                         .line_height(unit(LISTENERS_ROW))
                         .text_color(rgb(palette.text_muted))
-                        .children(self.listeners.clone()),
+                        .children(self.listeners.clone())
+                        .when(self.listeners.is_none() && self.listeners_loading, |row| {
+                            row.child(
+                                div()
+                                    .mt(unit(0.4))
+                                    .h(unit(0.9))
+                                    .w(unit(11.))
+                                    .rounded_md()
+                                    .bg(rgb(palette.control)),
+                            )
+                        }),
                 );
         }
         if grown > 0. {
