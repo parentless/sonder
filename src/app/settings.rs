@@ -593,7 +593,7 @@ impl Settings {
                             .text_size(tokens::BODY_TEXT)
                             .line_height(relative(1.45))
                             .text_color(rgb(palette.text_muted))
-                            .child("This is what turns your voice into words. It runs entirely on this computer: your voice is never sent anywhere or saved. It understands English and is downloaded once from its publisher, whisper.cpp on Hugging Face."),
+                            .child("This is what turns your voice into words. It runs entirely on this computer, and only while you hold the shortcut: it loads as you start speaking and is gone from memory as soon as it has your words. Your voice is never sent anywhere or saved. It understands English and is downloaded once from its publisher, whisper.cpp on Hugging Face."),
                     )
                     .child(
                         v_flex().mt_4().gap_3().children(

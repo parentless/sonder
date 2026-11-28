@@ -44,6 +44,19 @@ const MONTHS: &[Month] = &[
                 date: "Nov 27, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.76",
+                        notes: &[
+                            Note(
+                                Better,
+                                "Voice play uses no memory until you hold the shortcut. The speech model now loads in a helper while you speak and is gone as soon as it has your words, instead of staying in Sonder.",
+                            ),
+                            Note(
+                                Better,
+                                "Voice play answers about three times faster, and a new Fast model (32 MB) joins Standard and Accurate in Settings > Voice.",
+                            ),
+                        ],
+                    },
+                    Release {
                         version: "0.8.75",
                         notes: &[
                             Note(

@@ -17,17 +17,20 @@ use std::{
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Model {
-    /// Fast and good for clear speech.
+    /// The smallest and quickest. Names are where it slips.
+    Fast,
+    /// Good for clear speech.
     Standard,
     /// Better with unusual names, a little slower and larger.
     Accurate,
 }
 
 impl Model {
-    pub(crate) const ALL: [Self; 2] = [Self::Standard, Self::Accurate];
+    pub(crate) const ALL: [Self; 3] = [Self::Fast, Self::Standard, Self::Accurate];
 
     pub(crate) fn key(self) -> &'static str {
         match self {
+            Self::Fast => "fast",
             Self::Standard => "standard",
             Self::Accurate => "accurate",
         }
@@ -39,6 +42,7 @@ impl Model {
 
     pub(crate) fn label(self) -> &'static str {
         match self {
+            Self::Fast => "Fast",
             Self::Standard => "Standard",
             Self::Accurate => "Accurate",
         }
@@ -47,6 +51,7 @@ impl Model {
     /// What it is good at, for Settings.
     pub(crate) fn detail(self) -> &'static str {
         match self {
+            Self::Fast => "Smallest and quickest. Can slip on unusual names.",
             Self::Standard => "Quick, and good for clear speech.",
             Self::Accurate => "Better with unusual names. A little slower.",
         }
@@ -54,6 +59,7 @@ impl Model {
 
     pub(crate) fn file_name(self) -> &'static str {
         match self {
+            Self::Fast => "ggml-tiny.en-q5_1.bin",
             Self::Standard => "ggml-base.en-q5_1.bin",
             Self::Accurate => "ggml-small.en-q5_1.bin",
         }
@@ -70,6 +76,7 @@ impl Model {
     /// a cut-off one.
     pub(crate) fn bytes(self) -> u64 {
         match self {
+            Self::Fast => 32_166_155,
             Self::Standard => 59_721_011,
             Self::Accurate => 190_098_681,
         }
@@ -77,6 +84,7 @@ impl Model {
 
     fn sha256(self) -> &'static str {
         match self {
+            Self::Fast => "c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b",
             Self::Standard => "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f",
             Self::Accurate => "bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30",
         }
@@ -200,6 +208,7 @@ mod tests {
 
     #[test]
     fn sizes_read_in_megabytes() {
+        assert_eq!(Model::Fast.size_label(), "32 MB");
         assert_eq!(Model::Standard.size_label(), "60 MB");
         assert_eq!(Model::Accurate.size_label(), "190 MB");
         assert_eq!(megabytes(0), "0 MB");

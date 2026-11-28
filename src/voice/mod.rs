@@ -10,6 +10,13 @@ pub(crate) mod model;
 pub(crate) mod query;
 pub(crate) mod sounds;
 pub(crate) mod transcribe;
+pub(crate) mod worker;
+
+/// Runs the speech-to-text helper if this process was started as one.
+/// Must be the first thing `main` does.
+pub fn run_worker_if_requested() -> bool {
+    worker::run_if_requested()
+}
 
 pub(crate) use hotkey::{Hotkey, HotkeyEvent};
 pub(crate) use model::Model;

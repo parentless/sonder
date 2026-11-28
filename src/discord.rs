@@ -125,6 +125,9 @@ fn activity(track: &crate::model::Track, position_ms: u32, now_ms: u64) -> Value
     let start = now_ms.saturating_sub(u64::from(position_ms)) / 1000;
     let mut activity = json!({
         "type": 2,
+        // Discord shows "Listening to <name>". Without this it uses the
+        // application's name from the developer portal, so always say Sonder.
+        "name": "Sonder",
         "details": text(&track.title, "Unknown track"),
         "state": text(&track.artist, "Unknown artist"),
         "timestamps": {"start": start},
@@ -356,6 +359,7 @@ mod tests {
     fn activity_contains_listening_metadata_and_progress_without_credentials() {
         let activity = activity(&track(), 30_000, 1_800_000_000_000);
         assert_eq!(activity["type"], 2);
+        assert_eq!(activity["name"], "Sonder");
         assert_eq!(activity["details"], "A song");
         assert_eq!(activity["state"], "An artist");
         assert_eq!(activity["timestamps"]["start"], 1_799_999_970u64);

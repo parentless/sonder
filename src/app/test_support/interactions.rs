@@ -3009,6 +3009,23 @@ fn open_voice_settings(fixture: &mut Fixture) {
     fixture.update(|window, cx| window.click(("settings-tab", 3usize), cx));
 }
 
+/// The page is taller than the window now that it lists three models.
+fn scroll_voice_settings_down(fixture: &mut Fixture) {
+    fixture.update(|window, cx| {
+        let position = window.find("settings-page").bounds().center();
+        window.dispatch_event(
+            gpui_kit::ScrollWheelEvent {
+                position,
+                delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-3000.))),
+                modifiers: Default::default(),
+                touch_phase: gpui_kit::TouchPhase::Moved,
+            }
+            .to_platform_input(),
+            cx,
+        );
+    });
+}
+
 fn voice_config(fixture: &mut Fixture) -> crate::voice::Config {
     fixture.update(|_, cx| {
         services::AppServices::voice_play(cx)
@@ -3075,22 +3092,19 @@ fn escape_stops_waiting_for_a_voice_shortcut() {
 
 #[test]
 fn the_voice_model_can_be_chosen_before_it_is_downloaded() {
+    use crate::voice::Model;
     let mut fixture = Fixture::new(true);
     open_voice_settings(&mut fixture);
-    assert_eq!(
-        voice_config(&mut fixture).model,
-        crate::voice::Model::Standard
-    );
-    fixture.update(|window, cx| window.click(("settings-voice-model", 1usize), cx));
-    assert_eq!(
-        voice_config(&mut fixture).model,
-        crate::voice::Model::Accurate
-    );
-    fixture.update(|window, cx| window.click(("settings-voice-model", 0usize), cx));
-    assert_eq!(
-        voice_config(&mut fixture).model,
-        crate::voice::Model::Standard
-    );
+    scroll_voice_settings_down(&mut fixture);
+    assert_eq!(voice_config(&mut fixture).model, Model::Standard);
+    for (index, expected) in [
+        (2usize, Model::Accurate),
+        (0, Model::Fast),
+        (1, Model::Standard),
+    ] {
+        fixture.update(|window, cx| window.click(("settings-voice-model", index), cx));
+        assert_eq!(voice_config(&mut fixture).model, expected);
+    }
 }
 
 #[test]

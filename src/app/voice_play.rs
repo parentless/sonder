@@ -6,7 +6,9 @@
 //! while Sonder is in the tray or something else has the screen.
 
 use super::*;
-use crate::voice::{Config, HotkeyEvent, Model, capture, hook, model, query, sounds, transcribe};
+use crate::voice::{
+    Config, HotkeyEvent, Model, capture, hook, model, query, sounds, transcribe, worker,
+};
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicBool, Ordering},
@@ -42,11 +44,12 @@ pub(super) struct VoicePlay {
     last: Option<SharedString>,
     download: Option<Download>,
     download_error: Option<SharedString>,
-    installed: [bool; 2],
+    installed: [bool; Model::ALL.len()],
     listener: Option<hook::Listener>,
     events: async_channel::Sender<HotkeyEvent>,
     recording: Option<capture::Recording>,
-    transcriber: transcribe::Transcriber,
+    /// The speech-to-text helper, running only while the shortcut is held.
+    worker: Option<worker::Worker>,
     /// Bumped by every press, so the end of an older request cannot overwrite
     /// a newer one.
     generation: u64,
@@ -86,7 +89,7 @@ impl VoicePlay {
             listener: None,
             events,
             recording: None,
-            transcriber: transcribe::Transcriber::default(),
+            worker: None,
             generation: 0,
             player,
             library,
@@ -151,6 +154,7 @@ impl VoicePlay {
         } else {
             self.listener = None;
             self.recording = None;
+            self.worker = None;
             self.work = None;
             self.generation += 1;
             self.phase = Phase::Idle;
@@ -174,6 +178,20 @@ impl VoicePlay {
         // A new request replaces whatever the last one was still doing.
         self.generation += 1;
         self.work = None;
+        self.worker = None;
+        // The helper starts loading the model now, while the listener speaks.
+        let started = model::path(self.config.model)
+            .ok_or_else(|| anyhow::anyhow!("could not find the speech model"))
+            .and_then(|path| worker::Worker::start(&path));
+        match started {
+            Ok(worker) => self.worker = Some(worker),
+            Err(error) => {
+                sounds::play(sounds::Sound::Fail);
+                self.last = Some(format!("{error:#}").into());
+                cx.notify();
+                return;
+            }
+        }
         sounds::play(sounds::Sound::Start);
         self.recording = Some(capture::Recording::start());
         self.phase = Phase::Listening;
@@ -188,8 +206,9 @@ impl VoicePlay {
         self.phase = Phase::Working("Listening…".into());
         cx.notify();
         let generation = self.generation;
+        let released = std::time::Instant::now();
         let answer = recording.finish();
-        let model = model::path(self.config.model);
+        let worker = self.worker.take();
         let names = self.artist_names(cx);
         let backend = self.backend.clone();
         let player = self.player.clone();
@@ -207,17 +226,18 @@ impl VoicePlay {
                     }
                     capture::Heard::Speech => {}
                 }
-                let model =
-                    model.ok_or_else(|| SharedString::from("The speech model is missing."))?;
-                let transcript = this
-                    .update(cx, |voice, _| {
-                        voice.transcriber.transcribe(model, samples, &names)
-                    })
-                    .map_err(|_| SharedString::default())?
+                let worker =
+                    worker.ok_or_else(|| SharedString::from("Speech to text was not running."))?;
+                let transcript = worker
+                    .finish(samples, transcribe::prompt(&names))
                     .recv()
                     .await
                     .map_err(|_| SharedString::from("Speech to text stopped unexpectedly."))?
                     .map_err(SharedString::from)?;
+                log::info!(
+                    "voice: heard {transcript:?} {:?} after release",
+                    released.elapsed()
+                );
                 let request = query::parse(&transcript).ok_or_else(|| {
                     SharedString::from(if transcript.trim().is_empty() {
                         "Didn't catch that.".to_owned()
@@ -246,6 +266,11 @@ impl VoicePlay {
                     ))
                 })?;
                 let track = results.tracks[index].clone();
+                log::info!(
+                    "voice: found {} {:?} after release",
+                    track.title,
+                    released.elapsed()
+                );
                 let line = format!("Playing {} by {}.", track.title, track.artist);
                 let started = this
                     .update(cx, |voice, cx| {

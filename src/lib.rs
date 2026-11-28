@@ -30,6 +30,9 @@ pub mod storage;
 mod trash;
 pub(crate) mod voice;
 
+#[doc(hidden)]
+pub use voice::run_worker_if_requested as run_voice_worker_if_requested;
+
 pub use app::run;
 
 #[cfg(any(target_os = "windows", test))]
