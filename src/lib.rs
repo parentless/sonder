@@ -21,6 +21,7 @@ mod musicbrainz;
 mod oauth_callback;
 mod oauth_page;
 pub mod playback;
+mod private_search;
 #[cfg(any(target_os = "windows", test))]
 mod rotating_log;
 mod similar;

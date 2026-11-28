@@ -121,6 +121,25 @@ impl Settings {
             input
         });
         let mut subscriptions = Vec::new();
+        // The reset button shows only while Spotify's limit is on, so the page
+        // redraws when that changes. It checks a flag, nothing more.
+        cx.spawn(async move |this, cx| {
+            let mut shown = crate::spotify::rate_limit_remaining().is_some();
+            loop {
+                cx.background_executor().timer(Duration::from_secs(2)).await;
+                let limited = crate::spotify::rate_limit_remaining().is_some();
+                if limited != shown {
+                    shown = limited;
+                    if this.update(cx, |_, cx| cx.notify()).is_err() {
+                        return;
+                    }
+                }
+                if this.update(cx, |_, _| ()).is_err() {
+                    return;
+                }
+            }
+        })
+        .detach();
         subscriptions.push(cx.subscribe(
             &discord_application_id,
             |this, _, event: &InputEvent, cx| match event {
@@ -1163,6 +1182,56 @@ impl Settings {
                                                     ),
                                             ),
                                     )
+                                    .when_some(
+                                        crate::spotify::rate_limit_remaining(),
+                                        |card, remaining| {
+                                            card.child(
+                                                div()
+                                                    .mt_5()
+                                                    .pt_5()
+                                                    .border_t_1()
+                                                    .border_color(rgb(palette.border))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .gap_5()
+                                                    .child(
+                                                        div()
+                                                            .min_w_0()
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                                                    .text_color(rgb(palette.text))
+                                                                    .child("Spotify is limiting Sonder"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .mt_1()
+                                                                    .text_size(tokens::CAPTION_TEXT)
+                                                                    .line_height(relative(1.45))
+                                                                    .text_color(rgb(palette.text_muted))
+                                                                    .child(format!(
+                                                                        "Library pages wait, but search and playback keep working. Sonder pauses requests for about {}. Resetting lets them through now; Spotify may limit again.",
+                                                                        wait_label(remaining)
+                                                                    )),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        components::settings_button(
+                                                            palette,
+                                                            "settings-reset-spotify-limit",
+                                                            "Reset Spotify limit",
+                                                        )
+                                                        .flex_none()
+                                                        .on_click(cx.listener(|_, _, _, cx| {
+                                                            crate::spotify::clear_rate_limit();
+                                                            cx.notify();
+                                                        })),
+                                                    ),
+                                            )
+                                        },
+                                    )
                                     .when(environment_configuration, |card| {
                                         card.child(
                                             div()
@@ -1887,5 +1956,29 @@ impl Settings {
 impl Render for Settings {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.page(window, cx)
+    }
+}
+
+/// "3 hours", "12 minutes": how long a cooldown has left, roughly.
+fn wait_label(remaining: Duration) -> String {
+    let minutes = remaining.as_secs().div_ceil(60);
+    match minutes {
+        0..=59 => format!("{minutes} minute{}", if minutes == 1 { "" } else { "s" }),
+        _ => {
+            let hours = minutes.div_ceil(60);
+            format!("{hours} hour{}", if hours == 1 { "" } else { "s" })
+        }
+    }
+}
+
+#[cfg(test)]
+mod wait_label_tests {
+    use super::*;
+
+    #[test]
+    fn a_cooldown_is_described_roughly() {
+        assert_eq!(wait_label(Duration::from_secs(60)), "1 minute");
+        assert_eq!(wait_label(Duration::from_secs(61)), "2 minutes");
+        assert_eq!(wait_label(Duration::from_secs(40_000)), "12 hours");
     }
 }

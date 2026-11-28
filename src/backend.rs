@@ -1483,7 +1483,9 @@ impl Worker {
                 Ok(())
             }
             BackendCommand::SearchCatalog { query, respond } => {
-                self.catalog.search(self.spotify.clone(), query, respond);
+                let session = self.playback_session();
+                self.catalog
+                    .search(self.spotify.clone(), session, query, respond);
                 Ok(())
             }
             BackendCommand::LoadMadeForYou { force, respond } => {
@@ -3365,11 +3367,38 @@ impl CatalogFetches {
     fn search(
         &mut self,
         spotify: Spotify,
+        session: Option<librespot::core::session::Session>,
         query: String,
         respond: Reply<crate::model::CatalogSearchResults>,
     ) {
         Self::start(&mut self.search, respond, "Spotify search", async move {
-            spotify.search_catalog(&query).await
+            match spotify.search_catalog(&query).await {
+                Err(error)
+                    if matches!(
+                        crate::spotify::classify_error(&error),
+                        crate::spotify::ErrorKind::RateLimited { .. }
+                    ) =>
+                {
+                    // The Web API is limited, but playback is not: ask the
+                    // way Spotify's own clients do, through the session.
+                    let Some(session) = session else {
+                        return Err(error);
+                    };
+                    match crate::private_search::search(&session, &query).await {
+                        Ok(results) => {
+                            log::info!("search: answered through the playback session");
+                            Ok(results)
+                        }
+                        Err(private) => {
+                            log::warn!(
+                                "search: the playback session could not answer: {private:#}"
+                            );
+                            Err(error)
+                        }
+                    }
+                }
+                other => other,
+            }
         });
     }
 

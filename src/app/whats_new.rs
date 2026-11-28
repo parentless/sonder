@@ -41,6 +41,22 @@ const MONTHS: &[Month] = &[
         name: "November 2026",
         days: &[
             Day {
+                date: "Nov 28, 2026",
+                releases: &[Release {
+                    version: "0.8.77",
+                    notes: &[
+                        Note(
+                            New,
+                            "When Spotify limits Sonder's requests, search still works. It now asks through your playback connection, which has no such limit, so Voice play and the search box keep finding songs and you can still play them.",
+                        ),
+                        Note(
+                            New,
+                            "A Reset Spotify limit button appears in Settings > Connections only while Spotify is limiting Sonder. It lets requests through again right away.",
+                        ),
+                    ],
+                }],
+            },
+            Day {
                 date: "Nov 27, 2026",
                 releases: &[
                     Release {

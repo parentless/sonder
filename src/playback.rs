@@ -464,6 +464,11 @@ impl BuiltIn {
         Self::connect_with_access_token(access_token).await
     }
 
+    #[cfg(test)]
+    pub(crate) fn session_for_probe(&self) -> &Session {
+        &self.session
+    }
+
     pub async fn reconnect() -> Result<Self> {
         let refresh_token = load_playback_refresh_token()
             .await?

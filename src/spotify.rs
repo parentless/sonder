@@ -226,6 +226,34 @@ struct GateState {
     strikes: u32,
     /// The cooldown is also on disk and must be removed once it ends.
     remembered: bool,
+    /// The last [`CLEARS`] number this gate has acted on.
+    cleared_seen: u32,
+}
+
+/// When the Web API's cooldown ends, in Unix seconds, or 0 for none. Kept
+/// outside the gate so Settings can show it without asking the backend.
+static LIMITED_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Bumped by [`clear_rate_limit`]; each gate forgets its cooldown when it sees
+/// a number it has not seen.
+static CLEARS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// How much longer Spotify's Web API will be left alone, or `None` when it is
+/// not limited. Only long cooldowns count: a few seconds clear on their own.
+pub fn rate_limit_remaining() -> Option<Duration> {
+    let until = LIMITED_UNTIL.load(std::sync::atomic::Ordering::Relaxed);
+    let remaining = until.saturating_sub(unix_now());
+    (remaining >= REMEMBERED_COOLDOWN.as_secs()).then(|| Duration::from_secs(remaining))
+}
+
+/// Lets requests go to Spotify again at once, whatever cooldown Sonder was
+/// keeping. If Spotify is still limiting this app the next answer starts a new
+/// one.
+pub fn clear_rate_limit() {
+    CLEARS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    LIMITED_UNTIL.store(0, std::sync::atomic::Ordering::Relaxed);
+    if let Some(dirs) = directories::ProjectDirs::from("dev", "twoducks", "cadence") {
+        let _ = std::fs::remove_file(dirs.data_dir().join("spotify-rate-limit"));
+    }
 }
 
 /// Cooldowns shorter than this are not worth remembering across a restart.
@@ -264,9 +292,11 @@ impl RateLimitGate {
             && until > unix_now()
         {
             let mut state = gate.state.lock().expect("rate-limit gate lock");
+            state.cleared_seen = CLEARS.load(std::sync::atomic::Ordering::Relaxed);
             state.open_until =
                 Some(std::time::Instant::now() + Duration::from_secs(until - unix_now()));
             state.remembered = true;
+            LIMITED_UNTIL.store(until, std::sync::atomic::Ordering::Relaxed);
         }
         gate
     }
@@ -276,7 +306,14 @@ impl RateLimitGate {
     }
 
     fn check_at(&self, now: std::time::Instant) -> Result<()> {
-        let state = self.state.lock().expect("rate-limit gate lock");
+        let mut state = self.state.lock().expect("rate-limit gate lock");
+        let clears = CLEARS.load(std::sync::atomic::Ordering::Relaxed);
+        if state.cleared_seen != clears {
+            *state = GateState {
+                cleared_seen: clears,
+                ..GateState::default()
+            };
+        }
         match state.open_until {
             Some(until) if until > now => Err(RateLimitActive {
                 retry_after: until - now,
@@ -295,6 +332,10 @@ impl RateLimitGate {
         state.strikes = state.strikes.saturating_add(1);
         let wait = retry_after.unwrap_or_else(|| fallback_cooldown(state.strikes));
         state.open_until = Some(now + wait + jitter);
+        LIMITED_UNTIL.fetch_max(
+            unix_now() + (wait + jitter).as_secs(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         if wait >= REMEMBERED_COOLDOWN
             && let Some((path, client)) = &self.saved
         {
@@ -322,7 +363,11 @@ impl RateLimitGate {
             {
                 let _ = std::fs::remove_file(path);
             }
-            *state = GateState::default();
+            *state = GateState {
+                cleared_seen: state.cleared_seen,
+                ..GateState::default()
+            };
+            LIMITED_UNTIL.store(0, std::sync::atomic::Ordering::Relaxed);
         }
     }
 }
@@ -2392,6 +2437,20 @@ mod tests {
             }
         ));
         assert!(gate.check_at(now + Duration::from_secs(6)).is_ok());
+    }
+
+    #[test]
+    fn a_cleared_limit_lets_requests_through_at_once() {
+        let gate = RateLimitGate::default();
+        let now = std::time::Instant::now();
+        gate.trip_at(Some(Duration::from_secs(40_000)), now, Duration::ZERO);
+        assert!(gate.check_at(now + Duration::from_secs(10)).is_err());
+        // What `clear_rate_limit` does, without touching the other tests' gates.
+        gate.state.lock().unwrap().cleared_seen = super::CLEARS
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .wrapping_sub(1);
+        assert!(gate.check_at(now + Duration::from_secs(10)).is_ok());
+        assert_eq!(gate.state.lock().unwrap().strikes, 0);
     }
 
     #[test]
