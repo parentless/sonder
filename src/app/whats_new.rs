@@ -44,6 +44,13 @@ const MONTHS: &[Month] = &[
                 date: "Nov 28, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.80",
+                        notes: &[Note(
+                            New,
+                            "Parakeet Unified English is a new speech model for Voice play, made by NVIDIA for English. It downloads about 660 MB from Settings > Voice and uses about 1.3 GB of memory only while you hold the shortcut.",
+                        )],
+                    },
+                    Release {
                         version: "0.8.79",
                         notes: &[
                             Note(

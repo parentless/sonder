@@ -642,7 +642,7 @@ impl Settings {
                             .text_size(tokens::BODY_TEXT)
                             .line_height(relative(1.45))
                             .text_color(rgb(palette.text_muted))
-                            .child("This is what turns your voice into words. It runs entirely on this computer, and only while you hold the shortcut: it loads as you start speaking and is gone from memory as soon as it has your words. Your voice is never sent anywhere or saved. Fast, Standard and Accurate are whisper.cpp models for English. Parakeet v3 is NVIDIA's: more accurate and also quick, but larger, and it needs about 1.3 GB of memory for the second it works. It also downloads Microsoft's ONNX Runtime library. Everything is downloaded once, from Hugging Face and PyPI."),
+                            .child("This is what turns your voice into words. It runs entirely on this computer, and only while you hold the shortcut: it loads as you start speaking and is gone from memory as soon as it has your words. Your voice is never sent anywhere or saved. Fast, Standard and Accurate are whisper.cpp models for English. Parakeet v3 and Parakeet Unified English are NVIDIA's: more accurate and also quick, but larger, and each needs about 1.3 GB of memory for the second it works. It also downloads Microsoft's ONNX Runtime library. Everything is downloaded once, from Hugging Face and PyPI."),
                     )
                     .child(
                         v_flex().mt_4().gap_3().children(

@@ -56,12 +56,17 @@ pub(crate) fn audio_context(samples: usize) -> i32 {
 pub(crate) enum Engine {
     Whisper(WhisperContext),
     Parakeet(Box<parakeet_rs::ParakeetTDT>),
+    ParakeetUnified(Box<parakeet_rs::ParakeetUnified>),
 }
 
 /// Loads a model: a file is a whisper.cpp model, a folder is Parakeet. Slow,
 /// so the helper does it while the listener is still speaking.
 pub(crate) fn load(path: &Path) -> Result<Engine> {
     if path.is_dir() {
+        // The unified export has a SentencePiece tokenizer; v3 has a word list.
+        if path.join("tokenizer.model").is_file() {
+            return load_unified(path).map(|model| Engine::ParakeetUnified(Box::new(model)));
+        }
         return load_parakeet(path).map(|model| Engine::Parakeet(Box::new(model)));
     }
     let Some(text) = path.to_str() else {
@@ -75,7 +80,18 @@ pub(crate) fn load(path: &Path) -> Result<Engine> {
 }
 
 fn load_parakeet(folder: &Path) -> Result<parakeet_rs::ParakeetTDT> {
-    use parakeet_rs::{ExecutionConfig, ParakeetTDT};
+    parakeet_rs::ParakeetTDT::from_pretrained(folder, Some(runtime_config(folder)?))
+        .context("could not load the speech model; try removing it and downloading it again")
+}
+
+fn load_unified(folder: &Path) -> Result<parakeet_rs::ParakeetUnified> {
+    parakeet_rs::ParakeetUnified::from_pretrained(folder, Some(runtime_config(folder)?))
+        .context("could not load the speech model; try removing it and downloading it again")
+}
+
+/// How the ONNX Runtime is started for a Parakeet folder.
+fn runtime_config(folder: &Path) -> Result<parakeet_rs::ExecutionConfig> {
+    use parakeet_rs::ExecutionConfig;
     // The ONNX Runtime library is downloaded with the model. Without one there
     // (a development build, say) the usual search applies, which honours
     // ORT_DYLIB_PATH.
@@ -91,11 +107,9 @@ fn load_parakeet(folder: &Path) -> Result<parakeet_rs::ParakeetTDT> {
         .build()
         .context("could not start the speech runtime")?;
     let cores = thread::available_parallelism().map_or(2, usize::from);
-    let config = ExecutionConfig::new()
+    Ok(ExecutionConfig::new()
         .with_environment(environment)
-        .with_intra_threads(cores.clamp(2, 8));
-    ParakeetTDT::from_pretrained(folder, Some(config))
-        .context("could not load the speech model; try removing it and downloading it again")
+        .with_intra_threads(cores.clamp(2, 8)))
 }
 
 /// Turns the audio into text. `prompt` is whisper's; Parakeet has no use
@@ -104,6 +118,7 @@ pub(crate) fn run(engine: &mut Engine, samples: &[f32], prompt: &str) -> Result<
     match engine {
         Engine::Whisper(context) => run_whisper(context, samples, prompt),
         Engine::Parakeet(model) => run_parakeet(model, samples),
+        Engine::ParakeetUnified(model) => run_unified(model, samples),
     }
 }
 
@@ -117,6 +132,17 @@ fn run_parakeet(model: &mut parakeet_rs::ParakeetTDT, samples: &[f32]) -> Result
         .transcribe_samples(audio, 16_000, 1, None)
         .map_err(|error| anyhow::anyhow!("speech to text failed: {error}"))?;
     Ok(result.text.trim().to_owned())
+}
+
+fn run_unified(model: &mut parakeet_rs::ParakeetUnified, samples: &[f32]) -> Result<String> {
+    let mut audio = samples.to_vec();
+    if audio.len() < MIN_SAMPLES {
+        audio.resize(MIN_SAMPLES, 0.);
+    }
+    let text = model
+        .transcribe_audio(audio, 16_000, 1)
+        .map_err(|error| anyhow::anyhow!("speech to text failed: {error}"))?;
+    Ok(text.trim().to_owned())
 }
 
 fn run_whisper(context: &WhisperContext, samples: &[f32], prompt: &str) -> Result<String> {

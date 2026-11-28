@@ -26,6 +26,8 @@ pub(crate) enum Model {
     Accurate,
     /// NVIDIA's Parakeet v3: the most accurate, and the largest.
     Parakeet,
+    /// NVIDIA's Parakeet Unified: English only, and tuned for it.
+    ParakeetUnified,
 }
 
 /// One file of a model.
@@ -118,11 +120,63 @@ const RUNTIME: Part = Part {
         bytes: 19_288_928,
     }),
 };
+/// Parakeet Unified's folder: the int8 files from a community ONNX export of
+/// NVIDIA's model, which `parakeet-rs` reads by these names.
+#[cfg(target_os = "windows")]
+const UNIFIED_FILES: [Part; 5] = [
+    UNIFIED_ENCODER,
+    UNIFIED_ENCODER_DATA,
+    UNIFIED_DECODER,
+    UNIFIED_TOKENIZER,
+    RUNTIME,
+];
+#[cfg(not(target_os = "windows"))]
+const UNIFIED_FILES: [Part; 4] = [
+    UNIFIED_ENCODER,
+    UNIFIED_ENCODER_DATA,
+    UNIFIED_DECODER,
+    UNIFIED_TOKENIZER,
+];
+const UNIFIED_ENCODER: Part = Part {
+    name: "encoder.int8.onnx",
+    url: "https://huggingface.co/bobNight/parakeet-unified-en-0.6b-onnx/resolve/main/encoder.int8.onnx",
+    bytes: 42_606_669,
+    sha256: "c81adfab77634e00c1668a221a14f244c5fb3409e7c14eeebaf6ac963425910f",
+    unpack: None,
+};
+/// The encoder's weights, which its `.onnx` file points to by this name.
+const UNIFIED_ENCODER_DATA: Part = Part {
+    name: "encoder.int8.onnx.data",
+    url: "https://huggingface.co/bobNight/parakeet-unified-en-0.6b-onnx/resolve/main/encoder.int8.onnx.data",
+    bytes: 611_491_584,
+    sha256: "3d54dd04646c15677bd2844a84df3770b12cc1ce183481f7b6e0def31c92114a",
+    unpack: None,
+};
+const UNIFIED_DECODER: Part = Part {
+    name: "decoder_joint.int8.onnx",
+    url: "https://huggingface.co/bobNight/parakeet-unified-en-0.6b-onnx/resolve/main/decoder_joint.int8.onnx",
+    bytes: 8_995_064,
+    sha256: "7f76ad5f35035f25630075699c6c942a2c0c05ff42cb398f966f3c256d148e1e",
+    unpack: None,
+};
+const UNIFIED_TOKENIZER: Part = Part {
+    name: "tokenizer.model",
+    url: "https://huggingface.co/bobNight/parakeet-unified-en-0.6b-onnx/resolve/main/tokenizer.model",
+    bytes: 251_056,
+    sha256: "07d4e5a63840a53ab2d4d106d2874768143fb3fbdd47938b3910d2da05bfb0a9",
+    unpack: None,
+};
 /// The name the ONNX Runtime library is kept under.
 pub(crate) const RUNTIME_DLL: &str = "onnxruntime.dll";
 
 impl Model {
-    pub(crate) const ALL: [Self; 4] = [Self::Fast, Self::Standard, Self::Accurate, Self::Parakeet];
+    pub(crate) const ALL: [Self; 5] = [
+        Self::Fast,
+        Self::Standard,
+        Self::Accurate,
+        Self::Parakeet,
+        Self::ParakeetUnified,
+    ];
 
     pub(crate) fn key(self) -> &'static str {
         match self {
@@ -130,6 +184,7 @@ impl Model {
             Self::Standard => "standard",
             Self::Accurate => "accurate",
             Self::Parakeet => "parakeet",
+            Self::ParakeetUnified => "parakeet-unified",
         }
     }
 
@@ -143,6 +198,7 @@ impl Model {
             Self::Standard => "Standard",
             Self::Accurate => "Accurate",
             Self::Parakeet => "Parakeet v3",
+            Self::ParakeetUnified => "Parakeet Unified English",
         }
     }
 
@@ -155,6 +211,9 @@ impl Model {
             Self::Parakeet => {
                 "NVIDIA's most accurate model, and fast. Needs about 1.3 GB of memory for the second it works."
             }
+            Self::ParakeetUnified => {
+                "NVIDIA's English-only Parakeet, tuned for English speech with punctuation. Needs about 1.3 GB of memory for the second it works."
+            }
         }
     }
 
@@ -164,7 +223,13 @@ impl Model {
             Self::Standard => &STANDARD,
             Self::Accurate => &ACCURATE,
             Self::Parakeet => &PARAKEET_FILES,
+            Self::ParakeetUnified => &UNIFIED_FILES,
         }
+    }
+
+    /// Whether it is several files in a folder, not one file.
+    pub(crate) fn is_folder(self) -> bool {
+        matches!(self, Self::Parakeet | Self::ParakeetUnified)
     }
 
     /// Everything that is downloaded, which tells a finished download from a
@@ -196,15 +261,17 @@ pub(crate) fn path(model: Model) -> Option<PathBuf> {
     let directory = directory()?;
     Some(match model {
         Model::Parakeet => directory.join("parakeet-tdt-v3"),
+        Model::ParakeetUnified => directory.join("parakeet-unified-en"),
         other => directory.join(other.parts()[0].name),
     })
 }
 
 /// Where each part of the model is kept.
 fn part_path(model: Model, part: &Part) -> Option<PathBuf> {
-    match model {
-        Model::Parakeet => Some(path(model)?.join(part.name)),
-        _ => path(model),
+    if model.is_folder() {
+        Some(path(model)?.join(part.name))
+    } else {
+        path(model)
     }
 }
 
@@ -222,16 +289,17 @@ pub(crate) fn is_installed(model: Model) -> bool {
 /// Deletes the model, and any half-finished download of it.
 pub(crate) fn remove(model: Model) -> Result<()> {
     let path = path(model).context("could not find where the model is kept")?;
-    let outcome = match model {
-        Model::Parakeet => fs::remove_dir_all(&path),
-        _ => fs::remove_file(&path),
+    let outcome = if model.is_folder() {
+        fs::remove_dir_all(&path)
+    } else {
+        fs::remove_file(&path)
     };
     match outcome {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error).context("could not remove the model"),
     }
-    if model != Model::Parakeet {
+    if !model.is_folder() {
         match fs::remove_file(path.with_extension("part")) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -396,6 +464,18 @@ mod tests {
                 .iter()
                 .any(|part| part.name == "vocab.txt")
         );
+        // The unified model's weights sit beside the file that names them.
+        assert!(
+            path(Model::ParakeetUnified)
+                .unwrap()
+                .ends_with("parakeet-unified-en")
+        );
+        assert!(
+            Model::ParakeetUnified
+                .parts()
+                .iter()
+                .any(|part| part.name == "encoder.int8.onnx.data")
+        );
     }
 
     #[test]
@@ -405,6 +485,8 @@ mod tests {
         assert_eq!(Model::Accurate.size_label(), "190 MB");
         assert_eq!(megabytes(0), "0 MB");
         // Windows also fetches the runtime library.
+        let unified = Model::ParakeetUnified.bytes();
+        assert!(unified > 660_000_000 && unified < 690_000_000, "{unified}");
         let parakeet = Model::Parakeet.bytes();
         assert!(
             parakeet > 670_000_000 && parakeet < 690_000_000,
