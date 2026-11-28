@@ -521,6 +521,43 @@ impl Store {
         })
     }
 
+    /// Voice play's settings. Anything unreadable falls back to the default,
+    /// so a damaged value never blocks the app.
+    pub(crate) fn voice_config(&self) -> Result<crate::voice::Config> {
+        let default = crate::voice::Config::default();
+        Ok(crate::voice::Config {
+            enabled: self.preference("voice_enabled")?.as_deref() == Some("true"),
+            hotkey: self
+                .preference("voice_hotkey")?
+                .and_then(|text| crate::voice::Hotkey::decode(&text))
+                .unwrap_or(default.hotkey),
+            model: self
+                .preference("voice_model")?
+                .and_then(|key| crate::voice::Model::from_key(&key))
+                .unwrap_or(default.model),
+        })
+    }
+
+    pub(crate) fn set_voice_config(&mut self, config: &crate::voice::Config) -> Result<()> {
+        anyhow::ensure!(config.hotkey.is_usable(), "choose a different shortcut");
+        let transaction = self.connection.transaction()?;
+        for (key, value) in [
+            (
+                "voice_enabled",
+                if config.enabled { "true" } else { "false" },
+            ),
+            ("voice_hotkey", config.hotkey.encode().as_str()),
+            ("voice_model", config.model.key()),
+        ] {
+            transaction.execute(
+                "INSERT INTO preferences (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub(crate) fn lastfm_config(&self) -> Result<crate::lastfm::Config> {
         Ok(crate::lastfm::Config {
             enabled: self.preference("lastfm_enabled")?.as_deref() == Some("true"),
@@ -1400,6 +1437,42 @@ mod tests {
         };
         store.set_lastfm_config(&connected).unwrap();
         assert_eq!(store.lastfm_config().unwrap(), connected);
+    }
+
+    #[test]
+    fn voice_play_is_off_by_default_and_its_settings_persist() {
+        let mut store = Store::open(":memory:").unwrap();
+        assert_eq!(
+            store.voice_config().unwrap(),
+            crate::voice::Config::default()
+        );
+        assert!(!store.voice_config().unwrap().enabled);
+        let config = crate::voice::Config {
+            enabled: true,
+            hotkey: crate::voice::Hotkey::from_keys(true, false, true, false, "f9").unwrap(),
+            model: crate::voice::Model::Accurate,
+        };
+        store.set_voice_config(&config).unwrap();
+        assert_eq!(store.voice_config().unwrap(), config);
+        // A shortcut that would take over typing is refused, and nothing changes.
+        let unusable = crate::voice::Config {
+            hotkey: crate::voice::Hotkey {
+                ctrl: false,
+                alt: false,
+                shift: false,
+                win: false,
+                key: "a".into(),
+            },
+            ..config.clone()
+        };
+        assert!(store.set_voice_config(&unusable).is_err());
+        assert_eq!(store.voice_config().unwrap(), config);
+        // Damaged saved values fall back instead of failing.
+        store.set_preference("voice_hotkey", "nonsense").unwrap();
+        store.set_preference("voice_model", "huge").unwrap();
+        let repaired = store.voice_config().unwrap();
+        assert_eq!(repaired.hotkey, crate::voice::Hotkey::default());
+        assert_eq!(repaired.model, crate::voice::Model::Standard);
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub(super) struct AppServices {
     session: Entity<session::Session>,
     library: Entity<library::Library>,
     link_downloads: Entity<link_downloads::LinkDownloads>,
+    voice_play: Entity<voice_play::VoicePlay>,
     image_cache: Entity<image_cache::BoundedImageCache>,
     brand_mark: Arc<gpui_kit::Image>,
     media_controls: Option<media_controls::SystemMediaControls>,
@@ -59,7 +60,19 @@ impl AppServices {
         let player =
             cx.new(|cx| player::Player::new(handle.clone(), cx.background_executor().now()));
         let session = cx.new(|_| session::Session::new(handle.clone()));
-        let library = cx.new(|_| library::Library::new(handle));
+        let library = cx.new(|_| library::Library::new(handle.clone()));
+        let voice_play = {
+            let (player, library) = (player.clone(), library.clone());
+            cx.new(|cx| {
+                voice_play::VoicePlay::new(
+                    crate::voice::Config::default(),
+                    player,
+                    library,
+                    handle,
+                    cx,
+                )
+            })
+        };
         let link_downloads =
             cx.new(|cx| link_downloads::LinkDownloads::new(Default::default(), cx));
         let image_cache = image_cache::BoundedImageCache::new(cx);
@@ -69,6 +82,7 @@ impl AppServices {
             session,
             library,
             link_downloads,
+            voice_play,
             image_cache,
             brand_mark: Arc::new(gpui_kit::Image::from_bytes(
                 gpui_kit::ImageFormat::Png,
@@ -117,6 +131,14 @@ impl AppServices {
         });
         let session = cx.new(|_| session::Session::new(handle.clone()));
         let library = cx.new(|_| library::Library::new(handle.clone()));
+        let voice_config = store
+            .as_ref()
+            .and_then(|store| store.voice_config().ok())
+            .unwrap_or_default();
+        let voice_play = {
+            let (player, library, handle) = (player.clone(), library.clone(), handle.clone());
+            cx.new(|cx| voice_play::VoicePlay::new(voice_config, player, library, handle, cx))
+        };
         let choice = store
             .as_ref()
             .and_then(|store| store.link_download_choice().ok())
@@ -191,6 +213,7 @@ impl AppServices {
             session,
             library,
             link_downloads,
+            voice_play,
             image_cache,
             brand_mark,
             media_controls,
@@ -391,6 +414,26 @@ impl AppServices {
     /// The listener's music, which outlives any window showing it.
     pub(super) fn library(cx: &App) -> Entity<library::Library> {
         cx.global::<Self>().library.clone()
+    }
+
+    /// Voice play, which listens for its shortcut for the whole process.
+    pub(super) fn voice_play(cx: &App) -> Entity<voice_play::VoicePlay> {
+        cx.global::<Self>().voice_play.clone()
+    }
+
+    /// Saves Voice play's settings and applies them. Nothing is saved if they
+    /// cannot be applied.
+    pub(super) fn set_voice_config(
+        config: crate::voice::Config,
+        cx: &mut App,
+    ) -> anyhow::Result<()> {
+        let voice = Self::voice_play(cx);
+        voice.update(cx, |voice, cx| voice.apply(config.clone(), cx))?;
+        cx.global_mut::<Self>()
+            .store
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("settings storage is unavailable"))
+            .and_then(|store| store.set_voice_config(&config))
     }
 
     /// The songs being saved from links.

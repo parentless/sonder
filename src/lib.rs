@@ -28,6 +28,7 @@ pub mod soloist;
 pub mod spotify;
 pub mod storage;
 mod trash;
+pub(crate) mod voice;
 
 pub use app::run;
 

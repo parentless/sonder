@@ -44,6 +44,19 @@ const MONTHS: &[Month] = &[
                 date: "Nov 27, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.75",
+                        notes: &[
+                            Note(
+                                New,
+                                "Voice play: hold a shortcut (Ctrl+Alt+Space by default), say a song and its artist, and let go. Sonder searches Spotify and plays it, even while a game is in front. Turn it on in Settings > Voice, where you can change the shortcut and download the speech model.",
+                            ),
+                            Note(
+                                New,
+                                "The speech model runs on your computer. Your voice is never sent anywhere or saved. Short tones tell you when it starts listening, when it stops and when it could not find the song.",
+                            ),
+                        ],
+                    },
+                    Release {
                         version: "0.8.74",
                         notes: &[
                             Note(

@@ -33,18 +33,27 @@ enum SettingsTab {
     Connections,
     /// The equalizer.
     Audio,
+    /// Play a song by saying it.
+    Voice,
     /// Updates and cache.
     System,
 }
 
 impl SettingsTab {
-    const ALL: [Self; 4] = [Self::General, Self::Connections, Self::Audio, Self::System];
+    const ALL: [Self; 5] = [
+        Self::General,
+        Self::Connections,
+        Self::Audio,
+        Self::Voice,
+        Self::System,
+    ];
 
     fn label(self) -> &'static str {
         match self {
             Self::General => "General",
             Self::Connections => "Connections",
             Self::Audio => "Audio",
+            Self::Voice => "Voice",
             Self::System => "System",
         }
     }
@@ -73,6 +82,13 @@ pub(super) struct Settings {
     /// Set between asking Last.fm for a sign-in link and finishing it.
     lastfm_token: Option<String>,
     lastfm_busy: bool,
+    /// Voice play lives for the whole process; this page shows and changes it.
+    voice: Entity<voice_play::VoicePlay>,
+    voice_focus: FocusHandle,
+    voice_capture_focus: FocusHandle,
+    /// Waiting for the next key press to become the shortcut.
+    voice_capturing: bool,
+    voice_error: Option<SharedString>,
     cache_cleared: bool,
     local_files_error: Option<SharedString>,
     /// Equalizer: the point being dragged, the graph's painted bounds (read
@@ -139,6 +155,8 @@ impl Settings {
         if let Some(status) = updater::status(cx) {
             subscriptions.push(cx.observe(&status, |_, _, cx| cx.notify()));
         }
+        let voice = services::AppServices::voice_play(cx);
+        subscriptions.push(cx.observe(&voice, |_, _, cx| cx.notify()));
         Self {
             session: services::AppServices::session(cx),
             tab: SettingsTab::General,
@@ -156,6 +174,11 @@ impl Settings {
             lastfm_status: None,
             lastfm_token: None,
             lastfm_busy: false,
+            voice,
+            voice_focus: cx.focus_handle(),
+            voice_capture_focus: cx.focus_handle(),
+            voice_capturing: false,
+            voice_error: None,
             discord_application_id,
             discord_error: None,
             cache_cleared: false,
@@ -246,6 +269,388 @@ impl Settings {
                 palette,
                 "Lyrics",
                 "Follow the words as a song plays. Lyrics come from LRCLIB, so the song’s title, artist and length are sent there when lyrics are open.",
+            ))
+            .child(card)
+    }
+
+    /// Saves a change to Voice play's settings, or says why it cannot be made.
+    fn save_voice(
+        &mut self,
+        change: impl FnOnce(&mut crate::voice::Config),
+        cx: &mut Context<Self>,
+    ) {
+        let mut config = self.voice.read(cx).config().clone();
+        change(&mut config);
+        self.voice_error = services::AppServices::set_voice_config(config, cx)
+            .err()
+            .map(|error| format!("{error:#}").into());
+        cx.notify();
+    }
+
+    /// The key press that is being waited for becomes the shortcut.
+    fn capture_shortcut(&mut self, event: &gpui_kit::KeyDownEvent, cx: &mut Context<Self>) {
+        if !self.voice_capturing {
+            return;
+        }
+        let key = event.keystroke.key.as_str();
+        cx.stop_propagation();
+        match key {
+            "escape" => {
+                self.voice_capturing = false;
+                self.voice_error = None;
+            }
+            // Holding a modifier first is how a shortcut starts.
+            "control" | "shift" | "alt" | "platform" | "function" | "meta" | "super" | "win" => {}
+            _ => {
+                let held = &event.keystroke.modifiers;
+                match crate::voice::Hotkey::from_keys(
+                    held.control,
+                    held.alt,
+                    held.shift,
+                    held.platform,
+                    key,
+                ) {
+                    Some(hotkey) => {
+                        self.voice_capturing = false;
+                        self.save_voice(|config| config.hotkey = hotkey, cx);
+                    }
+                    None => {
+                        self.voice_error = Some(
+                            "That shortcut can't be used. Hold Ctrl, Alt or Windows with a key, or use an F key on its own."
+                                .into(),
+                        );
+                    }
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn voice_model_row(
+        &self,
+        palette: CadencePalette,
+        model: crate::voice::Model,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        use crate::voice::model::megabytes;
+        let voice = self.voice.read(cx);
+        let installed = voice.installed(model);
+        let downloading = voice
+            .download()
+            .filter(|download| download.model == model)
+            .map(|download| download.received);
+        let busy = voice.download().is_some();
+        let key = crate::voice::Model::ALL
+            .iter()
+            .position(|candidate| *candidate == model)
+            .unwrap_or(0);
+        let action = if downloading.is_some() {
+            components::settings_button(palette, ("settings-voice-cancel", key), "Cancel")
+                .test_support()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.voice.update(cx, |voice, cx| voice.cancel_download(cx));
+                }))
+                .into_any_element()
+        } else if installed {
+            components::settings_button(palette, ("settings-voice-remove", key), "Remove")
+                .test_support()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let selected_and_on = {
+                        let config = this.voice.read(cx).config();
+                        config.model == model && config.enabled
+                    };
+                    if selected_and_on {
+                        this.save_voice(|config| config.enabled = false, cx);
+                    }
+                    this.voice
+                        .update(cx, |voice, cx| voice.remove_model(model, cx));
+                }))
+                .into_any_element()
+        } else {
+            components::settings_button(palette, ("settings-voice-download", key), "Download")
+                .test_support()
+                .when(busy, |button| button.opacity(0.5))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.voice
+                        .update(cx, |voice, cx| voice.start_download(model, cx));
+                }))
+                .into_any_element()
+        };
+        let detail = match downloading {
+            Some(received) => format!(
+                "Downloading {} of {}",
+                megabytes(received),
+                model.size_label()
+            ),
+            None if installed => format!("{} · Downloaded", model.size_label()),
+            None => format!("{} · {}", model.size_label(), model.detail()),
+        };
+        let fraction = downloading.map(|received| received as f32 / model.bytes() as f32);
+        h_flex()
+            .w_full()
+            .items_center()
+            .gap_3()
+            .child(
+                components::pill(
+                    palette,
+                    ("settings-voice-model", key),
+                    model.label(),
+                    selected,
+                )
+                .test_support()
+                .h_9()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.save_voice(|config| config.model = model, cx);
+                })),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_1p5()
+                    .child(
+                        div()
+                            .text_size(tokens::BODY_TEXT)
+                            .text_color(rgb(palette.text_muted))
+                            .child(if installed && selected {
+                                format!("{detail} · In use")
+                            } else {
+                                detail
+                            }),
+                    )
+                    .when_some(fraction, |column, fraction| {
+                        column.child(
+                            div()
+                                .h(px(4.))
+                                .w_full()
+                                .rounded_full()
+                                .bg(rgb(palette.control))
+                                .child(
+                                    div()
+                                        .h_full()
+                                        .w(relative(fraction.clamp(0., 1.)))
+                                        .rounded_full()
+                                        .bg(rgb(palette.text_primary)),
+                                ),
+                        )
+                    }),
+            )
+            .child(div().flex_none().child(action))
+    }
+
+    /// Hold a shortcut, say a song, and it plays: the setting, its shortcut
+    /// and the speech model it needs.
+    fn voice_section(
+        &self,
+        palette: CadencePalette,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        use crate::voice::Hotkey;
+        let voice = self.voice.read(cx);
+        let config = voice.config().clone();
+        let phase = voice.phase().clone();
+        let status = match &phase {
+            voice_play::Phase::Idle => voice.last().cloned(),
+            voice_play::Phase::Listening => Some("Listening…".into()),
+            voice_play::Phase::Working(text) => Some(format!("Working on “{text}”…").into()),
+        };
+        let supported = crate::voice::hook::SUPPORTED;
+        let download_error = voice.download_error().cloned();
+        let capturing = self.voice_capturing;
+        let shortcut = if capturing {
+            "Press the new shortcut…".to_owned()
+        } else {
+            config.hotkey.label()
+        };
+        let card = div()
+            .mt_4()
+            .rounded_2xl()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .bg(rgb(palette.surface_raised))
+            .p_5()
+            .child(Self::playback_setting_row(
+                palette,
+                "Play by voice",
+                "Hold the shortcut, say a song and its artist, then let go. Sonder searches Spotify and plays it, even while another app or a game is in front.",
+                components::focus_ring_around(
+                    palette,
+                    &self.voice_focus,
+                    window,
+                    cx,
+                    Switch::new("settings-voice-enabled")
+                        .cursor_pointer()
+                        .focus_ring(false)
+                        .checked(config.enabled)
+                        .on_click(cx.listener(|this, enabled: &bool, _, cx| {
+                            let enabled = *enabled;
+                            this.save_voice(|config| config.enabled = enabled, cx);
+                        })),
+                ),
+            ))
+            .child(
+                div()
+                    .mt_5()
+                    .pt_5()
+                    .border_t_1()
+                    .border_color(rgb(palette.border))
+                    .child(Self::playback_setting_row(
+                        palette,
+                        "Shortcut",
+                        "Hold it while you speak. Hold Ctrl, Alt or Windows with a key, or use an F key on its own.",
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("settings-voice-shortcut-field")
+                                    .test_support()
+                                    .track_focus(&self.voice_capture_focus)
+                                    .on_key_down(cx.listener(
+                                        |this, event: &gpui_kit::KeyDownEvent, _, cx| {
+                                            this.capture_shortcut(event, cx)
+                                        },
+                                    ))
+                                    // Escape is an action elsewhere; while waiting for a
+                                    // shortcut it only means "never mind".
+                                    .on_action(cx.listener(|this, _: &DismissOverlay, _, cx| {
+                                        if this.voice_capturing {
+                                            this.voice_capturing = false;
+                                            this.voice_error = None;
+                                            cx.notify();
+                                        } else {
+                                            cx.propagate();
+                                        }
+                                    }))
+                                    .h_10()
+                                    .px_3()
+                                    .flex()
+                                    .items_center()
+                                    .rounded(tokens::CONTROL_RADIUS)
+                                    .bg(rgb(palette.control))
+                                    .border_1()
+                                    .border_color(rgb(if capturing {
+                                        palette.text_primary
+                                    } else {
+                                        palette.border
+                                    }))
+                                    .text_size(tokens::BODY_TEXT)
+                                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(palette.text_primary))
+                                    .child(shortcut),
+                            )
+                            .child(
+                                components::settings_button(
+                                    palette,
+                                    "settings-voice-shortcut",
+                                    if capturing { "Cancel" } else { "Change" },
+                                )
+                                .test_support()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.voice_capturing = !this.voice_capturing;
+                                    this.voice_error = None;
+                                    if this.voice_capturing {
+                                        window.focus(&this.voice_capture_focus, cx);
+                                    }
+                                    cx.notify();
+                                })),
+                            )
+                            .when(config.hotkey != Hotkey::default() && !capturing, |row| {
+                                row.child(
+                                    components::settings_button(
+                                        palette,
+                                        "settings-voice-shortcut-reset",
+                                        "Reset",
+                                    )
+                                    .test_support()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.save_voice(
+                                            |config| config.hotkey = Hotkey::default(),
+                                            cx,
+                                        );
+                                    })),
+                                )
+                            }),
+                    )),
+            )
+            .child(
+                div()
+                    .mt_5()
+                    .pt_5()
+                    .border_t_1()
+                    .border_color(rgb(palette.border))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .text_color(rgb(palette.text))
+                            .child("Speech model"),
+                    )
+                    .child(
+                        div()
+                            .mt_1()
+                            .text_size(tokens::BODY_TEXT)
+                            .line_height(relative(1.45))
+                            .text_color(rgb(palette.text_muted))
+                            .child("This is what turns your voice into words. It runs entirely on this computer: your voice is never sent anywhere or saved. It understands English and is downloaded once from its publisher, whisper.cpp on Hugging Face."),
+                    )
+                    .child(
+                        v_flex().mt_4().gap_3().children(
+                            crate::voice::Model::ALL
+                                .into_iter()
+                                .map(|model| {
+                                    self.voice_model_row(palette, model, config.model == model, cx)
+                                }),
+                        ),
+                    ),
+            )
+            .child(
+                div()
+                    .mt_5()
+                    .pt_5()
+                    .border_t_1()
+                    .border_color(rgb(palette.border))
+                    .child(
+                        div()
+                            .id("settings-voice-status")
+                            .test_support()
+                            .text_size(tokens::BODY_TEXT)
+                            .text_color(rgb(palette.text))
+                            .child(status.unwrap_or_else(|| "Nothing played by voice yet.".into())),
+                    )
+                    .when_some(
+                        self.voice_error.clone().or(download_error),
+                        |card, error| {
+                            card.child(
+                                div()
+                                    .id("settings-voice-error")
+                                    .test_support()
+                                    .mt_2()
+                                    .text_size(tokens::BODY_TEXT)
+                                    .text_color(rgb(palette.text))
+                                    .child(error),
+                            )
+                        },
+                    )
+                    .child(
+                        div()
+                            .mt_2()
+                            .text_size(tokens::CAPTION_TEXT)
+                            .text_color(rgb(palette.text_muted))
+                            .child(if supported {
+                                "Windows does not let Sonder hear the shortcut while a window running as administrator has focus. Start Sonder as administrator too if a game does."
+                            } else {
+                                "Voice play works on Windows only for now."
+                            }),
+                    ),
+            );
+        div()
+            .mt_12()
+            .child(Self::settings_section_header(
+                palette,
+                "Voice play",
+                "Start a song by saying its name.",
             ))
             .child(card)
     }
@@ -667,6 +1072,9 @@ impl Settings {
                     )
                     .when(tab == SettingsTab::Audio, |content| {
                         content.child(self.audio_tab(palette, window, cx))
+                    })
+                    .when(tab == SettingsTab::Voice, |content| {
+                        content.child(self.voice_section(palette, window, cx).mt_0())
                     })
                     .when(tab == SettingsTab::Connections, |content| content
                     .child(

@@ -2985,8 +2985,8 @@ fn windows_brand_and_search_share_the_same_vertical_center() {
 #[test]
 fn settings_cache_cleanup_button_is_reachable_and_does_not_send_playback_commands() {
     let mut fixture = Fixture::new(true);
-    // Cache lives under the System tab (fourth).
-    fixture.update(|window, cx| window.click(("settings-tab", 3usize), cx));
+    // Cache lives under the System tab (fifth).
+    fixture.update(|window, cx| window.click(("settings-tab", 4usize), cx));
     fixture.update(|window, cx| {
         let position = window.find("settings-page").bounds().center();
         window.dispatch_event(
@@ -3003,6 +3003,94 @@ fn settings_cache_cleanup_button_is_reachable_and_does_not_send_playback_command
     fixture.update(|window, cx| window.click("settings-clear-cache", cx));
     assert_eq!(fixture.route(), Route::Settings);
     fixture.no_commands();
+}
+
+fn open_voice_settings(fixture: &mut Fixture) {
+    fixture.update(|window, cx| window.click(("settings-tab", 3usize), cx));
+}
+
+fn voice_config(fixture: &mut Fixture) -> crate::voice::Config {
+    fixture.update(|_, cx| {
+        services::AppServices::voice_play(cx)
+            .read(cx)
+            .config()
+            .clone()
+    })
+}
+
+#[test]
+fn voice_play_cannot_be_turned_on_without_its_model_and_says_why() {
+    let mut fixture = Fixture::new(true);
+    open_voice_settings(&mut fixture);
+    assert!(!voice_config(&mut fixture).enabled);
+    fixture.update(|window, cx| window.click("settings-voice-enabled", cx));
+    assert!(!voice_config(&mut fixture).enabled);
+    // The reason is on the page, so the switch never fails silently.
+    assert!(fixture.update(|window, _| window.try_find("settings-voice-error").is_some()));
+    fixture.no_commands();
+}
+
+#[test]
+fn the_voice_shortcut_is_changed_by_pressing_the_new_one() {
+    let mut fixture = Fixture::new(true);
+    open_voice_settings(&mut fixture);
+    assert_eq!(
+        voice_config(&mut fixture).hotkey,
+        crate::voice::Hotkey::default()
+    );
+    fixture.update(|window, cx| window.click("settings-voice-shortcut", cx));
+    // A bare letter would take over typing, so it is refused and listening
+    // continues.
+    fixture.press("v");
+    assert_eq!(
+        voice_config(&mut fixture).hotkey,
+        crate::voice::Hotkey::default()
+    );
+    assert!(fixture.update(|window, _| window.try_find("settings-voice-error").is_some()));
+    fixture.press("ctrl-shift-v");
+    let hotkey = voice_config(&mut fixture).hotkey;
+    assert_eq!(hotkey.encode(), "ctrl+shift+v");
+    // Listening ended, and Reset brings the default back.
+    fixture.press("x");
+    assert_eq!(voice_config(&mut fixture).hotkey, hotkey);
+    fixture.update(|window, cx| window.click("settings-voice-shortcut-reset", cx));
+    assert_eq!(
+        voice_config(&mut fixture).hotkey,
+        crate::voice::Hotkey::default()
+    );
+}
+
+#[test]
+fn escape_stops_waiting_for_a_voice_shortcut() {
+    let mut fixture = Fixture::new(true);
+    open_voice_settings(&mut fixture);
+    fixture.update(|window, cx| window.click("settings-voice-shortcut", cx));
+    fixture.press("escape");
+    fixture.press("ctrl-alt-q");
+    assert_eq!(
+        voice_config(&mut fixture).hotkey,
+        crate::voice::Hotkey::default()
+    );
+}
+
+#[test]
+fn the_voice_model_can_be_chosen_before_it_is_downloaded() {
+    let mut fixture = Fixture::new(true);
+    open_voice_settings(&mut fixture);
+    assert_eq!(
+        voice_config(&mut fixture).model,
+        crate::voice::Model::Standard
+    );
+    fixture.update(|window, cx| window.click(("settings-voice-model", 1usize), cx));
+    assert_eq!(
+        voice_config(&mut fixture).model,
+        crate::voice::Model::Accurate
+    );
+    fixture.update(|window, cx| window.click(("settings-voice-model", 0usize), cx));
+    assert_eq!(
+        voice_config(&mut fixture).model,
+        crate::voice::Model::Standard
+    );
 }
 
 #[test]
@@ -4093,6 +4181,11 @@ fn settings_tabs_show_one_group_at_a_time() {
         assert!(window.try_find("settings-clear-cache").is_none());
     });
     fixture.update(|window, cx| window.click(("settings-tab", 3usize), cx));
+    fixture.update(|window, _| {
+        assert!(window.try_find("settings-voice-enabled").is_some());
+        assert!(window.try_find("equalizer-graph").is_none());
+    });
+    fixture.update(|window, cx| window.click(("settings-tab", 4usize), cx));
     fixture.update(|window, _| {
         assert!(window.try_find("settings-clear-cache").is_some());
         assert!(window.try_find("equalizer-graph").is_none());

@@ -45,6 +45,7 @@ enum Scene {
     Settings,
     SettingsAutoplayOff,
     SettingsCache,
+    SettingsVoice,
     SettingsAudio,
     SettingsAudioShaped,
     LocalFiles,
@@ -117,6 +118,7 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("playlist-zoom-large", Scene::PlaylistZoomLarge),
         ("settings", Scene::Settings),
         ("settings-cache", Scene::SettingsCache),
+        ("settings-voice", Scene::SettingsVoice),
         ("settings-audio", Scene::SettingsAudio),
         ("settings-audio-shaped", Scene::SettingsAudioShaped),
         ("settings-autoplay-off", Scene::SettingsAutoplayOff),
@@ -525,6 +527,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                 Scene::Settings
                 | Scene::SettingsAutoplayOff
                 | Scene::SettingsCache
+                | Scene::SettingsVoice
                 | Scene::SettingsAudio
                 | Scene::SettingsAudioShaped => {
                     workspace.open_settings(cx);
@@ -762,9 +765,16 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
             .unwrap();
             settle(&mut cx, handle.into());
         }
-        Scene::SettingsCache => {
+        Scene::SettingsVoice => {
             cx.update_window(handle.into(), |_, window, cx| {
                 window.click(("settings-tab", 3usize), cx);
+            })
+            .unwrap();
+            settle(&mut cx, handle.into());
+        }
+        Scene::SettingsCache => {
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.click(("settings-tab", 4usize), cx);
             })
             .unwrap();
             settle(&mut cx, handle.into());
