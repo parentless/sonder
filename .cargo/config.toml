@@ -1,5 +1,8 @@
 [env]
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+# whisper.cpp (speech to text) must not be tuned to the machine that builds it,
+# or the released app could crash on an older processor.
+GGML_NATIVE = "OFF"
 
 # Ship a standalone Windows executable without a VC++ runtime installer.
 [target.x86_64-pc-windows-msvc]
