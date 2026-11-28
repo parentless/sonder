@@ -75,7 +75,9 @@ impl ArtistHeader {
         }
     }
 
-    pub fn scroll(&mut self, offset: f32, available: f32, cx: &mut Context<Self>) {
+    /// The dock progress and hero shift for a page scrolled `offset` rems down
+    /// with `available` rems of scrolling in all.
+    fn resolve(offset: f32, available: f32) -> (f32, f32) {
         let distance = available.min(DOCK_DISTANCE);
         let target = if distance > 0. {
             (offset / distance).clamp(0., 1.)
@@ -83,7 +85,18 @@ impl ArtistHeader {
             0.
         };
         // The big identity scrolls with the page, so it follows the real offset.
-        let scrolled = offset.clamp(0., distance.max(0.));
+        (target, offset.clamp(0., distance.max(0.)))
+    }
+
+    /// Whether the page has moved without this header hearing of it, as when the
+    /// list below it grows or shrinks and the page is pulled to a new offset.
+    pub fn is_stale(&self, offset: f32, available: f32) -> bool {
+        let (target, scrolled) = Self::resolve(offset, available);
+        self.target != target || (self.scrolled - scrolled).abs() > 0.005
+    }
+
+    pub fn scroll(&mut self, offset: f32, available: f32, cx: &mut Context<Self>) {
+        let (target, scrolled) = Self::resolve(offset, available);
         let moved = (self.scrolled - scrolled).abs() > 0.005;
         if self.target != target {
             self.target = target;

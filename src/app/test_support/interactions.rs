@@ -5486,6 +5486,8 @@ fn whats_new_opens_from_the_sidebar_and_back_returns() {
     fixture.update(|window, _| assert!(window.try_find(("whats-new-month", 1usize)).is_some()));
     fixture.update(|window, cx| window.click("detail-back", cx));
     assert_eq!(fixture.route(), before);
+    // Once opened, the row is dismissed until the next version.
+    fixture.update(|window, _| assert!(window.try_find("sidebar-whats-new").is_none()));
     fixture.no_commands();
 }
 
@@ -5585,6 +5587,96 @@ fn popular_songs_stop_at_five_until_show_more_is_pressed() {
     fixture.update(|window, _| {
         assert!(window.try_find(("spotify-track", 5usize)).is_none());
     });
+    fixture.no_commands();
+}
+
+/// The portrait is drawn from the header's own record of the scroll. It must
+/// agree with where the page really is, however the page got there.
+fn assert_hero_follows_the_page(fixture: &mut Fixture, page_top: Pixels) {
+    fixture.update(|window, _| {
+        let header = window.find("artist-header").bounds();
+        let offset = page_top - header.origin.y;
+        let rem = window.rem_size();
+        match window.try_find("artist-portrait") {
+            Some(portrait) => {
+                let expected = page_top + rem * 8. - offset;
+                assert!(
+                    (portrait.bounds().origin.y - expected).abs() < px(1.),
+                    "portrait at {:?}, page offset {:?}, expected {:?}",
+                    portrait.bounds().origin.y,
+                    offset,
+                    expected
+                );
+            }
+            None => assert!(
+                offset > px(1.),
+                "the portrait is gone with the page back at the top"
+            ),
+        }
+    });
+}
+
+#[test]
+fn the_artist_header_follows_the_page_when_the_popular_list_changes_height() {
+    let mut fixture = Fixture::new(false);
+    let workspace = fixture.workspace.clone().unwrap();
+    fixture.update(|_, cx| {
+        cx.set_reduce_motion(true);
+        workspace.upgrade().unwrap().update(cx, |workspace, cx| {
+            workspace.open_artist(
+                artist_ref("Artist", "artist-popular"),
+                Route::LikedSongs,
+                cx,
+            );
+        });
+    });
+    let BackendCommand::LoadArtist { respond, .. } = fixture.backend.commands.try_recv().unwrap()
+    else {
+        panic!("expected artist request");
+    };
+    respond
+        .send(Ok((
+            model::Artist {
+                genres: Vec::new(),
+                provider: model::Provider::Spotify,
+                source_id: "artist-popular".into(),
+                spotify_uri: None,
+                name: "Artist".into(),
+                artwork_url: None,
+            },
+            (0..10).map(track).collect(),
+            Vec::new().into(),
+        )))
+        .unwrap();
+    fixture.update(|_, _| {});
+    let scroll = |fixture: &mut Fixture, dy: f32| {
+        fixture.update(|window, cx| {
+            window.dispatch_event(
+                gpui_kit::ScrollWheelEvent {
+                    position: point(px(700.), px(400.)),
+                    delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(dy))),
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+        });
+        fixture.update(|_, _| {});
+    };
+    let mut page_top = px(0.);
+    fixture.update(|window, _| page_top = window.find("artist-header").bounds().origin.y);
+    scroll(&mut fixture, -200.);
+    assert_hero_follows_the_page(&mut fixture, page_top);
+    fixture.update(|window, cx| window.click("artist-popular-toggle", cx));
+    fixture.update(|_, _| {});
+    fixture.update(|_, _| {});
+    assert_hero_follows_the_page(&mut fixture, page_top);
+    // Far down, then fewer rows: the page is pulled back up by the shorter list.
+    scroll(&mut fixture, -2000.);
+    fixture.update(|window, cx| window.click("artist-popular-toggle", cx));
+    fixture.update(|_, _| {});
+    fixture.update(|_, _| {});
+    assert_hero_follows_the_page(&mut fixture, page_top);
     fixture.no_commands();
 }
 

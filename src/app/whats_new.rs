@@ -42,39 +42,54 @@ const MONTHS: &[Month] = &[
         days: &[
             Day {
                 date: "Nov 28, 2026",
-                releases: &[Release {
-                    version: "0.8.77",
-                    notes: &[
-                        Note(
-                            New,
-                            "When Spotify limits Sonder's requests, search still works. It now asks through your playback connection, which has no such limit, so Voice play and the search box keep finding songs and you can still play them.",
-                        ),
-                        Note(
-                            New,
-                            "A Reset Spotify limit button appears in Settings > Connections only while Spotify is limiting Sonder. It lets requests through again right away.",
-                        ),
-                        Note(
-                            New,
-                            "Voice play now looks in your library first. Songs you play and like often win over a vague search, and local files can be matched too.",
-                        ),
-                        Note(
-                            New,
-                            "An optional listening animation: a ring of dots reacts to your voice, then shows what Sonder heard. Turn it on in Settings > Voice.",
-                        ),
-                        Note(
-                            New,
-                            "Parakeet v3 is a new, more accurate speech model for Voice play. It downloads about 680 MB and uses about 1.3 GB of memory only while you hold the shortcut.",
-                        ),
-                        Note(
-                            Better,
-                            "Loading an album now shows placeholder rows that match real track rows exactly, with numbers and columns, so nothing shifts when tracks arrive.",
-                        ),
-                        Note(
-                            Better,
-                            "Smoother fades in track lists, lyrics and the sidebar.",
-                        ),
-                    ],
-                }],
+                releases: &[
+                    Release {
+                        version: "0.8.78",
+                        notes: &[
+                            Note(
+                                Better,
+                                "Once you open What’s new, it leaves the sidebar until the next update. You can open it again any time from Settings.",
+                            ),
+                            Note(
+                                Fixed,
+                                "Show more and Show fewer on an artist page no longer make the artist’s name and portrait disappear or jump.",
+                            ),
+                        ],
+                    },
+                    Release {
+                        version: "0.8.77",
+                        notes: &[
+                            Note(
+                                New,
+                                "When Spotify limits Sonder's requests, search still works. It now asks through your playback connection, which has no such limit, so Voice play and the search box keep finding songs and you can still play them.",
+                            ),
+                            Note(
+                                New,
+                                "A Reset Spotify limit button appears in Settings > Connections only while Spotify is limiting Sonder. It lets requests through again right away.",
+                            ),
+                            Note(
+                                New,
+                                "Voice play now looks in your library first. Songs you play and like often win over a vague search, and local files can be matched too.",
+                            ),
+                            Note(
+                                New,
+                                "An optional listening animation: a ring of dots reacts to your voice, then shows what Sonder heard. Turn it on in Settings > Voice.",
+                            ),
+                            Note(
+                                New,
+                                "Parakeet v3 is a new, more accurate speech model for Voice play. It downloads about 680 MB and uses about 1.3 GB of memory only while you hold the shortcut.",
+                            ),
+                            Note(
+                                Better,
+                                "Loading an album now shows placeholder rows that match real track rows exactly, with numbers and columns, so nothing shifts when tracks arrive.",
+                            ),
+                            Note(
+                                Better,
+                                "Smoother fades in track lists, lyrics and the sidebar.",
+                            ),
+                        ],
+                    },
+                ],
             },
             Day {
                 date: "Nov 27, 2026",

@@ -633,7 +633,9 @@ impl Sidebar {
             .pt_2()
             .border_t_1()
             .border_color(rgb(palette.border))
-            .child(row)
+            // Opening the notes dismisses the row until the next update; Settings
+            // keeps a way back. It stays while the notes are the open page.
+            .when(unseen || selected, |footer| footer.child(row))
             // Mounted while the rail moves, on one line and fading with it, so it
             // never wraps into the narrow rail and then unwraps as the rail opens.
             .when(!collapsed || progress > 0.001, |footer| {

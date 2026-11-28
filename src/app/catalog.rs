@@ -2494,7 +2494,24 @@ impl Render for ArtistPage {
                             {
                                 let page = cx.weak_entity();
                                 let self_header = self.header_motion.clone();
+                                let content_state = self.content_state.clone();
                                 move |bounds, window, cx| {
+                                    // The list has laid out by now. If it moved the page
+                                    // itself, as when a taller or shorter popular list pulls
+                                    // it to a new offset, no scroll event told the header.
+                                    let rem = window.rem_size();
+                                    let offset =
+                                        -content_state.scroll_px_offset_for_scrollbar().y / rem;
+                                    let available =
+                                        content_state.max_offset_for_scrollbar().y / rem;
+                                    if self_header.read(cx).is_stale(offset, available) {
+                                        let header = self_header.clone();
+                                        cx.defer(move |cx| {
+                                            header.update(cx, |header, cx| {
+                                                header.scroll(offset, available, cx)
+                                            });
+                                        });
+                                    }
                                     let origin = bounds.origin;
                                     let width = bounds.size.width;
                                     let geometry_changed = {
