@@ -232,8 +232,15 @@ impl TrackList {
                 .as_ref()
                 .is_some_and(|tracks| tracks.borrow().contains(index));
             if !unavailable {
-                return track_row::track_skeleton_row(palette, index, compact, self.inline_rows)
-                    .into_any_element();
+                return track_row::track_skeleton_row(
+                    palette,
+                    index,
+                    compact,
+                    self.inline_rows,
+                    // Album rows carry no cover, and neither do their placeholders.
+                    self.current_album_id.is_none() && self.placeholder_rows == 0,
+                )
+                .into_any_element();
             }
             return div()
                 .h_16()

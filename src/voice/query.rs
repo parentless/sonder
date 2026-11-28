@@ -144,13 +144,99 @@ fn words(text: &str) -> Vec<String> {
     found
 }
 
-/// How many of `wanted` appear in `have`, as a fraction of `wanted`.
+/// How the word sounds, roughly: enough that "scene" and "seen", or "knight"
+/// and "night", come out the same. Speech models spell by ear, so a word that
+/// sounds right is often spelled as another word.
+fn sound(word: &str) -> String {
+    let mut text = word.to_owned();
+    for (from, to) in [
+        ("ph", "f"),
+        ("ck", "k"),
+        ("sce", "se"),
+        ("sci", "si"),
+        ("ce", "se"),
+        ("ci", "si"),
+        ("cy", "sy"),
+        ("kn", "n"),
+        ("wr", "r"),
+        ("wh", "w"),
+        ("gh", ""),
+        ("c", "k"),
+        ("q", "k"),
+        ("z", "s"),
+        ("x", "ks"),
+        ("y", "i"),
+    ] {
+        text = text.replace(from, to);
+    }
+    // A silent final e, and doubled letters, say nothing.
+    if text.len() > 3 && text.ends_with('e') && !text.ends_with("ee") {
+        text.pop();
+    }
+    let mut out = String::new();
+    for letter in text.chars() {
+        if !out.ends_with(letter) {
+            out.push(letter);
+        }
+    }
+    out
+}
+
+fn distance(a: &[char], b: &[char]) -> usize {
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, x) in a.iter().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, y) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (above + 1)
+                .min(row[j] + 1)
+                .min(diagonal + usize::from(x != y));
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
+/// How alike two spoken words are: 1 for the same word, a little less for one
+/// that sounds the same or is a letter or two off, 0 for different words.
+/// Short words must match exactly, so "in" never stands for "on".
+fn similarity(wanted: &str, have: &str) -> f32 {
+    if wanted == have {
+        return 1.;
+    }
+    let (a, b): (Vec<char>, Vec<char>) = (wanted.chars().collect(), have.chars().collect());
+    if a.len() < 4 || b.len() < 4 {
+        // "yt" and "dj" are real words in titles: only the same letters count.
+        return 0.;
+    }
+    if sound(wanted) == sound(have) {
+        return 0.9;
+    }
+    let apart = distance(&a, &b);
+    let closeness = 1. - apart as f32 / a.len().max(b.len()) as f32;
+    if closeness >= 0.74 {
+        closeness * 0.9
+    } else {
+        0.
+    }
+}
+
+/// How much of `wanted` is in `have`, as a fraction of `wanted`. A word that
+/// was misheard but sounds alike counts for most of a word.
 fn recall(wanted: &[String], have: &[String]) -> f32 {
     if wanted.is_empty() {
         return 0.;
     }
-    let found = wanted.iter().filter(|word| have.contains(word)).count();
-    found as f32 / wanted.len() as f32
+    let found: f32 = wanted
+        .iter()
+        .map(|word| {
+            have.iter()
+                .map(|other| similarity(word, other))
+                .fold(0., f32::max)
+        })
+        .sum();
+    found / wanted.len() as f32
 }
 
 fn score(request: &Request, track: &Track) -> f32 {
@@ -533,5 +619,33 @@ mod tests {
             Some(1)
         );
         assert_eq!(pick(&request, &[]), None);
+    }
+
+    #[test]
+    fn a_misheard_word_still_finds_the_song_the_listener_has() {
+        let liked = vec![
+            track("Scene Dreams YT", "Some Artist", "Album"),
+            track("Seen It All", "Other", "Album"),
+        ];
+        let known = Known {
+            liked: &liked,
+            favorites: &[],
+            recent: &[],
+            local: &[],
+        };
+        let title = |said: &str| pick_known(&parse(said).unwrap(), &known).map(|track| track.title);
+        // Heard "seen" for "scene", and heard only the end of the name.
+        assert_eq!(title("seen dreams yt"), Some("Scene Dreams YT".into()));
+        assert_eq!(title("dreams yt"), Some("Scene Dreams YT".into()));
+        assert_eq!(title("play seen dreams yt"), Some("Scene Dreams YT".into()));
+    }
+
+    #[test]
+    fn words_that_only_sound_alike_in_part_are_not_the_same() {
+        assert!(similarity("scene", "seen") > 0.85);
+        assert!(similarity("knight", "night") > 0.85);
+        assert_eq!(similarity("son", "seen"), 0.);
+        assert_eq!(similarity("in", "on"), 0.);
+        assert_eq!(similarity("love", "hate"), 0.);
     }
 }

@@ -44,6 +44,23 @@ const MONTHS: &[Month] = &[
                 date: "Nov 28, 2026",
                 releases: &[
                     Release {
+                        version: "0.8.79",
+                        notes: &[
+                            Note(
+                                Better,
+                                "Voice play no longer needs to hear a song exactly. A word it mishears, like “seen” for “scene”, or only the end of a title, still finds the song you listen to.",
+                            ),
+                            Note(
+                                Fixed,
+                                "The listening animation is switched off for now, while a problem with it is fixed. Voice play itself is unchanged.",
+                            ),
+                            Note(
+                                Fixed,
+                                "Loading track lists show a cover placeholder in each row, as the real rows have.",
+                            ),
+                        ],
+                    },
+                    Release {
                         version: "0.8.78",
                         notes: &[
                             Note(

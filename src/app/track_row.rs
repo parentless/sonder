@@ -88,6 +88,7 @@ pub(super) fn track_skeleton_row(
     index: usize,
     compact: bool,
     dense: bool,
+    artwork: bool,
 ) -> impl IntoElement {
     // A few lengths, so the rows do not look stamped from one mould.
     const TITLES: [f32; 6] = [0.52, 0.38, 0.64, 0.45, 0.58, 0.33];
@@ -119,17 +120,35 @@ pub(super) fn track_skeleton_row(
                     .min_w_0()
                     .pr(COLUMN_GUTTER)
                     .flex()
-                    .flex_col()
-                    .child(placeholder_line(
-                        palette,
-                        tokens::BODY_TEXT,
-                        Placeholder::Fraction(TITLES[index % TITLES.len()]),
-                    ))
-                    .child(placeholder_line(
-                        palette,
-                        Rems(0.75),
-                        Placeholder::Fraction(ARTISTS[index % ARTISTS.len()]),
-                    )),
+                    .items_center()
+                    .gap_2p5()
+                    // The cover, where the real row has one.
+                    .when(artwork, |column| {
+                        column.child(
+                            div()
+                                .flex_none()
+                                .size(tokens::TRACK_ARTWORK.size)
+                                .rounded(tokens::TRACK_ARTWORK.radius)
+                                .bg(rgb(palette.control)),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(placeholder_line(
+                                palette,
+                                tokens::BODY_TEXT,
+                                Placeholder::Fraction(TITLES[index % TITLES.len()]),
+                            ))
+                            .child(placeholder_line(
+                                palette,
+                                Rems(0.75),
+                                Placeholder::Fraction(ARTISTS[index % ARTISTS.len()]),
+                            )),
+                    ),
             )
             .when(!compact, |row| {
                 row.child(

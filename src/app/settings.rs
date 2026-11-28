@@ -595,7 +595,8 @@ impl Settings {
                             }),
                     )),
             )
-            .child(
+            .when(super::voice_play::ANIMATION_AVAILABLE, |card| {
+                card.child(
                 div()
                     .mt_5()
                     .pt_5()
@@ -620,7 +621,8 @@ impl Settings {
                                 })),
                         ),
                     )),
-            )
+                )
+            })
             .child(
                 div()
                     .mt_5()

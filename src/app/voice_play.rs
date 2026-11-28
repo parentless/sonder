@@ -24,6 +24,11 @@ pub(super) enum Phase {
     Working(SharedString),
 }
 
+/// The listening animation is switched off for everyone while it is looked at
+/// again: it caused trouble on some machines. Settings hides its switch and no
+/// window opens, whatever an earlier version saved.
+pub(super) const ANIMATION_AVAILABLE: bool = false;
+
 /// What the listening animation shows. Separate from [`Phase`], which is for
 /// Settings: this one carries the times the animation moves by.
 #[derive(Clone, Debug)]
@@ -258,7 +263,7 @@ impl VoicePlay {
 
     /// Opens the animation, if the listener turned it on and it is not open.
     fn show_overlay(&mut self, cx: &mut Context<Self>) {
-        if !self.config.animation || self.overlay.is_some() {
+        if !ANIMATION_AVAILABLE || !self.config.animation || self.overlay.is_some() {
             return;
         }
         let voice = cx.entity();
