@@ -97,7 +97,7 @@ fn work(model: &Path) -> Result<String> {
         "the request was too large"
     );
     let (prompt, samples) = decode_request(&request)?;
-    transcribe::run(&context?, &samples, &prompt)
+    transcribe::run(&mut context?, &samples, &prompt)
 }
 
 /// A helper process waiting for its request.

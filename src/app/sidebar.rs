@@ -977,7 +977,15 @@ impl Sidebar {
             .map(move |fill| {
                 let (width, left, pad) =
                     sidebar_fill_geometry(BRAND_ROW_PAD, BRAND_LOGO_SIZE, row_width, progress);
-                fill.w(width).ml(left).pl(pad)
+                // The logo is a bitmap, so a fractional position during the glide
+                // is drawn rounded one way and then lands a pixel off when the
+                // glide ends. Keep its offset on whole device pixels throughout.
+                let device = |size: Rems| {
+                    let scale = window.scale_factor();
+                    let pixels = size.to_pixels(window.rem_size());
+                    (pixels * scale).round() / scale
+                };
+                fill.w(width).ml(device(left)).pl(device(pad))
             });
         let brand = components::bare_button("sidebar-toggle")
             .test_support()

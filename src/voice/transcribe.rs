@@ -1,4 +1,5 @@
-//! Turns recorded speech into text with whisper.cpp, on this computer.
+//! Turns recorded speech into text on this computer, with whisper.cpp or
+//! NVIDIA's Parakeet.
 //!
 //! This runs only inside the short-lived helper process (see `worker.rs`), so
 //! the speech model exists in memory only while the shortcut is held and its
@@ -51,20 +52,74 @@ pub(crate) fn audio_context(samples: usize) -> i32 {
     (positions + 160).clamp(MIN_AUDIO_CTX, MAX_AUDIO_CTX)
 }
 
-/// Loads a model. Slow, so the helper does it while the listener is still
-/// speaking.
-pub(crate) fn load(path: &Path) -> Result<WhisperContext> {
+/// A loaded speech model, of either kind.
+pub(crate) enum Engine {
+    Whisper(WhisperContext),
+    Parakeet(Box<parakeet_rs::ParakeetTDT>),
+}
+
+/// Loads a model: a file is a whisper.cpp model, a folder is Parakeet. Slow,
+/// so the helper does it while the listener is still speaking.
+pub(crate) fn load(path: &Path) -> Result<Engine> {
+    if path.is_dir() {
+        return load_parakeet(path).map(|model| Engine::Parakeet(Box::new(model)));
+    }
     let Some(text) = path.to_str() else {
         bail!("the model's folder has a name Sonder cannot read");
     };
     let mut parameters = WhisperContextParameters::default();
     parameters.use_gpu(false);
     WhisperContext::new_with_params(text, parameters)
+        .map(Engine::Whisper)
         .context("could not load the speech model; try removing it and downloading it again")
 }
 
-/// Turns the audio into text.
-pub(crate) fn run(context: &WhisperContext, samples: &[f32], prompt: &str) -> Result<String> {
+fn load_parakeet(folder: &Path) -> Result<parakeet_rs::ParakeetTDT> {
+    use parakeet_rs::{ExecutionConfig, ParakeetTDT};
+    // The ONNX Runtime library is downloaded with the model. Without one there
+    // (a development build, say) the usual search applies, which honours
+    // ORT_DYLIB_PATH.
+    let runtime = folder.join(super::model::RUNTIME_DLL);
+    let builder = if runtime.is_file() {
+        parakeet_rs::ort::init_from(&runtime).context(
+            "could not load the speech runtime; Windows may need the Visual C++ runtime installed",
+        )?
+    } else {
+        parakeet_rs::ort::init()
+    };
+    let environment = builder
+        .build()
+        .context("could not start the speech runtime")?;
+    let cores = thread::available_parallelism().map_or(2, usize::from);
+    let config = ExecutionConfig::new()
+        .with_environment(environment)
+        .with_intra_threads(cores.clamp(2, 8));
+    ParakeetTDT::from_pretrained(folder, Some(config))
+        .context("could not load the speech model; try removing it and downloading it again")
+}
+
+/// Turns the audio into text. `prompt` is whisper's; Parakeet has no use
+/// for one.
+pub(crate) fn run(engine: &mut Engine, samples: &[f32], prompt: &str) -> Result<String> {
+    match engine {
+        Engine::Whisper(context) => run_whisper(context, samples, prompt),
+        Engine::Parakeet(model) => run_parakeet(model, samples),
+    }
+}
+
+fn run_parakeet(model: &mut parakeet_rs::ParakeetTDT, samples: &[f32]) -> Result<String> {
+    use parakeet_rs::Transcriber as _;
+    let mut audio = samples.to_vec();
+    if audio.len() < MIN_SAMPLES {
+        audio.resize(MIN_SAMPLES, 0.);
+    }
+    let result = model
+        .transcribe_samples(audio, 16_000, 1, None)
+        .map_err(|error| anyhow::anyhow!("speech to text failed: {error}"))?;
+    Ok(result.text.trim().to_owned())
+}
+
+fn run_whisper(context: &WhisperContext, samples: &[f32], prompt: &str) -> Result<String> {
     let mut state = context
         .create_state()
         .context("could not prepare speech to text")?;
@@ -142,7 +197,7 @@ mod tests {
         let model = std::env::var("SONDER_VOICE_MODEL").expect("SONDER_VOICE_MODEL");
         let wavs = std::env::var("SONDER_VOICE_WAVS").expect("SONDER_VOICE_WAVS");
         let started = std::time::Instant::now();
-        let context = load(Path::new(&model)).expect("the model loads");
+        let mut context = load(Path::new(&model)).expect("the model loads");
         println!("loaded in {:?}", started.elapsed());
         for wav in wavs.split(',') {
             let bytes = std::fs::read(wav).expect("recording");
@@ -152,7 +207,7 @@ mod tests {
                 .collect();
             let started = std::time::Instant::now();
             let text =
-                run(&context, &samples, &prompt(&["The Weeknd".into()])).expect("a transcript");
+                run(&mut context, &samples, &prompt(&["The Weeknd".into()])).expect("a transcript");
             println!("{wav}: {text:?} in {:?}", started.elapsed());
         }
     }

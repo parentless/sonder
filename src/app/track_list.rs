@@ -18,6 +18,8 @@ pub(super) struct TrackList {
     tracks: Arc<[model::Track]>,
     playlist_tracks: Option<Rc<RefCell<playlist_buffer::PlaylistBuffer>>>,
     shown_playlist_len: usize,
+    /// Rows to show as placeholders while the tracks load, when there are none.
+    placeholder_rows: usize,
     /// The row whose action menu is open, keyed by source ID and row index so
     /// the same track appearing twice opens only the row that was clicked.
     menu_open: Option<(Rc<str>, usize)>,
@@ -47,6 +49,7 @@ impl TrackList {
             tracks: Arc::default(),
             playlist_tracks: None,
             shown_playlist_len: 0,
+            placeholder_rows: 0,
             menu_open: None,
             inline_rows: false,
             queue_mode: false,
@@ -116,7 +119,32 @@ impl TrackList {
         }
         self.id = id;
         self.playlist_tracks = None;
+        self.placeholder_rows = 0;
         self.tracks = tracks;
+        self.last_viewport = None;
+        self.menu_open = None;
+        cx.notify();
+    }
+
+    /// Shows `count` placeholder rows, shaped like the rows that will replace
+    /// them, while the tracks are still loading.
+    pub(super) fn show_placeholder(
+        &mut self,
+        id: impl Into<ElementId>,
+        count: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let id = Some(id.into());
+        if self.id == id && self.placeholder_rows == count && self.tracks.is_empty() {
+            return;
+        }
+        if self.id != id {
+            self.scroll = gpui_kit::UniformListScrollHandle::new();
+        }
+        self.id = id;
+        self.playlist_tracks = None;
+        self.tracks = Arc::default();
+        self.placeholder_rows = count;
         self.last_viewport = None;
         self.menu_open = None;
         cx.notify();
@@ -146,6 +174,7 @@ impl TrackList {
         }
         self.id = id;
         self.tracks = Arc::default();
+        self.placeholder_rows = 0;
         self.playlist_tracks = Some(tracks);
         self.shown_playlist_len = len;
         self.last_viewport = None;
@@ -156,6 +185,7 @@ impl TrackList {
     pub(super) fn clear(&mut self, cx: &mut Context<Self>) {
         self.playlist_tracks = None;
         self.tracks = Arc::default();
+        self.placeholder_rows = 0;
         self.id = None;
         self.menu_open = None;
         self.playlist_context = None;
@@ -166,7 +196,9 @@ impl TrackList {
     fn track_count(&self) -> usize {
         self.playlist_tracks
             .as_ref()
-            .map_or(self.tracks.len(), |tracks| tracks.borrow().len())
+            .map_or(self.tracks.len().max(self.placeholder_rows), |tracks| {
+                tracks.borrow().len()
+            })
     }
 
     /// Suppresses the "Go to album" entry for the album the page is showing.
@@ -199,19 +231,18 @@ impl TrackList {
                 .playlist_tracks
                 .as_ref()
                 .is_some_and(|tracks| tracks.borrow().contains(index));
+            if !unavailable {
+                return track_row::track_skeleton_row(palette, index, compact, self.inline_rows)
+                    .into_any_element();
+            }
             return div()
                 .h_16()
                 .w_full()
-                .when(unavailable, |row| {
-                    row.px_3()
-                        .flex()
-                        .items_center()
-                        .text_color(rgb(palette.text_muted))
-                        .child(format!("{}   Unavailable track", index + 1))
-                })
-                .when(!unavailable, |row| {
-                    row.child(components::list_skeleton_rows(palette, 1))
-                })
+                .px_3()
+                .flex()
+                .items_center()
+                .text_color(rgb(palette.text_muted))
+                .child(format!("{}   Unavailable track", index + 1))
                 .into_any_element();
         };
         let palette = appearance::Appearance::palette(cx);
@@ -741,9 +772,47 @@ impl Render for TrackList {
                         gpui_kit::base::Scrollbar::vertical(&self.scroll)
                             .viewport_from_layout()
                             .mode(gpui_kit::base::ScrollbarMode::Always),
-                    ),
+                    )
+                    // Rows melt into the page at the edges they scroll under,
+                    // instead of being sliced off flat. At rest the first row
+                    // stays clear, and a list that fits has nothing to fade.
+                    .when(!self.queue_mode, |viewport| {
+                        let state = self.scroll.0.borrow();
+                        let scrolled = state.base_handle.offset().y < px(-1.);
+                        let more_below = state.base_handle.max_offset().y > px(0.)
+                            && state.base_handle.offset().y > -state.base_handle.max_offset().y;
+                        drop(state);
+                        viewport
+                            .when(scrolled, |v| v.child(list_edge_fade(palette, true)))
+                            .when(more_below, |v| v.child(list_edge_fade(palette, false)))
+                    }),
             )
     }
+}
+
+/// How far a list's rows fade out at an edge they scroll under.
+const LIST_EDGE_FADE: Pixels = px(32.);
+
+/// A strip over the top or bottom of the rows, from the page colour to clear.
+/// It leaves the scrollbar's column alone and lets clicks through.
+fn list_edge_fade(palette: CadencePalette, top: bool) -> Div {
+    let page = rgb(palette.surface);
+    let (from, to) = if top {
+        (page, page.opacity(0.))
+    } else {
+        (page.opacity(0.), page)
+    };
+    div()
+        .absolute()
+        .left_0()
+        .right(px(16.))
+        .h(LIST_EDGE_FADE)
+        .map(|fade| if top { fade.top_0() } else { fade.bottom_0() })
+        .bg(gpui_kit::linear_gradient(
+            180.,
+            gpui_kit::linear_color_stop(from, 0.),
+            gpui_kit::linear_color_stop(to, 1.),
+        ))
 }
 
 // GPUI invokes the row renderer while measuring row zero as well as while

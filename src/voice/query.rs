@@ -222,6 +222,60 @@ pub(crate) fn pick(request: &Request, tracks: &[Track]) -> Option<usize> {
     best.map(|(index, _)| index)
 }
 
+/// What a library match must score before it is trusted over a search: every
+/// word asked for found, and the artist too when one was named. Short of
+/// that the request goes to Spotify.
+const KNOWN_CONFIDENCE: f32 = 2.55;
+/// The most that liking or often playing a song can add. Less than one
+/// unwanted version word costs, so a better match always wins.
+const MAX_FAMILIARITY: f32 = 0.6;
+
+/// Songs the listener already has, in the order they matter.
+pub(crate) struct Known<'a> {
+    pub liked: &'a [Track],
+    pub favorites: &'a [Track],
+    pub recent: &'a [Track],
+    pub local: &'a [Track],
+}
+
+/// The song in the listener's own library that the request clearly names,
+/// preferring what they like and play most. Local files count: they play
+/// without Spotify. `None` means "search instead".
+pub(crate) fn pick_known(request: &Request, known: &Known<'_>) -> Option<Track> {
+    use std::collections::HashMap;
+
+    // The same song in several lists is one candidate that is more familiar.
+    let mut familiarity: HashMap<String, (&Track, f32)> = HashMap::new();
+    for (tracks, value) in [
+        (known.liked, 0.25),
+        (known.favorites, 0.2),
+        (known.recent, 0.1),
+        (known.local, 0.1),
+    ] {
+        for track in tracks {
+            let key = track
+                .spotify_uri
+                .clone()
+                .unwrap_or_else(|| format!("{:?}:{}", track.provider, track.source_id));
+            familiarity.entry(key).or_insert((track, 0.)).1 += value;
+        }
+    }
+
+    let mut best: Option<(&Track, f32)> = None;
+    for (track, familiar) in familiarity.into_values() {
+        let value = score(request, track);
+        if value < KNOWN_CONFIDENCE {
+            continue;
+        }
+        let value = value + familiar.min(MAX_FAMILIARITY);
+        let better = best.is_none_or(|(_, top)| value > top + 0.001);
+        if better {
+            best = Some((track, value));
+        }
+    }
+    best.map(|(track, _)| track.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,6 +421,105 @@ mod tests {
         let tracks = vec![track("Don't Stop Me Now", "Queen", "Jazz")];
         assert_eq!(pick(&request, &tracks), Some(0));
         assert_eq!(words("Don’t"), vec!["dont"]);
+    }
+
+    #[test]
+    fn a_song_the_listener_has_beats_a_search() {
+        let request = parse("africa by toto").unwrap();
+        let liked = vec![track("Africa", "Toto", "Toto IV")];
+        let known = Known {
+            liked: &liked,
+            favorites: &[],
+            recent: &[],
+            local: &[],
+        };
+        assert_eq!(
+            pick_known(&request, &known).map(|track| track.title),
+            Some("Africa".into())
+        );
+    }
+
+    #[test]
+    fn a_vague_match_goes_to_search_instead() {
+        let liked = vec![track("Africa", "Toto", "Toto IV")];
+        let known = Known {
+            liked: &liked,
+            favorites: &[],
+            recent: &[],
+            local: &[],
+        };
+        // Right artist, wrong song.
+        assert!(pick_known(&parse("rosanna by toto").unwrap(), &known).is_none());
+        // Right song, wrong artist.
+        assert!(pick_known(&parse("africa by weezer").unwrap(), &known).is_none());
+        // Only part of the title.
+        assert!(pick_known(&parse("africa the long version").unwrap(), &known).is_none());
+    }
+
+    #[test]
+    fn what_is_liked_and_played_most_wins_between_equal_matches() {
+        let request = parse("africa by toto").unwrap();
+        let mut cover = track("Africa", "Toto", "Covers");
+        cover.source_id = "cover".into();
+        cover.spotify_uri = Some("spotify:track:cover".into());
+        let original = track("Africa", "Toto", "Toto IV");
+        let recent = vec![cover.clone(), cover.clone()];
+        let liked = vec![original.clone()];
+        let known = Known {
+            liked: &liked,
+            favorites: &[],
+            recent: &recent,
+            local: &[],
+        };
+        assert_eq!(
+            pick_known(&request, &known).map(|track| track.source_id),
+            Some(original.source_id.clone())
+        );
+        // Played a lot and never liked: familiarity still counts.
+        let many = vec![cover.clone(); 4];
+        let known = Known {
+            liked: &[],
+            favorites: &[],
+            recent: &many,
+            local: std::slice::from_ref(&original),
+        };
+        assert_eq!(
+            pick_known(&request, &known).map(|track| track.source_id),
+            Some("cover".into())
+        );
+    }
+
+    #[test]
+    fn a_local_file_can_be_the_match() {
+        let request = parse("africa by toto").unwrap();
+        let mut local = track("Africa", "Toto", "Toto IV");
+        local.provider = Provider::Local;
+        local.spotify_uri = None;
+        let files = vec![local];
+        let known = Known {
+            liked: &[],
+            favorites: &[],
+            recent: &[],
+            local: &files,
+        };
+        assert!(pick_known(&request, &known).is_some());
+    }
+
+    #[test]
+    fn a_wanted_version_beats_a_familiar_one() {
+        let request = parse("africa live by toto").unwrap();
+        let studio = vec![track("Africa", "Toto", "Toto IV")];
+        let live = vec![track("Africa - Live", "Toto", "Live")];
+        let known = Known {
+            liked: &studio,
+            favorites: &[],
+            recent: &[],
+            local: &live,
+        };
+        assert_eq!(
+            pick_known(&request, &known).map(|track| track.title),
+            Some("Africa - Live".into())
+        );
     }
 
     #[test]

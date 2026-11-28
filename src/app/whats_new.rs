@@ -53,6 +53,26 @@ const MONTHS: &[Month] = &[
                             New,
                             "A Reset Spotify limit button appears in Settings > Connections only while Spotify is limiting Sonder. It lets requests through again right away.",
                         ),
+                        Note(
+                            New,
+                            "Voice play now looks in your library first. Songs you play and like often win over a vague search, and local files can be matched too.",
+                        ),
+                        Note(
+                            New,
+                            "An optional listening animation: a ring of dots reacts to your voice, then shows what Sonder heard. Turn it on in Settings > Voice.",
+                        ),
+                        Note(
+                            New,
+                            "Parakeet v3 is a new, more accurate speech model for Voice play. It downloads about 680 MB and uses about 1.3 GB of memory only while you hold the shortcut.",
+                        ),
+                        Note(
+                            Better,
+                            "Loading an album now shows placeholder rows that match real track rows exactly, with numbers and columns, so nothing shifts when tracks arrive.",
+                        ),
+                        Note(
+                            Better,
+                            "Smoother fades in track lists, lyrics and the sidebar.",
+                        ),
                     ],
                 }],
             },

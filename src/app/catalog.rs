@@ -2642,8 +2642,18 @@ impl Render for AlbumPage {
             )
             .into_any_element()
         } else {
-            // Shaped like the track list that is about to arrive.
-            components::list_skeleton(palette).into_any_element()
+            // The track list itself, with placeholder rows, so the header,
+            // columns and spacing are the real ones. The album's own track
+            // count when it is known, so nothing jumps when the tracks arrive.
+            let count = self
+                .album
+                .as_ref()
+                .and_then(|album| album.track_count)
+                .map_or(12, |count| count.clamp(1, 40) as usize);
+            self.track_list.update(cx, |list, cx| {
+                list.show_placeholder(ElementId::from("album-tracks-loading"), count, cx)
+            });
+            self.track_list.clone().into_any_element()
         };
         let can_review = self.album.is_some() && !tracks.is_empty();
         let review_label: SharedString = match self.review.as_ref() {

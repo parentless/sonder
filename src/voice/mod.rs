@@ -27,6 +27,8 @@ pub(crate) struct Config {
     pub enabled: bool,
     pub hotkey: Hotkey,
     pub model: Model,
+    /// Shows the listening animation over whatever is on screen.
+    pub animation: bool,
 }
 
 impl Default for Config {
@@ -35,6 +37,7 @@ impl Default for Config {
             enabled: false,
             hotkey: Hotkey::default(),
             model: Model::Standard,
+            animation: false,
         }
     }
 }

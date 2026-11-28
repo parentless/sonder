@@ -75,6 +75,10 @@ struct Motion {
     /// Frames still to re-place the view after a jump, so it follows the layout
     /// of the lines it has just been given rather than the previous song's.
     settling: u8,
+    /// Frames still to re-place the column after a glide ends. The column is
+    /// placed from where lines were laid out on the previous frame, so the
+    /// last frame of a glide leaves it a pixel or so off the final sizes.
+    trailing: u8,
 }
 
 impl Default for Motion {
@@ -84,6 +88,7 @@ impl Default for Motion {
             focus: gpui_motion_kit::ValueState::new(0.),
             moving: false,
             settling: 0,
+            trailing: 0,
         }
     }
 }
@@ -419,8 +424,13 @@ impl LyricsPane {
                 let at = top + (next - top) * between;
                 self.scroll.set_offset(point(px(0.), anchor_y - at));
             }
-            if self.motion.settling > 0 && !self.motion.moving {
+            if self.motion.moving {
+                self.motion.trailing = 2;
+            } else if self.motion.settling > 0 {
                 self.motion.settling -= 1;
+                window.request_animation_frame();
+            } else if self.motion.trailing > 0 {
+                self.motion.trailing -= 1;
                 window.request_animation_frame();
             }
         }
@@ -645,18 +655,14 @@ impl Render for LyricsPane {
             let lyrics_column = div().flex_1().min_w_0().h_full().child(body);
             let content = match (cover, lyrics.is_some()) {
                 (Some(cover), true) => div()
-                    .flex_1()
-                    .min_h_0()
-                    .mt_4()
+                    .size_full()
                     .flex()
                     .items_center()
                     .gap_12()
                     .child(cover)
                     .child(lyrics_column),
                 (Some(cover), false) => div()
-                    .flex_1()
-                    .min_h_0()
-                    .mt_4()
+                    .size_full()
                     .flex()
                     .flex_col()
                     .items_center()
@@ -664,15 +670,16 @@ impl Render for LyricsPane {
                     .gap_6()
                     .child(cover)
                     .child(Self::note(palette, status(&self.state))),
-                (None, _) => div().flex_1().min_h_0().mt_4().child(lyrics_column),
+                (None, _) => div().size_full().child(lyrics_column),
             };
+            // The content fills the page with the same room above and below,
+            // so the cover sits on the page's centre rather than the centre of
+            // what is left under the header. The header comes after it, to
+            // stay on top and clickable.
             container("lyrics-page")
                 .left_0()
-                .px_12()
-                .pt_6()
-                .pb_8()
-                .child(header)
-                .child(content)
+                .child(div().absolute().inset_0().px_12().py_16().child(content))
+                .child(div().px_12().pt_6().child(header))
                 .into_any_element()
         } else {
             container("lyrics-panel")

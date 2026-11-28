@@ -11,7 +11,10 @@ use cpal::{
     traits::{DeviceTrait as _, HostTrait as _, StreamTrait as _},
 };
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -30,6 +33,9 @@ const SILENCE_RMS: f32 = 0.004;
 
 /// A recording in progress, on its own thread.
 pub(crate) struct Recording {
+    /// How loud the listener is right now, 0 to 1, for the listening
+    /// animation. An `f32` kept as bits so the audio thread never waits.
+    level: Arc<AtomicU32>,
     stop: std::sync::mpsc::Sender<()>,
     result: async_channel::Receiver<Result<Vec<f32>, String>>,
 }
@@ -38,19 +44,30 @@ impl Recording {
     pub(crate) fn start() -> Self {
         let (stop, stopped) = std::sync::mpsc::channel();
         let (send, result) = async_channel::bounded(1);
+        let level = Arc::new(AtomicU32::new(0));
         let spawned = thread::Builder::new()
             .name("sonder-voice-capture".into())
             .spawn({
                 let send = send.clone();
+                let level = Arc::clone(&level);
                 move || {
-                    let outcome = record(&stopped).map_err(|error| format!("{error:#}"));
+                    let outcome = record(&stopped, &level).map_err(|error| format!("{error:#}"));
                     let _ = send.send_blocking(outcome);
                 }
             });
         if let Err(error) = spawned {
             let _ = send.try_send(Err(format!("could not start recording: {error}")));
         }
-        Self { stop, result }
+        Self {
+            level,
+            stop,
+            result,
+        }
+    }
+
+    /// A handle to the live volume, which stays readable after `finish`.
+    pub(crate) fn level(&self) -> Arc<AtomicU32> {
+        Arc::clone(&self.level)
     }
 
     /// Stops recording. The answer arrives on the returned channel: the audio
@@ -62,7 +79,7 @@ impl Recording {
     }
 }
 
-fn record(stopped: &std::sync::mpsc::Receiver<()>) -> Result<Vec<f32>> {
+fn record(stopped: &std::sync::mpsc::Receiver<()>, level: &Arc<AtomicU32>) -> Result<Vec<f32>> {
     let device = cpal::default_host()
         .default_input_device()
         .context("no microphone was found")?;
@@ -79,10 +96,10 @@ fn record(stopped: &std::sync::mpsc::Receiver<()>) -> Result<Vec<f32>> {
         limit.min(rate as usize * 6),
     )));
     let stream = match format {
-        SampleFormat::F32 => input_stream::<f32>(&device, config, channels, limit, &heard),
-        SampleFormat::I16 => input_stream::<i16>(&device, config, channels, limit, &heard),
-        SampleFormat::U16 => input_stream::<u16>(&device, config, channels, limit, &heard),
-        SampleFormat::I32 => input_stream::<i32>(&device, config, channels, limit, &heard),
+        SampleFormat::F32 => input_stream::<f32>(&device, config, channels, limit, &heard, level),
+        SampleFormat::I16 => input_stream::<i16>(&device, config, channels, limit, &heard, level),
+        SampleFormat::U16 => input_stream::<u16>(&device, config, channels, limit, &heard, level),
+        SampleFormat::I32 => input_stream::<i32>(&device, config, channels, limit, &heard, level),
         other => bail!("the microphone uses a sound format Sonder cannot read ({other:?})"),
     }
     .context("could not open the microphone; check Windows' microphone privacy settings")?;
@@ -111,16 +128,20 @@ fn input_stream<T>(
     channels: usize,
     limit: usize,
     heard: &Arc<Mutex<Vec<f32>>>,
+    level: &Arc<AtomicU32>,
 ) -> Result<Stream, cpal::Error>
 where
     T: SizedSample,
     f32: FromSample<T>,
 {
     let heard = Arc::clone(heard);
+    let level = Arc::clone(level);
     device.build_input_stream(
         config,
         move |data: &[T], _| {
             let mut heard = heard.lock().unwrap_or_else(|error| error.into_inner());
+            let mut energy = 0f32;
+            let mut frames = 0u32;
             for frame in data.chunks(channels) {
                 if heard.len() >= limit {
                     return;
@@ -129,12 +150,26 @@ where
                     .iter()
                     .map(|&sample| <f32 as FromSample<T>>::from_sample_(sample))
                     .sum();
-                heard.push(sum / frame.len() as f32);
+                let mono = sum / frame.len() as f32;
+                energy += mono * mono;
+                frames += 1;
+                heard.push(mono);
+            }
+            if frames > 0 {
+                let now = level_of((energy / frames as f32).sqrt());
+                let before = f32::from_bits(level.load(Ordering::Relaxed));
+                // Rises at once, falls gently, so the animation does not flicker.
+                level.store(now.max(before * 0.85).to_bits(), Ordering::Relaxed);
             }
         },
         |error| log::warn!("microphone stream error: {error}"),
         None,
     )
+}
+
+/// Speech at a normal distance is around 0.02 to 0.2 RMS; this maps that to 0..1.
+fn level_of(rms: f32) -> f32 {
+    (rms * 7.).sqrt().min(1.)
 }
 
 /// Drops the start tone and converts to what the model reads.
@@ -218,6 +253,14 @@ mod tests {
         let out = prepare(&audio, 48_000);
         assert!(out.iter().all(|sample| (sample - 0.25).abs() < 0.01));
         assert!(prepare(&[0.5; 100], 48_000).is_empty());
+    }
+
+    #[test]
+    fn volume_maps_quiet_to_nothing_and_speech_to_most_of_the_range() {
+        assert_eq!(level_of(0.), 0.);
+        assert!(level_of(0.003) < 0.2);
+        assert!((0.4..=1.).contains(&level_of(0.05)));
+        assert_eq!(level_of(1.), 1.);
     }
 
     #[test]

@@ -50,6 +50,119 @@ pub(super) fn track_list_header(palette: CadencePalette, compact: bool) -> impl 
         )
 }
 
+/// A bar standing where one line of text will be. It reserves the line with
+/// invisible text of the same size, so the box is exactly the height (and, for
+/// `Fixed`, the width) the real text takes, and the bar sits inside it.
+enum Placeholder {
+    /// As wide as this sample text.
+    Fixed(&'static str),
+    /// This fraction of the column.
+    Fraction(f32),
+}
+
+fn placeholder_line(palette: CadencePalette, size: Rems, width: Placeholder) -> Div {
+    let (sample, bar) = match width {
+        Placeholder::Fixed(sample) => (sample, relative(1.)),
+        Placeholder::Fraction(fraction) => ("M", relative(fraction)),
+    };
+    div()
+        .relative()
+        .text_size(size)
+        .child(div().opacity(0.).child(sample))
+        .child(
+            div().absolute().inset_0().flex().items_center().child(
+                div()
+                    .h(relative(0.62))
+                    .w(bar)
+                    .rounded_md()
+                    .bg(rgb(palette.control)),
+            ),
+        )
+}
+
+/// A row standing where a track will be, laid out exactly as `TrackRow` lays
+/// it out: the same height, columns and text boxes, with the row number
+/// already in place. Static, so it costs nothing while it waits.
+pub(super) fn track_skeleton_row(
+    palette: CadencePalette,
+    index: usize,
+    compact: bool,
+    dense: bool,
+) -> impl IntoElement {
+    // A few lengths, so the rows do not look stamped from one mould.
+    const TITLES: [f32; 6] = [0.52, 0.38, 0.64, 0.45, 0.58, 0.33];
+    const ARTISTS: [f32; 4] = [0.3, 0.42, 0.24, 0.36];
+    // The slot a row sits in has this much room above and below it, as in
+    // `TrackRow`.
+    div().w_full().flex_none().py(Rems(0.125)).child(
+        div()
+            .w_full()
+            .h(if dense { Rems(3.25) } else { Rems(3.75) })
+            .px_3()
+            .flex()
+            .items_center()
+            .child(
+                div()
+                    .w(INDEX_COLUMN_WIDTH)
+                    .h_8()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(tokens::BODY_TEXT)
+                    .text_color(rgb(palette.text_muted))
+                    .child((index + 1).to_string()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .pr(COLUMN_GUTTER)
+                    .flex()
+                    .flex_col()
+                    .child(placeholder_line(
+                        palette,
+                        tokens::BODY_TEXT,
+                        Placeholder::Fraction(TITLES[index % TITLES.len()]),
+                    ))
+                    .child(placeholder_line(
+                        palette,
+                        Rems(0.75),
+                        Placeholder::Fraction(ARTISTS[index % ARTISTS.len()]),
+                    )),
+            )
+            .when(!compact, |row| {
+                row.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(placeholder_line(
+                            palette,
+                            tokens::BODY_TEXT,
+                            Placeholder::Fraction(0.5),
+                        )),
+                )
+            })
+            .child(
+                div()
+                    .w(TIME_COLUMN_WIDTH)
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .pr_2()
+                    .text_size(tokens::BODY_TEXT)
+                    .child(placeholder_line(
+                        palette,
+                        tokens::BODY_TEXT,
+                        Placeholder::Fixed("0:00"),
+                    )),
+            ),
+    )
+}
+
 /// A single line that ellipsizes at the column edge. Wrapping text with a
 /// one-line clamp rather than `.truncate()`: GPUI's text-measure cache
 /// never recomputes truncation for nowrap text first measured at indefinite

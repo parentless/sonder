@@ -3048,6 +3048,18 @@ fn voice_play_cannot_be_turned_on_without_its_model_and_says_why() {
 }
 
 #[test]
+fn the_listening_animation_is_off_until_it_is_turned_on() {
+    let mut fixture = Fixture::new(true);
+    open_voice_settings(&mut fixture);
+    assert!(!voice_config(&mut fixture).animation);
+    fixture.update(|window, cx| window.click("settings-voice-animation", cx));
+    assert!(voice_config(&mut fixture).animation);
+    fixture.update(|window, cx| window.click("settings-voice-animation", cx));
+    assert!(!voice_config(&mut fixture).animation);
+    fixture.no_commands();
+}
+
+#[test]
 fn the_voice_shortcut_is_changed_by_pressing_the_new_one() {
     let mut fixture = Fixture::new(true);
     open_voice_settings(&mut fixture);

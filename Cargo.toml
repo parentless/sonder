@@ -47,6 +47,7 @@ regex = "1"
 url = "2.5"
 percent-encoding = "2.3"
 sha2 = "0.10"
+zip = { version = "9", default-features = false, features = ["deflate"] }
 # Reads tags and lengths of local music files. The same build librespot
 # decodes them with, so it adds no second copy.
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "vorbis", "flac", "isomp4", "aac", "alac", "wav", "pcm"] }
@@ -57,6 +58,10 @@ log = "0.4.33"
 # Speech to text for voice quick play. whisper.cpp runs on this computer; the
 # model is a separate download the listener starts from Settings.
 whisper-rs = { version = "0.16", default-features = false }
+# Parakeet runs on ONNX Runtime, loaded from a DLL that is downloaded with the
+# model: the prebuilt static library is built for the dynamic C runtime, which
+# cannot be linked into Sonder, and the DLL keeps Sonder itself small.
+parakeet-rs = { version = "0.4.4", default-features = false, features = ["cpu", "load-dynamic"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

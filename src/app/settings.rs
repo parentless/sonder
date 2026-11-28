@@ -85,6 +85,7 @@ pub(super) struct Settings {
     /// Voice play lives for the whole process; this page shows and changes it.
     voice: Entity<voice_play::VoicePlay>,
     voice_focus: FocusHandle,
+    voice_animation_focus: FocusHandle,
     voice_capture_focus: FocusHandle,
     /// Waiting for the next key press to become the shortcut.
     voice_capturing: bool,
@@ -195,6 +196,7 @@ impl Settings {
             lastfm_busy: false,
             voice,
             voice_focus: cx.focus_handle(),
+            voice_animation_focus: cx.focus_handle(),
             voice_capture_focus: cx.focus_handle(),
             voice_capturing: false,
             voice_error: None,
@@ -599,6 +601,32 @@ impl Settings {
                     .pt_5()
                     .border_t_1()
                     .border_color(rgb(palette.border))
+                    .child(Self::playback_setting_row(
+                        palette,
+                        "Listening animation",
+                        "Shows a small ring of dots at the bottom of the screen while you speak, then what it heard and what it is playing. It floats above other apps and games without taking over the keyboard or the mouse.",
+                        components::focus_ring_around(
+                            palette,
+                            &self.voice_animation_focus,
+                            window,
+                            cx,
+                            Switch::new("settings-voice-animation")
+                                .cursor_pointer()
+                                .focus_ring(false)
+                                .checked(config.animation)
+                                .on_click(cx.listener(|this, enabled: &bool, _, cx| {
+                                    let enabled = *enabled;
+                                    this.save_voice(|config| config.animation = enabled, cx);
+                                })),
+                        ),
+                    )),
+            )
+            .child(
+                div()
+                    .mt_5()
+                    .pt_5()
+                    .border_t_1()
+                    .border_color(rgb(palette.border))
                     .child(
                         div()
                             .text_xs()
@@ -612,7 +640,7 @@ impl Settings {
                             .text_size(tokens::BODY_TEXT)
                             .line_height(relative(1.45))
                             .text_color(rgb(palette.text_muted))
-                            .child("This is what turns your voice into words. It runs entirely on this computer, and only while you hold the shortcut: it loads as you start speaking and is gone from memory as soon as it has your words. Your voice is never sent anywhere or saved. It understands English and is downloaded once from its publisher, whisper.cpp on Hugging Face."),
+                            .child("This is what turns your voice into words. It runs entirely on this computer, and only while you hold the shortcut: it loads as you start speaking and is gone from memory as soon as it has your words. Your voice is never sent anywhere or saved. Fast, Standard and Accurate are whisper.cpp models for English. Parakeet v3 is NVIDIA's: more accurate and also quick, but larger, and it needs about 1.3 GB of memory for the second it works. It also downloads Microsoft's ONNX Runtime library. Everything is downloaded once, from Hugging Face and PyPI."),
                     )
                     .child(
                         v_flex().mt_4().gap_3().children(

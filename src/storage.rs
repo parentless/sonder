@@ -535,6 +535,7 @@ impl Store {
                 .preference("voice_model")?
                 .and_then(|key| crate::voice::Model::from_key(&key))
                 .unwrap_or(default.model),
+            animation: self.preference("voice_animation")?.as_deref() == Some("true"),
         })
     }
 
@@ -548,6 +549,10 @@ impl Store {
             ),
             ("voice_hotkey", config.hotkey.encode().as_str()),
             ("voice_model", config.model.key()),
+            (
+                "voice_animation",
+                if config.animation { "true" } else { "false" },
+            ),
         ] {
             transaction.execute(
                 "INSERT INTO preferences (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
@@ -1451,6 +1456,7 @@ mod tests {
             enabled: true,
             hotkey: crate::voice::Hotkey::from_keys(true, false, true, false, "f9").unwrap(),
             model: crate::voice::Model::Accurate,
+            animation: true,
         };
         store.set_voice_config(&config).unwrap();
         assert_eq!(store.voice_config().unwrap(), config);

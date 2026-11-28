@@ -413,6 +413,7 @@ mod updater;
 #[cfg(target_os = "windows")]
 #[path = "updater_windows.rs"]
 mod updater;
+mod voice_overlay;
 mod voice_play;
 mod whats_new;
 mod windows;

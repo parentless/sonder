@@ -18,6 +18,7 @@ enum Scene {
     TrackMenu,
     Credits,
     AlbumTint,
+    AlbumLoading,
     AlbumReview,
     PlaylistTail,
     ReadmeGlaive,
@@ -100,6 +101,7 @@ fn scenes() -> Vec<(&'static str, Scene)> {
         ("track-menu", Scene::TrackMenu),
         ("credits", Scene::Credits),
         ("album-tint", Scene::AlbumTint),
+        ("album-loading", Scene::AlbumLoading),
         ("album-review", Scene::AlbumReview),
         ("playlist-tail", Scene::PlaylistTail),
         ("artist-zoom-large", Scene::ArtistZoomLarge),
@@ -323,6 +325,7 @@ fn capture(scene: Scene, theme: ThemePreference, width: f32) -> image::RgbaImage
                     }
                 }
                 Scene::ArtistLoading => workspace.open_artist(model::ArtistRef { name: "Artist".into(), source_id: Some("loading".into()), spotify_uri: None }, Route::LikedSongs, cx),
+                Scene::AlbumLoading => workspace.open_album(model::AlbumRef { name: "Blue hours".into(), source_id: Some("blue-album".into()), ..Default::default() }, Route::LikedSongs, cx),
                 Scene::AlbumTint | Scene::AlbumReview => {
                     let url = "https://fixtures.invalid/blue-album.png";
                     let pixels = image::RgbaImage::from_pixel(64, 64, image::Rgba([210, 110, 70, 255]));
